@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-900">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AESTHETIC</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    ::-webkit-scrollbar{ width:8px; height:8px }
+    ::-webkit-scrollbar-track{ background:#1f2937 }
+    ::-webkit-scrollbar-thumb{ background:#4f46e5; border-radius:4px }
+    ::-webkit-scrollbar-thumb:hover{ background:#6366f1 }
+    .tab-link{ transition:all .2s }
+    .tab-panel{ animation:fadeIn .25s ease }
+    @keyframes fadeIn{ from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:translateY(0)} }
+    .metric-list{ list-style:none; margin:0; padding:0; font-size:.8rem }
+    .metric-list li{ display:flex; justify-content:space-between; border-bottom:1px solid #1f2937; padding:4px 0 }
+    .metric-list li:last-child{ border-bottom:none }
+    .metric-name{ color:#9ca3af; margin-right:8px }
+    .metric-value{ color:#e5e7eb; font-weight:500 }
+  </style>
+</head>
+<body class="h-full flex flex-col text-gray-200">
+  <!-- Header -->
+  <header class="bg-gray-800 border-b border-gray-700/50 shadow">
+    <div class="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8 flex items-center justify-between">
+      <h1 class="text-xl sm:text-2xl font-bold tracking-tight text-white">AESTHETIC</h1>
+      <span id="bridgeStatus" class="text-xs text-indigo-300">checking bridge…</span>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <div class="flex-1 flex flex-col md:flex-row min-h-0">
+    <!-- Left column -->
+    <aside class="w-full md:w-96 bg-gray-900 border-r border-gray-700/50 p-4 overflow-y-auto space-y-4">
+      <div class="space-y-2">
+        <video id="videoPlayer" class="w-full bg-black rounded" controls></video>
+        <input type="file" id="fileInput" accept="video/*"
+          class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 cursor-pointer">
+        <p id="fileName" class="text-sm text-gray-400 truncate">No file selected.</p>
+
+        <div class="space-y-2 pt-2">
+          <div class="flex justify-between items-center">
+            <label for="sensitivitySlider" class="block text-sm font-medium text-gray-300">Shot Detection Sensitivity</label>
+            <span id="sensitivityValue" class="text-sm font-medium text-indigo-300">50</span>
+          </div>
+          <input id="sensitivitySlider" type="range" min="1" max="100" value="50"
+            class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+            oninput="document.getElementById('sensitivityValue').textContent = this.value">
+          <div class="flex justify-between text-xs text-gray-400">
+            <span>Fewer Shots</span><span>More Shots</span>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 mt-3">
+          <button id="createJobBtn" class="py-2 px-3 rounded text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-600" disabled>Create Job</button>
+          <button id="analyzeBtn" class="py-2 px-3 rounded text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-600" disabled>Analyze</button>
+          <button id="exportBtn" class="col-span-2 py-2 px-3 rounded text-sm font-medium text-white bg-gray-700 hover:bg-gray-600 disabled:bg-gray-600" disabled>Export Manifest</button>
+        </div>
+
+        <details class="bg-gray-800 rounded border border-gray-700/50">
+          <summary class="cursor-pointer p-3 font-medium text-gray-200">View config.yaml</summary>
+          <div class="p-3 border-t border-gray-700/50">
+            <pre id="configDisplay" class="text-xs text-gray-300 overflow-x-auto">loading…</pre>
+          </div>
+        </details>
+
+        <details class="bg-gray-800 rounded border border-gray-700/50">
+          <summary class="cursor-pointer p-3 font-medium text-indigo-200">Golden Baseline</summary>
+          <div class="p-3 border-t border-gray-700/50 space-y-2">
+            <button id="loadBaselineBtn" class="py-1.5 px-3 rounded text-xs font-medium text-white bg-gray-700 hover:bg-gray-600">Load Baseline</button>
+            <button id="saveBaselineBtn" class="py-1.5 px-3 rounded text-xs font-medium text-white bg-gray-700 hover:bg-gray-600">Save Baseline</button>
+            <pre id="baselineDisplay" class="text-xs text-gray-300 overflow-x-auto">not loaded</pre>
+          </div>
+        </details>
+      </div>
+    </aside>
+
+    <!-- Right column -->
+    <main class="flex-1 p-4 md:p-6 lg:p-8 space-y-6 overflow-y-auto">
+      <!-- Tabs -->
+      <div class="border-b border-gray-700">
+        <nav class="-mb-px flex space-x-8" aria-label="Tabs">
+          <a href="#" id="tab-analysis" class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-indigo-500 text-indigo-400" onclick="showTab('analysis')">Analysis Results</a>
+          <a href="#" id="tab-matrix" class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500" onclick="showTab('matrix')">Scoring Matrix</a>
+          <a href="#" id="tab-log" class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500" onclick="showTab('log')">Verbose Log</a>
+        </nav>
+      </div>
+
+      <div id="panel-analysis" class="tab-panel space-y-4">
+        <div id="resultsPlaceholder" class="text-center text-gray-400 p-8 bg-gray-800/50 rounded border border-gray-700">
+          Upload a video, create a job, then click Analyze.
+        </div>
+        <div id="analysisResults" class="space-y-4"></div>
+      </div>
+
+      <div id="panel-matrix" class="tab-panel hidden space-y-4">
+        <h3 class="text-lg font-semibold text-white">Scoring Matrix</h3>
+        <div class="bg-gray-800 p-3 rounded border border-gray-700">
+          <p class="text-sm text-gray-300">Category weights and pillar blends will be displayed here as they become configurable.</p>
+        </div>
+      </div>
+
+      <div id="panel-log" class="tab-panel hidden">
+        <textarea id="statusLog" readonly class="w-full h-[60vh] rounded p-2 bg-gray-950 border border-gray-700 text-gray-300 text-sm"></textarea>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // Bridge detection
+    const bridgeStatus = document.getElementById('bridgeStatus');
+    const hasBridge = typeof window.pywebview !== 'undefined' && window.pywebview.api;
+    bridgeStatus.textContent = hasBridge ? 'bridge: connected' : 'bridge: not available (browser demo mode)';
+
+    // Elements
+    const fileInput = document.getElementById('fileInput');
+    const fileName = document.getElementById('fileName');
+    const createJobBtn = document.getElementById('createJobBtn');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const configDisplay = document.getElementById('configDisplay');
+    const baselineDisplay = document.getElementById('baselineDisplay');
+    const loadBaselineBtn = document.getElementById('loadBaselineBtn');
+    const saveBaselineBtn = document.getElementById('saveBaselineBtn');
+    const statusLog = document.getElementById('statusLog');
+    const resultsPlaceholder = document.getElementById('resultsPlaceholder');
+    const analysisResults = document.getElementById('analysisResults');
+    const videoPlayer = document.getElementById('videoPlayer');
+    const sensitivitySlider = document.getElementById('sensitivitySlider');
+
+    let currentJobId = null;
+    let currentFilename = null;
+
+    function log(line){
+      const ts = new Date().toLocaleTimeString();
+      statusLog.value += `[${ts}] ${line}\n`;
+      statusLog.scrollTop = statusLog.scrollHeight;
+    }
+
+    function showTab(tabName){
+      document.getElementById('panel-analysis').classList.add('hidden');
+      document.getElementById('panel-matrix').classList.add('hidden');
+      document.getElementById('panel-log').classList.add('hidden');
+      document.getElementById('panel-' + tabName).classList.remove('hidden');
+      document.getElementById('tab-analysis').classList.remove('border-indigo-500', 'text-indigo-400');
+      document.getElementById('tab-matrix').classList.remove('border-indigo-500', 'text-indigo-400');
+      document.getElementById('tab-log').classList.remove('border-indigo-500', 'text-indigo-400');
+      document.getElementById('tab-' + tabName).classList.add('border-indigo-500', 'text-indigo-400');
+    }
+
+    // Load config
+    async function loadConfig(){
+      if(!hasBridge){ configDisplay.textContent = 'bridge unavailable'; return; }
+      const resp = await window.pywebview.api.get_config();
+      if(resp.ok){ configDisplay.textContent = resp.text; }
+      else { configDisplay.textContent = 'config not found'; }
+    }
+
+    // Baseline
+    async function loadBaseline(){
+      if(!hasBridge){ baselineDisplay.textContent = 'bridge unavailable'; return; }
+      const resp = await window.pywebview.api.load_baseline();
+      baselineDisplay.textContent = JSON.stringify(resp.baseline || {}, null, 2);
+      log('baseline loaded');
+    }
+
+    async function saveBaseline(){
+      if(!hasBridge){ return; }
+      try{
+        const obj = JSON.parse(baselineDisplay.textContent);
+        const resp = await window.pywebview.api.save_baseline(obj);
+        if(resp.ok) log('baseline saved');
+      }catch(e){
+        alert('Baseline JSON is invalid.');
+      }
+    }
+
+    // File handling
+    fileInput.addEventListener('change', (e)=>{
+      const f = e.target.files[0];
+      if(!f){ return; }
+      currentFilename = f.name;
+      fileName.textContent = f.name;
+      const url = URL.createObjectURL(f);
+      videoPlayer.src = url;
+      createJobBtn.disabled = !hasBridge;
+    });
+
+    // Job + analyze
+    createJobBtn.addEventListener('click', async ()=>{
+      if(!hasBridge || !currentFilename){ return; }
+      const r = await window.pywebview.api.create_job(currentFilename);
+      if(r.ok){
+        currentJobId = r.job_id;
+        analyzeBtn.disabled = false;
+        exportBtn.disabled = false;
+        log(`job created: ${currentJobId}`);
+      }
+    });
+
+    analyzeBtn.addEventListener('click', async ()=>{
+      if(!hasBridge || !currentJobId){ return; }
+      log('analyzing…');
+      const sens = parseInt(sensitivitySlider.value, 10);
+      const r = await window.pywebview.api.analyze(currentJobId, sens);
+      if(r.ok){
+        resultsPlaceholder.style.display = 'none';
+        analysisResults.innerHTML = '';
+        r.shots.forEach(shot => analysisResults.appendChild(makeShotCard(shot)));
+        showTab('analysis');
+        log(`analysis complete: ${r.shots.length} shots`);
+      }
+    });
+
+    exportBtn.addEventListener('click', async ()=>{
+      if(!hasBridge || !currentJobId){ return; }
+      const r = await window.pywebview.api.export_manifest(currentJobId);
+      if(r.ok){ log(`manifest written: ${r.path}`); }
+    });
+
+    // Shot card renderer
+    function makeShotCard(shot){
+      const card = document.createElement('div');
+      card.className = 'bg-gray-800 border border-gray-700/50 rounded shadow overflow-hidden';
+      const totalColor = shot.totalScore > 85 ? 'text-green-400' : (shot.totalScore > 70 ? 'text-yellow-400' : 'text-red-400');
+      card.innerHTML = `
+        <div class="p-4 flex items-center justify-between">
+          <h3 class="text-lg font-semibold text-white">Shot ${shot.id} <span class="text-sm font-normal text-gray-400">(${fmt(shot.start)}-${fmt(shot.end)})</span></h3>
+          <div class="text-right">
+            <span class="text-2xl font-bold ${totalColor}">${shot.totalScore}</span>
+            <span class="block text-xs text-gray-400">Total</span>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 p-3">
+          ${Object.entries(shot.scores).map(([k,v]) => `
+            <div class="bg-gray-900/60 rounded p-2">
+              <div class="text-xs uppercase text-blue-300">${k}</div>
+              <div class="text-lg font-bold text-white">${v.total ?? 0}</div>
+            </div>`).join('')}
+        </div>`;
+      return card;
+    }
+
+    function fmt(s){ const m=Math.floor(s/60).toString().padStart(2,'0'); const ss=Math.floor(s%60).toString().padStart(2,'0'); return `${m}:${ss}`; }
+
+    // Init
+    loadConfig();
+    loadBaselineBtn.addEventListener('click', loadBaseline);
+    saveBaselineBtn.addEventListener('click', saveBaseline);
+  </script>
+</body>
+</html>
