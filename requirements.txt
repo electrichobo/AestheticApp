@@ -1,1 +1,8 @@
 pywebview
+opencv-python  
+numpy  
+pillow  
+tqdm  
+pyyaml  
+scikit-image  
+scipy  

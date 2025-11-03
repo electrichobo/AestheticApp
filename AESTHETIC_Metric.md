@@ -1,14 +1,12 @@
 # AESTHETIC metrics reconciliation (contrast + compare)
 
 ## evaluation tiers and pillars
-- Tiers: Technical, Creative, Subjective — **covered**
-- Core pillars: Exposure, Lighting, Composition, Camera Movement, Color — **covered**
-- Extra bundles: Image Quality, Narrative/Aesthetic — **added** for completeness
+- Pillars Technical, Creative, Subjective 
 
 ---
 
 ## exposure
-**From your spec**
+
 - Histogram distribution (mean, median, std, skew, kurtosis)
 - Clipping analysis (highlights and shadows)
 - PSNR
@@ -18,17 +16,15 @@
 - Temporal exposure consistency
 - Exposure intent match
 - Perceived exposure quality MOS
-
-**Roadmap status**
-- Histogram distribution — **covered**
-- Clipping analysis — **covered**
-- PSNR — **planned opt in** when a true reference exists
-- SSIM — **planned opt in** when a true reference exists
-- Third moment about 18 percent gray — **covered**
-- SNR (luma and chroma) — **planned**
-- Temporal exposure consistency — **covered**
-- Exposure intent match — **planned** (rule based first, then learned)
-- Perceived exposure quality MOS — **planned**
+- Histogram distribution 
+- Clipping analysis   
+- PSNR 
+- SSIM
+- Third moment about 18 percent gray
+- SNR (luma and chroma)
+- Temporal exposure consistency 
+- Exposure intent match (rule based first, then learned)
+- Perceived exposure quality MOS
 
 **Action**
 - Add SNR calc to Exposure bundle
@@ -37,7 +33,7 @@
 ---
 
 ## lighting
-**From your spec**
+
 - Dynamic range in stops
 - Key to fill ratio
 - Color temperature and deviation
@@ -48,18 +44,16 @@
 - Light motivation (creative)
 - Lighting style adherence (creative)
 - Lighting mood effectiveness MOS (subjective)
-
-**Roadmap status**
-- Dynamic range proxy — **covered**
-- Key to fill ratio — **covered**
-- Color temperature estimate and deviation — **covered**
-- Shadow detail detection — **covered**
-- Shadow area noise — **planned**
-- Hard versus soft transition — **covered**
-- Lighting coverage consistency — **covered**
-- Light motivation — **planned**
-- Lighting style adherence — **planned**
-- Lighting mood effectiveness MOS — **planned**
+- Dynamic range
+- Key to fill ratio 
+- Color temperature estimate and deviation
+- Shadow detail detection 
+- Shadow area noise 
+- Hard versus soft transition 
+- Lighting coverage consistency
+- Light motivation
+- Lighting style adherence 
+- Lighting mood effectiveness MOS
 
 **Action**
 - Add shadow zone SNR
@@ -68,7 +62,7 @@
 ---
 
 ## composition
-**From your spec**
+
 - Rule of thirds adherence
 - Face detection and placement
 - Center of mass and balance
@@ -82,22 +76,20 @@
 - Frame balance composite score
 - Compositional creativity and motif tracking (creative)
 - Aesthetic impression MOS (subjective)
-
-**Roadmap status**
-- Rule of thirds — **covered**
-- Face detection and placement — **covered**
-- Center of mass and balance — **covered**
-- Negative space ratio — **covered**
+- Rule of thirds 
+- Face detection and placement 
+- Center of mass and balance 
+- Negative space ratio
 - Depth of field absolute — **not practical without lens EXIF**
-  We will use blur gradient and MiDaS separation as proxies — **planned**
-- Depth map separation — **covered**
-- Occupancy maps — **planned**
-- Symmetry or asymmetry — **covered**
-- Headroom and lead room — **covered**
-- Shot scale classification — **planned** (heuristics now, ShotBench later)
-- Frame balance composite — **covered**
-- Compositional creativity and motif tracking — **planned**
-- Aesthetic impression MOS — **planned**
+  We will use blur gradient and MiDaS separation as proxies
+- Depth map separation
+- Occupancy maps
+- Symmetry or asymmetry 
+- Headroom and lead room
+- Shot scale classification (heuristics now, ShotBench later)
+- Frame balance composite 
+- Compositional creativity and motif tracking
+- Aesthetic impression MOS
 
 **Action**
 - Add occupancy maps
@@ -106,7 +98,7 @@
 ---
 
 ## camera movement
-**From your spec**
+
 - Optical flow foundation
 - Motion smoothness and jerkiness
 - Stabilization and micro jitter
@@ -118,19 +110,17 @@
 - Path trajectory analysis
 - Movement motivation and impact on tension (creative)
 - Movement effectiveness MOS (subjective)
-
-**Roadmap status**
-- Optical flow (Farneback) — **covered**
-- Smoothness and jerkiness — **covered**
-- Stabilization and micro jitter — **covered**
-- Motion blur amount — **covered** via gradient spectrum proxy
-- Motion blur direction — **planned** Radon based
-- Movement type detection — **planned** rule based first
-- Shot duration — **covered**
-- Focus accuracy during movement — **planned**
-- Path trajectory to spline — **planned**
-- Movement motivation and impact on tension — **planned**
-- Movement effectiveness MOS — **planned**
+- Optical flow (Farneback)
+- Smoothness and jerkiness
+- Stabilization and micro jitter
+- Motion blur amount via gradient spectrum proxy
+- Motion blur direction Radon based
+- Movement type detection rule based first
+- Shot duration
+- Focus accuracy during movement
+- Path trajectory to spline
+- Movement motivation and impact on tension
+- Movement effectiveness MOS
 
 **Action**
 - Add blur direction metric
@@ -139,7 +129,7 @@
 ---
 
 ## color
-**From your spec**
+
 - White balance deviation and cross scene variance
 - Saturation richness and uniformity in Lab
 - Lab distributions and palette entropy
@@ -152,21 +142,19 @@
 - Color temperature cross scene variance
 - Palette emotional accuracy and style adherence (creative)
 - Color aesthetic MOS (subjective)
-
-**Roadmap status**
-- WB deviation and variance — **covered**
-- Saturation richness and uniformity — **covered**
-- Lab distributions and entropy — **covered**
-- Palette classification — **covered** now, labeled families **planned**
-- Color accuracy ΔE2000 — **planned opt in** when you provide a chart or reference
-- Skin tone ΔE — **planned**
-- Grading uniformity — **covered**
-- Chroma noise — **covered**
-- Banding detection proxy — **covered** as gradient based proxy
-- Color temperature cross scene variance — **covered**
-- Palette emotional accuracy — **planned**
-- Color style adherence — **planned**
-- Color aesthetic MOS — **planned**
+- WB deviation and variance
+- Saturation richness and uniformity
+- Lab distributions and entropy
+- Palette classification now, labeled families
+- Color accuracy ΔE2000 when you provide a chart or reference
+- Skin tone ΔE
+- Grading uniformity
+- Chroma noise
+- Banding detection proxy as gradient based proxy
+- Color temperature cross scene variance
+- Palette emotional accuracy
+- Color style adherence
+- Color aesthetic MOS
 
 **Action**
 - Add skin tone ΔE
@@ -175,7 +163,7 @@
 ---
 
 ## image quality bundle
-**From your spec**
+
 - Sharpness and resolution MTF proxy
 - VMAF, PSNR, SSIM when reference exists
 - Lens distortion percent
@@ -184,16 +172,14 @@
 - Veiling glare and flare contrast loss
 - Compression artifacts: blocking, banding, mosquito, ringing
 - Texture detail retention on textured regions
-
-**Roadmap status**
-- Sharpness proxy — **covered** with Laplacian var and edge density. MTF proxy **planned**
-- VMAF, PSNR, SSIM — **planned opt in** when a true reference exists
-- Lens distortion proxy — **planned** via straight line detection
-- Vignetting — **covered**
-- Chromatic aberration width — **planned**
-- Veiling glare and flare — **planned**
-- Compression artifacts — **covered** with proxy detectors and **planned** to expand
-- Texture detail retention — **planned** via local SSIM or high frequency masks
+- Sharpness proxy with Laplacian var and edge density. MTF proxy
+- VMAF, PSNR, SSIM when a true reference exists
+- Lens distortion proxy via straight line detection
+- Vignetting
+- Chromatic aberration width
+- Veiling glare and flare
+- Compression artifacts
+- Texture detail retention via local SSIM or high frequency masks
 
 **Action**
 - Add CA width detector and line based distortion proxy
@@ -202,7 +188,7 @@
 ---
 
 ## narrative and aesthetic
-**From your spec**
+
 - Visual storytelling effectiveness
 - Cinematic techniques quality
 - Audio visual richness
@@ -211,29 +197,29 @@
 - Attention time via eye tracking
 
 **Roadmap status**
-- Visual storytelling and technique quality — **planned** as learned classifiers aligned to gold labels
-- Audio visual richness — **planned**
-- Compelling degree MOS — **planned**
-- Memorability predictor — **planned** using CLIP similarity plus aesthetic regressor
+- Visual storytelling and technique quality as learned classifiers aligned to gold labels
+- Audio visual richness
+- Compelling degree MOS
+- Memorability predictor using CLIP similarity plus aesthetic regressor
 - Attention time — **not feasible without eye tracking**
-  Substitute a **saliency consistency proxy** — **planned**
+  Substitute a **saliency consistency proxy**
 
 **Action**
 - Add saliency consistency proxy as the stand in for attention
 
 ---
 
-## implementation recommendations from your note
+## implementation recommendations
 - Technical metrics as losses — acknowledged for future deep heads. For now used as features and calibration anchors.
-- FilmEval and ShotBench alignment — **planned**
-- Diverse datasets and expert annotations — **planned**
-- Automated QC with VMAF, PSNR, SSIM, CAMBI, flow — **planned** as optional pack
-- Creative assessment via reference databases and genre profiles — **planned**
+- FilmEval and ShotBench alignment
+- Diverse datasets and expert annotations
+- Automated QC with VMAF, PSNR, SSIM, CAMBI, flow as optional pack
+- Creative assessment via reference databases and genre profiles
 - Scalability statement — **captured** in roadmap
 
 ---
 
-## gaps to add to roadmap now
+## gaps to add
 1. Exposure SNR and chroma SNR  
 2. Exposure intent classifier v1  
 3. Occupancy maps in Composition  

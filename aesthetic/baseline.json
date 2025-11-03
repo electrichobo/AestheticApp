@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "updated_at": "2025-11-02T00:00:00Z",
+  "sampleCount": 0,
+  "pillars": {
+    "technical": { "weight": 0.5 },
+    "creative":  { "weight": 0.3 },
+    "subjective":{ "weight": 0.2 }
+  },
+  "bundles": {
+    "exposure":     { "mu": 0.0, "sigma": 1.0 },
+    "lighting":     { "mu": 0.0, "sigma": 1.0 },
+    "composition":  { "mu": 0.0, "sigma": 1.0 },
+    "movement":     { "mu": 0.0, "sigma": 1.0 },
+    "color":        { "mu": 0.0, "sigma": 1.0 },
+    "quality":      { "mu": 0.0, "sigma": 1.0 },
+    "narrative":    { "mu": 0.0, "sigma": 1.0 }
+  },
+  "provenance": {
+    "sources": [],   "notes": ""
+  }
+}

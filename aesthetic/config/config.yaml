@@ -1,0 +1,11 @@
+io:
+  outputs_dir: "data/outputs"
+  baseline_path: "data/baseline.json"
+
+runtime:
+  seed: 42
+  cpu_guard_pct: 85
+  gpu_guard_pct: 90
+
+features:
+  qc_pack_enabled: false  # enables VMAF/PSNR/SSIM if references exist
