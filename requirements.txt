@@ -1,8 +1,47 @@
+# AESTHETIC - Python dependencies
+#
+# Setup order:
+# 1. Create and activate venv:
+#      python -m venv .venv
+#      .venv\Scripts\Activate.ps1        (Windows PowerShell)
+#      source .venv/bin/activate         (macOS / Linux)
+#
+# 2. Install torch with CUDA support FIRST (RTX 3090 / CUDA 12.8 build):
+#      pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128 --no-cache-dir
+#
+# 3. Then install everything else:
+#      pip install -r requirements.txt --no-cache-dir
+#
+# NOTE: torch and torchvision are intentionally excluded from this file.
+# Installing them via pip install -r requirements.txt would pull the CPU
+# build. Always install them manually with the CUDA index URL above.
+
+# -----------------------------------------------------------------------
+# Core
+# -----------------------------------------------------------------------
 pywebview
-opencv-python  
-numpy  
-pillow  
-tqdm  
-pyyaml  
-scikit-image  
-scipy  
+opencv-python
+numpy
+pillow
+tqdm
+pyyaml
+scikit-image
+scipy
+pydantic
+imageio
+imageio-ffmpeg
+
+# -----------------------------------------------------------------------
+# Phase 6 - AI vision models
+# Requires torch + torchvision installed via CUDA index URL (see above)
+# -----------------------------------------------------------------------
+open-clip-torch
+timm
+ultralytics
+
+# -----------------------------------------------------------------------
+# Phase 6 - VLM rationale generation (optional, requires API key)
+# Set ANTHROPIC_API_KEY or OPENAI_API_KEY in your environment
+# -----------------------------------------------------------------------
+anthropic
+openai
