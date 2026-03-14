@@ -104,6 +104,11 @@ def select_shots(
     if len(selected) < min(top_k, len(pool)):
         selected = _top_k_fallback(pool, top_k)
 
+    # step 8 — narrative diversity enforcement
+    # ensure the final picks span shot scales, movement types, and scene types
+    # so the selects package is genuinely useful for a showreel
+    selected = _enforce_narrative_diversity(selected, pool, sel_cfg)
+
     # build output records
     result = _build_output(selected)
 
@@ -430,6 +435,171 @@ def _top_k_fallback(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _enforce_narrative_diversity(
+    selected: List[Tuple[Shot, ShotScore]],
+    pool:     List[Tuple[Shot, ShotScore]],
+    sel_cfg:  Dict[str, Any],
+) -> List[Tuple[Shot, ShotScore]]:
+    """
+    Ensure the final selected set spans the cinematic vocabulary.
+
+    Checks three diversity dimensions:
+      - Shot scale: at least one wide/establishing shot if pool has any
+      - Movement: at least one static and one moving shot if pool has both
+      - Scene type: at least one exterior if pool has any exterior shots
+
+    When a dimension is missing from the selection, the lowest-scoring
+    selected shot that duplicates a well-represented category is swapped
+    for the highest-scoring unselected shot that fills the gap.
+
+    The swap only happens if the replacement shot scores above the
+    diversity_min_score threshold — we never add a bad shot just for variety.
+
+    This is a soft constraint — if the pool genuinely lacks variety
+    (e.g. single-location interior film) the selection is unchanged.
+    """
+    if not selected or not pool:
+        return selected
+
+    diversity_min = float(sel_cfg.get("diversity_min_score", 35.0))
+    enforce       = sel_cfg.get("enforce_narrative_diversity", True)
+    if not enforce:
+        return selected
+
+    # build a lookup of unselected pool items sorted by score descending
+    selected_ids  = {s.shot_id for s, _ in selected}
+    unselected    = [(s, sc) for s, sc in pool if s.shot_id not in selected_ids]
+    unselected    = sorted(unselected, key=lambda x: x[1].total_score or 0.0, reverse=True)
+
+    result = list(selected)
+
+    # --- dimension 1: shot scale diversity ---
+    # need at least one wide/establishing if pool has any
+    wide_scales = {"wide", "extreme_wide", "medium_wide"}
+    close_scales= {"close", "extreme_close", "medium_close"}
+
+    selected_scales = {s.shot_scale.value for s, _ in result if s.shot_scale}
+    pool_scales     = {s.shot_scale.value for s, _ in pool  if s.shot_scale}
+
+    has_wide_in_selection = bool(selected_scales & wide_scales)
+    has_wide_in_pool      = bool(pool_scales     & wide_scales)
+    has_close_in_selection= bool(selected_scales & close_scales)
+    has_close_in_pool     = bool(pool_scales     & close_scales)
+
+    if not has_wide_in_selection and has_wide_in_pool:
+        result = _swap_for_category(
+            result, unselected,
+            lambda s: s.shot_scale and s.shot_scale.value in wide_scales,
+            diversity_min,
+            "wide shot",
+        )
+
+    if not has_close_in_selection and has_close_in_pool:
+        result = _swap_for_category(
+            result, unselected,
+            lambda s: s.shot_scale and s.shot_scale.value in close_scales,
+            diversity_min,
+            "close-up",
+        )
+
+    # --- dimension 2: movement diversity ---
+    # need at least one static and one moving shot if pool has both
+    moving_types = {"pan", "tilt", "dolly", "handheld", "drone"}
+    static_types = {"static"}
+
+    selected_movements = {s.movement_type.value for s, _ in result if s.movement_type}
+    pool_movements     = {s.movement_type.value for s, _ in pool  if s.movement_type}
+
+    has_static_selected = bool(selected_movements & static_types)
+    has_moving_selected = bool(selected_movements & moving_types)
+    has_static_in_pool  = bool(pool_movements     & static_types)
+    has_moving_in_pool  = bool(pool_movements     & moving_types)
+
+    if not has_static_selected and has_static_in_pool:
+        result = _swap_for_category(
+            result, unselected,
+            lambda s: s.movement_type and s.movement_type.value == "static",
+            diversity_min,
+            "static shot",
+        )
+
+    if not has_moving_selected and has_moving_in_pool:
+        result = _swap_for_category(
+            result, unselected,
+            lambda s: s.movement_type and s.movement_type.value in moving_types,
+            diversity_min,
+            "moving shot",
+        )
+
+    # --- dimension 3: scene type diversity ---
+    # need at least one exterior if pool has any
+    exterior_types = {"exterior_day", "exterior_night"}
+    interior_types = {"interior_day", "interior_night"}
+
+    selected_scenes = {s.scene_type.value for s, _ in result if s.scene_type}
+    pool_scenes     = {s.scene_type.value for s, _ in pool  if s.scene_type}
+
+    has_exterior_selected = bool(selected_scenes & exterior_types)
+    has_exterior_in_pool  = bool(pool_scenes     & exterior_types)
+
+    if not has_exterior_selected and has_exterior_in_pool:
+        result = _swap_for_category(
+            result, unselected,
+            lambda s: s.scene_type and s.scene_type.value in exterior_types,
+            diversity_min,
+            "exterior shot",
+        )
+
+    return result
+
+
+def _swap_for_category(
+    selected:     List[Tuple[Shot, ShotScore]],
+    unselected:   List[Tuple[Shot, ShotScore]],
+    matches:      Any,   # callable: Shot -> bool
+    min_score:    float,
+    label:        str,
+) -> List[Tuple[Shot, ShotScore]]:
+    """
+    Try to swap the lowest-scoring over-represented shot in selected
+    for the highest-scoring matching unselected shot above min_score.
+
+    If no suitable replacement exists, returns selected unchanged.
+    """
+    # find best replacement candidate
+    replacement = None
+    for shot, score in unselected:
+        if matches(shot) and (score.total_score or 0.0) >= min_score:
+            replacement = (shot, score)
+            break
+
+    if replacement is None:
+        return selected
+
+    # find the lowest-scoring shot in selected that is not the only
+    # representative of its own category (we don't want to remove the
+    # only close-up to make room for a wide)
+    sorted_selected = sorted(selected, key=lambda x: x[1].total_score or 0.0)
+    victim = None
+    for shot, score in sorted_selected:
+        # skip if this shot is already in the target category
+        if matches(shot):
+            continue
+        # check if removing it would leave its category empty
+        same_cat = [s for s, _ in selected if s.shot_id != shot.shot_id and matches(s)]
+        victim = (shot, score)
+        break
+
+    if victim is None:
+        return selected
+
+    result = [item for item in selected if item[0].shot_id != victim[0].shot_id]
+    result.append(replacement)
+    print(f"[selection] diversity swap: added {label} (score {replacement[1].total_score:.1f}), "
+          f"removed shot {victim[0].shot_id} (score {victim[1].total_score:.1f})")
+    return result
+
 
 def _apply_duration_weighting(
     pool:     List[Tuple[Shot, ShotScore]],
