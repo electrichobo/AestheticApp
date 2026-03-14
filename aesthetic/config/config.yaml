@@ -29,6 +29,8 @@ selection:
   top_k: 10                    # maximum number of shots to select globally
   dedupe_hash_threshold: 8     # hamming distance for perceptual hash dedupe (0-64)
   diversity_weight: 0.5        # balance between quality (0) and diversity (1)
+  min_shot_duration_sec: 2.0   # shots below this receive a score penalty
+  soft_min_duration_sec: 1.0   # shots below this are excluded entirely
   content_filter:
     min_palette_entropy:  2.5    # below this = likely title card (few colors)
     min_occupancy_score: 15.0    # below this = sparse content (logo/graphic)

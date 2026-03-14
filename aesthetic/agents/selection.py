@@ -59,6 +59,9 @@ def select_shots(
     extract  = config.get("extract", {})
     keep_pct = float(extract.get("per_scene_keep_pct", 0.40))
     top_k    = int(config.get("selection", {}).get("top_k", 10))
+    sel_cfg  = config.get("selection", {})
+    min_dur  = float(sel_cfg.get("min_shot_duration_sec",  2.0))
+    soft_min = float(sel_cfg.get("soft_min_duration_sec",  1.0))
 
     rng = np.random.default_rng(seed)
 
@@ -85,14 +88,19 @@ def select_shots(
     if filtered_count > 0:
         print(f"[selection] filtered {filtered_count} non-cinematic shots (title cards / logos)")
 
+    # step 4b — duration weighting
+    # Hard exclude shots below soft_min (unusable by any editor)
+    # Apply score penalty to shots between soft_min and min_dur
+    pool = _apply_duration_weighting(pool, min_dur, soft_min)
+
     # step 5 — ensure we have enough for selection
     if len(pool) <= top_k:
         selected = pool
     else:
-        # step 5 — facility location selection
+        # step 6 — facility location selection
         selected = _facility_location(pool, top_k, rng)
 
-    # step 6 — guarantee top_k even if facility location degraded
+    # step 7 — guarantee top_k even if facility location degraded
     if len(selected) < min(top_k, len(pool)):
         selected = _top_k_fallback(pool, top_k)
 
@@ -422,6 +430,64 @@ def _top_k_fallback(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _apply_duration_weighting(
+    pool:     List[Tuple[Shot, ShotScore]],
+    min_dur:  float = 2.0,
+    soft_min: float = 1.0,
+) -> List[Tuple[Shot, ShotScore]]:
+    """
+    Apply duration-based filtering and score penalties.
+
+    Hard exclude: shots shorter than soft_min seconds are removed entirely.
+                  They are too short to be usable by any editor.
+
+    Soft penalty: shots between soft_min and min_dur receive a score penalty
+                  proportional to how far below min_dur they are.
+                  A 1.5s shot with min_dur=2.0 gets a 25% score reduction.
+                  This keeps them in the pool but pushes them toward the bottom
+                  so the facility location algorithm avoids them unless there
+                  are no better options.
+
+    Both thresholds are configurable in config.yaml under selection:
+        min_shot_duration_sec: 2.0   # soft penalty kicks in below this
+        soft_min_duration_sec: 1.0   # hard exclusion below this
+    """
+    result = []
+    excluded = 0
+
+    for shot, score in pool:
+        dur = shot.duration_sec
+
+        # hard exclude — unusable
+        if dur < soft_min:
+            excluded += 1
+            continue
+
+        # soft penalty — usable but not ideal
+        if dur < min_dur:
+            penalty = (min_dur - dur) / min_dur   # 0.0 to 1.0
+            if score.total_score is not None:
+                score.total_score = round(
+                    score.total_score * (1.0 - penalty * 0.4), 2
+                )
+            if score.technical_total is not None:
+                score.technical_total = round(
+                    score.technical_total * (1.0 - penalty * 0.4), 2
+                )
+
+        result.append((shot, score))
+
+    if excluded > 0:
+        print(f"[selection] excluded {excluded} shots below minimum duration ({soft_min}s)")
+
+    # safety — never return empty pool
+    if not result:
+        print("[selection] warning: all shots excluded by duration filter — returning full pool")
+        return pool
+
+    return result
+
 
 def _pair_shots_scores(
     shots:  List[Shot],
