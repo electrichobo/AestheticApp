@@ -170,24 +170,10 @@ def _process_reference_still(
         tech = _compute_reference_metrics(img)
 
         # build the record stored in BaselineStore
-        # each key becomes a metric dimension in the online statistics
-        record: Dict[str, Any] = {
-            # store embedding as a serialized key
-            # BaselineStore tracks numeric stats — embeddings stored separately
-            "clip_embedding_dim": float(len(embedding)),
-
-            # technical metric seeds for Subjective pillar reference distribution
-            "histogram_mean":       tech.get("histogram_mean",       0.0),
-            "histogram_std":        tech.get("histogram_std",        0.0),
-            "highlight_clip_pct":   tech.get("highlight_clip_pct",   0.0),
-            "shadow_clip_pct":      tech.get("shadow_clip_pct",      0.0),
-            "snr_luma":             tech.get("snr_luma",             0.0),
-            "sharpness_laplacian":  tech.get("sharpness_laplacian",  0.0),
-            "saturation_mean":      tech.get("saturation_mean",      0.0),
-            "wb_deviation":         tech.get("wb_deviation",         0.0),
-            "dynamic_range_stops":  tech.get("dynamic_range_stops",  0.0),
-            "palette_entropy":      tech.get("palette_entropy",      0.0),
-        }
+        # pass all computed metrics through — each becomes a statistical dimension
+        # clip_embedding_dim is a sentinel so BaselineStore always has at least one entry
+        record: Dict[str, Any] = {"clip_embedding_dim": float(len(embedding))}
+        record.update({k: v for k, v in tech.items() if isinstance(v, (int, float))})
 
         # store embedding separately in a companion file
         _store_embedding(img_path, embedding, version, data_dir)
@@ -201,55 +187,222 @@ def _process_reference_still(
 
 def _compute_reference_metrics(img: np.ndarray) -> Dict[str, float]:
     """
-    Compute a lightweight metric summary for a reference still.
-    Uses direct numpy/opencv rather than the full FrameMetrics pipeline
-    to keep training fast — we only need the distribution anchors.
+    Compute the full metric suite for a reference still.
+    All metrics that can be derived from a single image are computed here.
+    Temporal/video-only metrics (optical flow, stabilization, temporal consistency,
+    shot duration) are omitted — they will be populated when video reference
+    frames are added in a future corpus version.
+    Each key corresponds to a field in FrameMetrics and becomes a dimension
+    in the BaselineStore online statistics.
     """
     results: Dict[str, float] = {}
 
     try:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
         flat = gray.flatten()
+        lab  = cv2.cvtColor(img, cv2.COLOR_BGR2Lab).astype(np.float32)
+        hsv  = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        L, a, b = lab[:, :, 0], lab[:, :, 1], lab[:, :, 2]
 
-        results["histogram_mean"]     = round(float(np.mean(flat)), 2)
-        results["histogram_std"]      = round(float(np.std(flat)),  2)
+        # ---- Exposure ----
+        mean   = float(np.mean(flat))
+        std    = float(np.std(flat))
+        results["histogram_mean"]     = round(mean, 2)
+        results["histogram_median"]   = round(float(np.median(flat)), 2)
+        results["histogram_std"]      = round(std, 2)
+        if std > 0:
+            results["histogram_skew"]     = round(float(np.mean(((flat - mean) / std) ** 3)), 4)
+            results["histogram_kurtosis"] = round(float(np.mean(((flat - mean) / std) ** 4)) - 3.0, 4)
         results["highlight_clip_pct"] = round(float(np.sum(flat >= 250) / len(flat) * 100.0), 3)
         results["shadow_clip_pct"]    = round(float(np.sum(flat <= 5)   / len(flat) * 100.0), 3)
+        zone_v = 118.0
+        results["third_moment_18gray"] = round(float(np.mean(((flat - zone_v) / 255.0) ** 3)), 6)
+        signal_val = float(np.mean(flat))
+        noise_val  = float(np.std(flat)) + 1e-6
+        results["snr_luma"] = round(20.0 * np.log10(signal_val / noise_val) if signal_val > 0 else 0.0, 2)
+        snr_a = round(20.0 * np.log10(abs(float(np.mean(a))) / (float(np.std(a)) + 1e-6) + 1e-6), 2)
+        snr_b = round(20.0 * np.log10(abs(float(np.mean(b))) / (float(np.std(b)) + 1e-6) + 1e-6), 2)
+        results["snr_chroma"] = round((snr_a + snr_b) / 2.0, 2)
+        blurred = cv2.GaussianBlur(gray.astype(np.uint8), (5, 5), 0).astype(np.float32)
+        mse = float(np.mean((gray - blurred) ** 2))
+        results["psnr"] = round(10.0 * np.log10((255.0 ** 2) / mse), 2) if mse > 0 else 60.0
+        from skimage.metrics import structural_similarity as ssim_func
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            ssim_val = float(ssim_func(gray.astype(np.uint8), blurred.astype(np.uint8), data_range=255))
+        results["ssim"] = round(ssim_val * 100.0, 2)
+        spread_score = min(100.0, (std / 64.0) * 100.0)
+        clip_penalty = (results["highlight_clip_pct"] * 2.0) + (results["shadow_clip_pct"] * 1.5)
+        results["exposure_intent"] = round(max(0.0, spread_score - clip_penalty), 2)
 
-        # SNR proxy
-        signal = float(np.mean(flat))
-        noise  = float(np.std(flat)) + 1e-6
-        results["snr_luma"] = round(20.0 * np.log10(signal / noise) if signal > 0 else 0.0, 2)
-
-        # sharpness
-        lap = cv2.Laplacian(gray.astype(np.uint8), cv2.CV_32F)
-        results["sharpness_laplacian"] = round(float(lap.var()), 2)
-
-        # color metrics
-        lab = cv2.cvtColor(img, cv2.COLOR_BGR2Lab).astype(np.float32)
-        a, b = lab[:, :, 1], lab[:, :, 2]
-        chroma = np.sqrt(a**2 + b**2)
-        results["saturation_mean"] = round(float(np.mean(chroma)), 2)
-        results["wb_deviation"]    = round(float(np.sqrt(float(np.mean(a))**2 + float(np.mean(b))**2)), 3)
-
-        # dynamic range proxy
-        L = lab[:, :, 0]
+        # ---- Lighting ----
         p2, p98 = np.percentile(L, 2), np.percentile(L, 98)
         dr = float(p98 - p2)
         results["dynamic_range_stops"] = round(np.log2(dr / 100.0 * 255.0 + 1.0), 2) if dr > 0 else 0.0
+        bright_mask = L > np.percentile(L, 75)
+        shadow_mask = L < np.percentile(L, 25)
+        key_mean  = float(np.mean(L[bright_mask])) if bright_mask.any() else 0.0
+        fill_mean = float(np.mean(L[shadow_mask])) + 1.0 if shadow_mask.any() else 1.0
+        results["key_fill_ratio"] = round(key_mean / fill_mean, 2)
+        b_mean = float(np.mean(img[:, :, 0].astype(np.float32)))
+        r_mean = float(np.mean(img[:, :, 2].astype(np.float32)))
+        br_ratio = b_mean / (r_mean + 1e-6)
+        results["color_temp_kelvin"]    = round(2000.0 + br_ratio * 4000.0, 0)
+        results["color_temp_deviation"] = round(abs(results["color_temp_kelvin"] - 5600.0) / 5600.0 * 100.0, 2)
+        results["shadow_detail"] = round(float(np.mean(L[shadow_mask])) / 100.0 * 100.0, 2) if shadow_mask.any() else 0.0
+        results["shadow_noise"]  = round(float(np.std(gray[shadow_mask])), 2) if shadow_mask.any() else 0.0
+        grad_x = cv2.Sobel(gray.astype(np.uint8), cv2.CV_32F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(gray.astype(np.uint8), cv2.CV_32F, 0, 1, ksize=3)
+        grad_mag = np.sqrt(grad_x**2 + grad_y**2)
+        results["transition_hardness"] = round(min(100.0, float(np.std(grad_mag)) / 50.0 * 100.0), 2)
+        h_img, w_img = gray.shape
+        quadrants = [gray[:h_img//2, :w_img//2], gray[:h_img//2, w_img//2:], gray[h_img//2:, :w_img//2], gray[h_img//2:, w_img//2:]]
+        q_std = float(np.std([float(np.mean(q)) for q in quadrants]))
+        results["light_motivation"] = round(min(100.0, q_std / 30.0 * 100.0), 2)
 
-        # palette entropy
-        hsv     = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        hue     = hsv[:, :, 0].flatten().astype(np.float32)
-        hist, _ = np.histogram(hue, bins=36, range=(0, 180))
-        hist    = hist.astype(np.float32) + 1e-6
-        hist   /= hist.sum()
-        results["palette_entropy"] = round(float(-np.sum(hist * np.log2(hist))), 4)
+        # ---- Composition ----
+        h_img, w_img = gray.shape
+        thirds_x = [w_img // 3, 2 * w_img // 3]
+        thirds_y = [h_img // 3, 2 * h_img // 3]
+        edges = cv2.Canny(gray.astype(np.uint8), 50, 150)
+        band = max(1, w_img // 20)
+        td = 0.0
+        for tx in thirds_x:
+            td += float(np.mean(edges[:, max(0,tx-band):min(w_img,tx+band)]))
+        band_h = max(1, h_img // 20)
+        for ty in thirds_y:
+            td += float(np.mean(edges[max(0,ty-band_h):min(h_img,ty+band_h), :]))
+        results["rule_of_thirds"] = round(min(100.0, (td / 4.0) / 128.0 * 100.0), 2)
+        total_lum = float(np.sum(gray)) + 1e-6
+        y_coords, x_coords = np.mgrid[0:h_img, 0:w_img]
+        com_x = round(float(np.sum(x_coords * gray) / total_lum) / w_img, 4)
+        com_y = round(float(np.sum(y_coords * gray) / total_lum) / h_img, 4)
+        results["center_of_mass_x"] = com_x
+        results["center_of_mass_y"] = com_y
+        results["negative_space_ratio"] = round(float(np.sum(gray < float(np.median(gray)))) / gray.size * 100.0, 2)
+        bg_thresh = float(np.percentile(gray, 20))
+        results["occupancy_map_score"] = round(float(np.mean(gray > bg_thresh * 1.5)) * 100.0, 2)
+        mid = w_img // 2
+        left  = gray[:, :mid].astype(np.float32)
+        right = np.fliplr(gray[:, w_img-mid:]).astype(np.float32)
+        min_w = min(left.shape[1], right.shape[1])
+        results["symmetry_score"] = round(max(0.0, 100.0 - float(np.mean(np.abs(left[:, :min_w] - right[:, :min_w]))) / 128.0 * 100.0), 2)
+        results["headroom"]  = round((1.0 - com_y) * 100.0, 2)
+        results["lead_room"] = round(abs(com_x - 0.5) * 200.0, 2)
+        thirds_pts = [(1/3,1/3),(2/3,1/3),(1/3,2/3),(2/3,2/3)]
+        min_dist = min(((com_x-px)**2+(com_y-py)**2)**0.5 for px,py in thirds_pts)
+        results["frame_balance"] = round(max(0.0, 100.0 - (min_dist / 0.5) * 100.0), 2)
+        lap_sharp  = cv2.Laplacian(gray.astype(np.uint8), cv2.CV_32F)
+        blurred15  = cv2.GaussianBlur(gray.astype(np.uint8), (15, 15), 0)
+        lap_blur   = cv2.Laplacian(blurred15, cv2.CV_32F)
+        ratio = float(np.var(lap_sharp)) / (float(np.var(lap_blur)) + 1e-6)
+        results["depth_separation"] = round(min(100.0, ratio / 10.0 * 100.0), 2)
 
-    except Exception:
-        pass
+        # ---- Color ----
+        chroma = np.sqrt(a**2 + b**2)
+        results["saturation_mean"]        = round(float(np.mean(chroma)), 2)
+        results["saturation_uniformity"]  = round(max(0.0, 100.0 - float(np.std(chroma))), 2)
+        results["wb_deviation"]           = round(float(np.sqrt(float(np.mean(a))**2 + float(np.mean(b))**2)), 3)
+        hue_flat = hsv[:, :, 0].flatten().astype(np.float32)
+        hist_h, _ = np.histogram(hue_flat, bins=36, range=(0, 180))
+        hist_h = hist_h.astype(np.float32) + 1e-6
+        hist_h /= hist_h.sum()
+        results["palette_entropy"] = round(float(-np.sum(hist_h * np.log2(hist_h))), 4)
+        results["chroma_noise"]    = round(float((np.std(a) + np.std(b)) / 2.0), 2)
+        row_means = np.mean(np.abs(cv2.Sobel(np.clip(L / 100.0 * 255.0, 0, 255).astype(np.uint8), cv2.CV_32F, 0, 1, ksize=3)), axis=1)
+        col_means = np.mean(np.abs(cv2.Sobel(np.clip(L / 100.0 * 255.0, 0, 255).astype(np.uint8), cv2.CV_32F, 1, 0, ksize=3)), axis=0)
+        results["banding_score"] = round(min(100.0, (float(np.std(row_means)) + float(np.std(col_means))) / 2.0), 2)
+        sat_val = float(np.mean(hsv[:,:,1]))
+        mean_val = float(np.mean(hsv[:,:,2]))
+        warm_pct = float(np.sum((hue_flat < 30) | (hue_flat > 150)) / len(hue_flat))
+        cool_pct = float(np.sum((hue_flat > 60) & (hue_flat < 130)) / len(hue_flat))
+        if sat_val < 30: results["palette_family_id"] = 0.0
+        elif mean_val < 60: results["palette_family_id"] = 1.0
+        elif mean_val > 200: results["palette_family_id"] = 2.0
+        elif warm_pct > 0.5: results["palette_family_id"] = 3.0
+        elif cool_pct > 0.5: results["palette_family_id"] = 4.0
+        else: results["palette_family_id"] = 5.0
+
+        # ---- Image Quality ----
+        lap = cv2.Laplacian(gray.astype(np.uint8), cv2.CV_32F)
+        results["sharpness_laplacian"]    = round(float(lap.var()), 2)
+        results["sharpness_edge_density"] = round(float(np.mean(edges > 0)) * 100.0, 2)
+        f = np.fft.fftshift(np.fft.fft2(gray))
+        mag = np.abs(f)
+        cy, cx = h_img // 2, w_img // 2
+        r_freq = min(h_img, w_img) // 8
+        mask = np.zeros_like(mag)
+        cv2.circle(mask, (cx, cy), r_freq, 1, -1)
+        low = float(np.sum(mag * mask))
+        high = float(np.sum(mag * (1 - mask)))
+        results["mtf_proxy"] = round(high / (low + high + 1e-6) * 100.0, 2)
+        results["vignetting_stops"] = _vignetting(gray, h_img, w_img)
+        results["ca_width_px"]      = _ca_width(img, edges)
+        edge_region = np.concatenate([gray[:h_img//6,:].flatten(), gray[-h_img//6:,:].flatten(),
+                                       gray[:,:w_img//6].flatten(), gray[:,-w_img//6:].flatten()])
+        results["flare_contrast_loss"] = round(float(np.sum(edge_region > 240) / len(edge_region) * 100.0), 3)
+        kernel = np.array([[-1,-1,-1],[-1,8,-1],[-1,-1,-1]], dtype=np.float32)
+        hp = cv2.filter2D(gray.astype(np.float32), -1, kernel)
+        results["compression_ringing"]  = round(min(100.0, float(np.std(hp)) / 20.0 * 100.0), 2)
+        results["texture_retention"]    = _texture_retention(gray)
+
+        # ---- Narrative ----
+        try:
+            sal = cv2.saliency.StaticSaliencySpectralResidual_create()
+            ok, sal_map = sal.computeSaliency(gray.astype(np.uint8))
+            if ok:
+                sal_f = sal_map.astype(np.float32)
+                results["saliency_consistency"] = round(min(100.0, float(np.max(sal_f)) / (float(np.mean(sal_f)) + 1e-6) * 10.0), 2)
+        except Exception:
+            pass
+        sharpness_s = min(100.0, float(lap.var()) / 500.0 * 100.0)
+        exposure_s  = max(0.0, 100.0 - abs(mean - 128.0) / 128.0 * 100.0)
+        contrast_s  = min(100.0, std / 80.0 * 100.0)
+        results["compelling_mos"] = round(sharpness_s * 0.4 + exposure_s * 0.3 + contrast_s * 0.3, 2)
+
+    except Exception as exc:
+        print(f"[trainer metrics] partial failure: {exc}")
 
     return results
+
+
+def _vignetting(gray: np.ndarray, h: int, w: int) -> float:
+    try:
+        margin = min(h, w) // 8
+        center = float(np.mean(gray[h//2-margin:h//2+margin, w//2-margin:w//2+margin]))
+        corners = [gray[:margin,:margin], gray[:margin,-margin:], gray[-margin:,:margin], gray[-margin:,-margin:]]
+        corner_mean = float(np.mean([np.mean(c) for c in corners]))
+        ratio = corner_mean / (center + 1e-6)
+        return max(0.0, round(float(-np.log2(ratio + 1e-6)), 2))
+    except Exception:
+        return 0.0
+
+
+def _ca_width(img: np.ndarray, edges: np.ndarray) -> float:
+    try:
+        edge_mask = edges > 0
+        if not edge_mask.any():
+            return 0.0
+        r_e = img[:,:,2][edge_mask].astype(np.float32)
+        g_e = img[:,:,1][edge_mask].astype(np.float32)
+        b_e = img[:,:,0][edge_mask].astype(np.float32)
+        return round((float(np.mean(np.abs(r_e-g_e))) + float(np.mean(np.abs(b_e-g_e)))) / 2.0, 2)
+    except Exception:
+        return 0.0
+
+
+def _texture_retention(gray: np.ndarray) -> float:
+    try:
+        blur = cv2.GaussianBlur(gray.astype(np.uint8), (5,5), 0)
+        diff = cv2.absdiff(gray.astype(np.uint8), blur)
+        mask = diff > 10
+        if not mask.any():
+            return 50.0
+        lap = cv2.Laplacian(gray.astype(np.uint8), cv2.CV_32F)
+        return round(min(100.0, float(np.var(lap[mask])) / 500.0 * 100.0), 2)
+    except Exception:
+        return 0.0
 
 
 def _store_embedding(
