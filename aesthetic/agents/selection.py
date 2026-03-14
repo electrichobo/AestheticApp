@@ -531,6 +531,7 @@ def _build_output(
             "hero_frame":       shot.hero_frame,
             "movement_type":    shot.movement_type.value if shot.movement_type else None,
             "shot_scale":       shot.shot_scale.value   if shot.shot_scale   else None,
+            "scene_type":       shot.scene_type.value   if shot.scene_type   else None,
             "total_score":      score.total_score,
             "technical_total":  score.technical_total,
             "creative_total":   score.creative_total,

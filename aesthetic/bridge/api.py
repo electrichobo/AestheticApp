@@ -468,6 +468,41 @@ class AestheticAPI:
                         pct = 60 + int((fi / total_frames) * 15)
                         self._push_progress(job_id, f"Inference: {fi+1}/{total_frames} frames", pct)
 
+            # --- stage 5b: shot classification ---
+            self._push_progress(job_id, "Classifying shot intent and scale…", 75)
+            from ..agents.classifier import classify_shot, classify_scene_from_shots
+
+            # load CLIP once and reuse across all frames
+            _clip_model = _clip_pre = None
+            _clip_dev   = "cpu"
+            if features.get("clip_enabled", True):
+                try:
+                    import torch
+                    import open_clip
+                    _clip_dev = "cuda" if (features.get("gpu_enabled", False) and torch.cuda.is_available()) else "cpu"
+                    _clip_model, _, _clip_pre = open_clip.create_model_and_transforms(
+                        "ViT-B-32", pretrained="openai", device=_clip_dev
+                    )
+                    _clip_model.eval()
+                except Exception:
+                    pass
+
+            # classify per frame, then aggregate to shot level
+            frame_classifications: Dict[int, List[Dict]] = defaultdict(list)
+            for fm in all_frame_metrics:
+                cls = classify_shot(
+                    fm, fm.frame_path, cfg,
+                    clip_model=_clip_model,
+                    clip_preprocess=_clip_pre,
+                    clip_device=_clip_dev,
+                )
+                frame_classifications[fm.scene_id].append(cls)
+
+            # aggregate to shot-level classification
+            shot_classifications: Dict[int, Dict] = {}
+            for scene_id, frame_cls_list in frame_classifications.items():
+                shot_classifications[scene_id] = classify_scene_from_shots(frame_cls_list)
+
             # --- stage 6: aggregation ---
             self._push_progress(job_id, "Aggregating shot scores…", 76)
             from ..agents.aggregation import aggregate_shot
@@ -504,7 +539,20 @@ class AestheticAPI:
                         2
                     )
 
+                # attach classification to shot
+                cls = shot_classifications.get(scene.scene_id, {})
                 hero_frame = scene_candidates_list[len(scene_candidates_list)//2].path if scene_candidates_list else None
+
+                try:
+                    from ..models.job import MovementType, ShotScale, SceneType
+                    mv_type  = MovementType(cls.get("movement_type", "unknown"))
+                    sh_scale = ShotScale(cls.get("shot_scale",    "unknown"))
+                    sc_type  = SceneType(cls.get("scene_type",    "unknown"))
+                except ValueError:
+                    mv_type  = MovementType.UNKNOWN
+                    sh_scale = ShotScale.UNKNOWN
+                    sc_type  = SceneType.UNKNOWN
+
                 shot = Shot(
                     shot_id=shot_id,
                     scene_id=scene.scene_id,
@@ -514,6 +562,9 @@ class AestheticAPI:
                     end_frame=scene.end_frame,
                     frame_paths=[c.path for c in scene_candidates_list],
                     hero_frame=hero_frame,
+                    movement_type=mv_type,
+                    shot_scale=sh_scale,
+                    scene_type=sc_type,
                 )
                 shots.append(shot)
                 scores.append(score)
@@ -657,6 +708,8 @@ def _build_ui_shots(selected: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "rationale":  s.get("rationale"),
             "movement_type": s.get("movement_type"),
             "shot_scale":    s.get("shot_scale"),
+            "scene_type":    s.get("scene_type"),
+            "shot_intent":   s.get("shot_intent"),
             "scores": {
                 "exposure":    {"total": scores.get("exposure")},
                 "lighting":    {"total": scores.get("lighting")},
