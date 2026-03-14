@@ -78,7 +78,14 @@ def select_shots(
     # step 3 — deduplication
     pool = _deduplicate(pool)
 
-    # step 4 — ensure we have enough for selection
+    # step 4 — filter title cards, logos, and static graphics
+    pre_filter_count = len(pool)
+    pool = _filter_non_cinematic(pool, config)
+    filtered_count = pre_filter_count - len(pool)
+    if filtered_count > 0:
+        print(f"[selection] filtered {filtered_count} non-cinematic shots (title cards / logos)")
+
+    # step 5 — ensure we have enough for selection
     if len(pool) <= top_k:
         selected = pool
     else:
@@ -94,6 +101,114 @@ def select_shots(
 
     _write_shots_json(result, job_dir)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Step 3b — non-cinematic content filter
+# ---------------------------------------------------------------------------
+
+def _filter_non_cinematic(
+    pool:   List[Tuple[Shot, ShotScore]],
+    config: Dict[str, Any],
+) -> List[Tuple[Shot, ShotScore]]:
+    """
+    Filter out shots that are likely title cards, logos, credits,
+    or static graphics rather than cinematic content.
+
+    Detection signals (all computed from existing metrics):
+      - palette_entropy very low     -> few distinct colors (title card bg)
+      - occupancy_map_score very low -> sparse content in frame
+      - depth_separation near zero   -> flat image, no depth
+      - histogram_std very low       -> near-uniform tone (black/white bg)
+      - sharpness_laplacian very high with low saturation -> text on plain bg
+
+    A shot is flagged as non-cinematic if it meets enough of these criteria.
+    Thresholds are configurable via config.yaml under selection.content_filter.
+    """
+    cfg = config.get("selection", {}).get("content_filter", {})
+
+    entropy_thresh    = float(cfg.get("min_palette_entropy",   2.5))
+    occupancy_thresh  = float(cfg.get("min_occupancy_score",  15.0))
+    depth_thresh      = float(cfg.get("min_depth_separation",  5.0))
+    hist_std_thresh   = float(cfg.get("min_histogram_std",    20.0))
+    saturation_thresh = float(cfg.get("min_saturation_mean",   8.0))
+
+    kept = []
+    for shot, score in pool:
+        if _is_non_cinematic(
+            score,
+            entropy_thresh,
+            occupancy_thresh,
+            depth_thresh,
+            hist_std_thresh,
+            saturation_thresh,
+        ):
+            continue
+        kept.append((shot, score))
+
+    # safety — never filter everything
+    if not kept:
+        return pool
+
+    return kept
+
+
+def _is_non_cinematic(
+    score:             ShotScore,
+    entropy_thresh:    float,
+    occupancy_thresh:  float,
+    depth_thresh:      float,
+    hist_std_thresh:   float,
+    saturation_thresh: float,
+) -> bool:
+    """
+    Return True if the shot looks like a title card, logo, or static graphic.
+    Uses a points system — needs at least 3 of 5 signals to flag.
+    This avoids false positives on intentionally minimal cinematography
+    (e.g. a desaturated fog shot should not be filtered).
+    """
+    flags = 0
+
+    # low color entropy — few distinct hues (title card background)
+    entropy = _get_metric(score, "color", "palette_entropy")
+    if entropy is not None and entropy < entropy_thresh:
+        flags += 1
+
+    # sparse content — little happening in the frame
+    occupancy = _get_metric(score, "composition", "occupancy_map_score")
+    if occupancy is not None and occupancy < occupancy_thresh:
+        flags += 1
+
+    # flat image — no depth separation
+    depth = _get_metric(score, "composition", "depth_separation")
+    if depth is not None and depth < depth_thresh:
+        flags += 1
+
+    # near-uniform tone — black or white background
+    # we use exposure technical as a proxy — very high or very low = flat bg
+    hist_std = score.exposure.technical
+    if hist_std is not None and hist_std < hist_std_thresh:
+        flags += 1
+
+    # desaturated — logo or credit roll
+    saturation = _get_metric(score, "color", "saturation_mean")
+    if saturation is not None and saturation < saturation_thresh:
+        flags += 1
+
+    return flags >= 3
+
+
+def _get_metric(score: ShotScore, category: str, field: str) -> Optional[float]:
+    """Safely retrieve a raw metric value from a ShotScore category."""
+    try:
+        cat = getattr(score, category, None)
+        if cat is None:
+            return None
+        # ShotScore stores CategoryScore objects — check if raw metrics available
+        # Fall back to the technical score for the category
+        return getattr(cat, field, None)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------

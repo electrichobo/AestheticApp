@@ -4,26 +4,33 @@
 # Reads a video file, steps through frames looking for content changes,
 # and returns a list of Scene models with accurate in/out timecodes.
 #
-# Algorithm: downscale each frame to a small thumbnail, convert to
-# greyscale, compute the mean absolute difference (MAD) between
-# consecutive frames. When MAD exceeds the threshold, that is a cut.
+# Detection uses a multi-signal approach:
+#   1. MAD (mean absolute difference) — fast pixel diff, catches hard cuts
+#   2. Quadrant diff — splits frame into 4 regions, detects subject position
+#      changes even when overall brightness is similar (reverse angles)
+#   3. SSIM — structural similarity, detects layout changes in similar-looking frames
+#   4. CLIP embedding distance — semantic change detection, most accurate,
+#      optional (enabled via config features.clip_scene_detection)
+#
+# A cut is flagged when ANY signal exceeds its threshold.
+# This combination catches hard cuts, reverse angles, coverage changes,
+# and subtle transitions that MAD alone misses.
 #
 # Edge cases handled:
 #   - Scenes shorter than min_scene_len_frames are merged with their neighbour
-#   - Flash cuts (very short spikes followed by immediate return) are ignored
-#   - First and last frames of the video are always scene boundaries
-#   - Videos with no detected cuts produce a single scene covering the full duration
-#
-# Output: list of Scene models, also written to jobs/<job_id>/scenes.json
+#   - Flash cuts (very short spikes) are ignored
+#   - First and last frames are always scene boundaries
+#   - Videos with no detected cuts produce one scene covering the full duration
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
+from skimage.metrics import structural_similarity as ssim_func
 
 from ..models.job import VideoMeta, Scene
 
@@ -33,41 +40,40 @@ from ..models.job import VideoMeta, Scene
 # ---------------------------------------------------------------------------
 
 def detect_scenes(
-    video_meta:          VideoMeta,
-    job_dir:             Path,
-    threshold:           float = 30.0,
-    min_scene_len_frames:int   = 12,
-    downscale_width:     int   = 320,
-    seed:                int   = 42,
+    video_meta:           VideoMeta,
+    job_dir:              Path,
+    threshold:            float = 22.0,
+    min_scene_len_frames: int   = 12,
+    downscale_width:      int   = 320,
+    seed:                 int   = 42,
+    config:               Optional[Dict] = None,
 ) -> List[Scene]:
     """
     Detect scene boundaries in the video described by video_meta.
 
     Args:
         video_meta:           Validated VideoMeta from the ingest agent.
-        job_dir:              Path to the job directory — scenes.json is written here.
-        threshold:            Mean absolute difference threshold for cut detection.
-                              Lower = more sensitive (more scenes).
-                              Higher = less sensitive (fewer scenes).
-                              Maps directly to the UI sensitivity slider.
-        min_scene_len_frames: Scenes shorter than this are merged with their neighbour.
-        downscale_width:      Width to downscale frames to before diffing.
-                              Smaller = faster, slightly less accurate.
-        seed:                 Not used in detection itself but stamped into output
-                              for determinism tracing.
+        job_dir:              Path to the job directory — scenes.json written here.
+        threshold:            Primary MAD threshold. Lower = more sensitive.
+        min_scene_len_frames: Scenes shorter than this are merged.
+        downscale_width:      Frame width for diff computation.
+        seed:                 Stamped into output for determinism tracing.
+        config:               Full config dict — used for feature flags.
 
     Returns:
-        List of Scene models, sorted by scene_id.
-
-    Raises:
-        RuntimeError: if the video cannot be opened by OpenCV.
+        List of Scene models sorted by scene_id.
     """
+    cfg      = config or {}
+    features = cfg.get("features", {})
+    use_clip = bool(features.get("clip_scene_detection", False))
+
     boundaries = _find_cut_boundaries(
-        video_meta.path,
-        video_meta.fps,
-        video_meta.frame_count,
-        threshold,
-        downscale_width,
+        video_path=video_meta.path,
+        fps=video_meta.fps,
+        frame_count=video_meta.frame_count,
+        threshold=threshold,
+        downscale_width=downscale_width,
+        use_clip=use_clip,
     )
 
     scenes = _boundaries_to_scenes(
@@ -78,7 +84,6 @@ def detect_scenes(
     )
 
     _write_scenes_json(scenes, job_dir)
-
     return scenes
 
 
@@ -88,20 +93,20 @@ def detect_scenes(
 
 def sensitivity_to_threshold(sensitivity: int) -> float:
     """
-    Map the UI sensitivity slider (1-100) to a diff threshold.
+    Map the UI sensitivity slider (1-100) to a MAD threshold.
 
-    High sensitivity (100) -> low threshold -> more cuts detected.
-    Low sensitivity  (1)   -> high threshold -> fewer cuts detected.
+    High sensitivity (100) -> low threshold (4.0)  -> more cuts detected.
+    Low sensitivity  (1)   -> high threshold (45.0) -> fewer cuts detected.
+    Default at sensitivity 50 = ~24.0.
 
-    Returns a threshold in the range [8.0, 60.0].
+    Quadrant and SSIM thresholds are derived from this value automatically.
     """
     sensitivity = max(1, min(100, sensitivity))
-    # linear interpolation: sensitivity 100 -> 8.0, sensitivity 1 -> 60.0
-    return round(60.0 - (sensitivity - 1) * (52.0 / 99.0), 2)
+    return round(45.0 - (sensitivity - 1) * (41.0 / 99.0), 2)
 
 
 # ---------------------------------------------------------------------------
-# Core detection
+# Core detection — multi-signal
 # ---------------------------------------------------------------------------
 
 def _find_cut_boundaries(
@@ -110,20 +115,33 @@ def _find_cut_boundaries(
     frame_count:     int,
     threshold:       float,
     downscale_width: int,
+    use_clip:        bool = False,
 ) -> List[int]:
     """
-    Step through the video frame by frame and return a list of frame indices
-    where cuts occur (i.e. where MAD between consecutive frames exceeds threshold).
-
-    The list always starts with frame 0 and ends with the last frame.
+    Step through the video and return frame indices where cuts occur.
+    Combines MAD + quadrant diff + SSIM. CLIP is optional.
     """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise RuntimeError(f"OpenCV could not open video: {video_path}")
 
+    # derive secondary thresholds from primary
+    quadrant_threshold = threshold * 0.6   # tighter — localised changes
+    ssim_threshold     = max(0.55, 0.85 - (threshold / 100.0))  # lower = more different
+
     boundaries: List[int] = [0]
-    prev_gray:  np.ndarray | None = None
+    prev_gray:  Optional[np.ndarray] = None
     frame_idx:  int = 0
+
+    # CLIP setup
+    clip_model      = None
+    clip_preprocess = None
+    clip_device     = "cpu"
+    prev_embedding: Optional[np.ndarray] = None
+    clip_interval   = max(1, int(fps / 2))   # sample at ~2fps
+
+    if use_clip:
+        clip_model, clip_preprocess, clip_device = _load_clip_for_scenes()
 
     try:
         while True:
@@ -134,16 +152,46 @@ def _find_cut_boundaries(
             gray = _preprocess_frame(frame, downscale_width)
 
             if prev_gray is not None:
-                mad = _mean_absolute_diff(prev_gray, gray)
-                if mad > threshold:
-                    boundaries.append(frame_idx)
+                cut_detected = False
+
+                # signal 1 — MAD
+                if _mean_absolute_diff(prev_gray, gray) > threshold:
+                    cut_detected = True
+
+                # signal 2 — quadrant diff (reverse angles, coverage changes)
+                if not cut_detected:
+                    if _quadrant_diff(prev_gray, gray) > quadrant_threshold:
+                        cut_detected = True
+
+                # signal 3 — SSIM (structural layout change)
+                if not cut_detected:
+                    if _ssim_diff(prev_gray, gray) < ssim_threshold:
+                        cut_detected = True
+
+                # signal 4 — CLIP semantic distance (optional)
+                if not cut_detected and use_clip and clip_model is not None:
+                    if frame_idx % clip_interval == 0:
+                        emb = _clip_embedding_for_frame(
+                            frame, clip_model, clip_preprocess, clip_device
+                        )
+                        if emb is not None and prev_embedding is not None:
+                            cos_dist = 1.0 - float(np.dot(emb, prev_embedding))
+                            if cos_dist > 0.15:
+                                cut_detected = True
+                        if emb is not None:
+                            prev_embedding = emb
+
+                if cut_detected:
+                    # suppress duplicate boundaries on consecutive frames (flash cut)
+                    if not boundaries or frame_idx - boundaries[-1] > 2:
+                        boundaries.append(frame_idx)
 
             prev_gray = gray
             frame_idx += 1
+
     finally:
         cap.release()
 
-    # always include the final frame as a boundary
     last_frame = frame_idx - 1
     if last_frame > 0 and boundaries[-1] != last_frame:
         boundaries.append(last_frame)
@@ -151,22 +199,93 @@ def _find_cut_boundaries(
     return boundaries
 
 
+# ---------------------------------------------------------------------------
+# Signal implementations
+# ---------------------------------------------------------------------------
+
 def _preprocess_frame(frame: np.ndarray, downscale_width: int) -> np.ndarray:
-    """
-    Downscale frame to downscale_width and convert to greyscale.
-    This is all we need for the diff — colour information adds noise.
-    """
+    """Downscale and convert to greyscale."""
     h, w = frame.shape[:2]
-    scale = downscale_width / w
-    new_w = downscale_width
-    new_h = max(1, int(h * scale))
-    small = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    new_h = max(1, int(h * downscale_width / w))
+    small = cv2.resize(frame, (downscale_width, new_h), interpolation=cv2.INTER_AREA)
     return cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
 
 
 def _mean_absolute_diff(a: np.ndarray, b: np.ndarray) -> float:
-    """Compute the mean absolute pixel difference between two greyscale frames."""
+    """Global mean absolute pixel difference."""
     return float(np.mean(np.abs(a.astype(np.int32) - b.astype(np.int32))))
+
+
+def _quadrant_diff(a: np.ndarray, b: np.ndarray) -> float:
+    """
+    Split frames into 4 quadrants and return the MAXIMUM quadrant MAD.
+
+    A reverse angle or coverage change will spike one or two quadrants
+    (subject moves sides) while the overall MAD stays low.
+    This is the key signal for catching similar-background cuts.
+    """
+    h, w = a.shape
+    mh, mw = h // 2, w // 2
+
+    quads_a = [a[:mh, :mw], a[:mh, mw:], a[mh:, :mw], a[mh:, mw:]]
+    quads_b = [b[:mh, :mw], b[:mh, mw:], b[mh:, :mw], b[mh:, mw:]]
+
+    diffs = [
+        float(np.mean(np.abs(qa.astype(np.int32) - qb.astype(np.int32))))
+        for qa, qb in zip(quads_a, quads_b)
+    ]
+
+    return float(max(diffs))
+
+
+def _ssim_diff(a: np.ndarray, b: np.ndarray) -> float:
+    """
+    SSIM between two greyscale frames. Lower = more structurally different.
+    Sensitive to compositional layout changes even in tonally similar frames.
+    """
+    try:
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return float(ssim_func(a, b, data_range=255))
+    except Exception:
+        return 1.0
+
+
+def _load_clip_for_scenes() -> Tuple:
+    """Load CLIP for scene detection. Returns (model, preprocess, device)."""
+    try:
+        import torch
+        import open_clip
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model, _, preprocess = open_clip.create_model_and_transforms(
+            "ViT-B-32", pretrained="openai", device=device
+        )
+        model.eval()
+        return model, preprocess, device
+    except Exception:
+        return None, None, "cpu"
+
+
+def _clip_embedding_for_frame(
+    frame:      np.ndarray,
+    model,
+    preprocess,
+    device:     str,
+) -> Optional[np.ndarray]:
+    """Generate a normalised CLIP embedding for a video frame."""
+    try:
+        import torch
+        from PIL import Image
+        rgb    = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img    = Image.fromarray(rgb)
+        tensor = preprocess(img).unsqueeze(0).to(device)
+        with torch.no_grad():
+            emb = model.encode_image(tensor)
+            emb = emb / emb.norm(dim=-1, keepdim=True)
+        return emb.squeeze().cpu().numpy()
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -174,30 +293,22 @@ def _mean_absolute_diff(a: np.ndarray, b: np.ndarray) -> float:
 # ---------------------------------------------------------------------------
 
 def _boundaries_to_scenes(
-    boundaries:          List[int],
-    total_frames:        int,
-    fps:                 float,
-    min_scene_len_frames:int,
+    boundaries:           List[int],
+    total_frames:         int,
+    fps:                  float,
+    min_scene_len_frames: int,
 ) -> List[Scene]:
-    """
-    Convert a list of cut boundary frame indices into Scene models.
-    Merges scenes that are shorter than min_scene_len_frames.
-    """
+    """Convert boundary indices into Scene models, merging short scenes."""
     if len(boundaries) < 2:
-        # no cuts found — one scene covering the whole video
-        return [_make_scene(0, 0, total_frames - 1, fps)]
+        return [_make_scene(1, 0, total_frames - 1, fps)]
 
-    # build raw scene spans from boundaries
     spans: List[Tuple[int, int]] = []
     for i in range(len(boundaries) - 1):
         start = boundaries[i]
         end   = boundaries[i + 1] - 1
         spans.append((start, end))
-    # last span ends at total_frames - 1
     spans[-1] = (spans[-1][0], total_frames - 1)
 
-    # merge short scenes into their following neighbour
-    # if the last scene is short, merge it into its preceding neighbour
     merged: List[Tuple[int, int]] = []
     i = 0
     while i < len(spans):
@@ -205,14 +316,12 @@ def _boundaries_to_scenes(
         length = end - start + 1
 
         if length < min_scene_len_frames and i < len(spans) - 1:
-            # absorb into next span
             next_start, next_end = spans[i + 1]
             spans[i + 1] = (start, next_end)
             i += 1
             continue
 
         if length < min_scene_len_frames and merged:
-            # last span is too short — absorb into previous
             prev_start, _ = merged[-1]
             merged[-1] = (prev_start, end)
         else:
@@ -220,9 +329,8 @@ def _boundaries_to_scenes(
 
         i += 1
 
-    # if nothing survived merging, return one scene
     if not merged:
-        return [_make_scene(0, 0, total_frames - 1, fps)]
+        return [_make_scene(1, 0, total_frames - 1, fps)]
 
     return [
         _make_scene(scene_id, start, end, fps)
@@ -231,7 +339,6 @@ def _boundaries_to_scenes(
 
 
 def _make_scene(scene_id: int, start_frame: int, end_frame: int, fps: float) -> Scene:
-    """Construct a Scene model from frame indices and fps."""
     return Scene(
         scene_id=scene_id,
         start_frame=start_frame,
@@ -246,7 +353,6 @@ def _make_scene(scene_id: int, start_frame: int, end_frame: int, fps: float) -> 
 # ---------------------------------------------------------------------------
 
 def _write_scenes_json(scenes: List[Scene], job_dir: Path) -> None:
-    """Write scenes list to jobs/<job_id>/scenes.json."""
     job_dir.mkdir(parents=True, exist_ok=True)
     out_path = job_dir / "scenes.json"
     data = [s.model_dump(mode="json") for s in scenes]

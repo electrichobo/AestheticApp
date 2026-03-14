@@ -15,7 +15,7 @@ runtime:
 # threshold is overridden at runtime by the UI sensitivity slider.
 # These values are the defaults when no slider input is provided.
 scenes:
-  threshold: 30.0              # MAD threshold for cut detection (lower = more cuts)
+  threshold: 22.0              # MAD threshold for cut detection (lower = more cuts)
   min_scene_len_frames: 12     # scenes shorter than this are merged with their neighbour
   downscale_width: 320         # frame width for diff computation (smaller = faster)
 
@@ -29,6 +29,12 @@ selection:
   top_k: 10                    # maximum number of shots to select globally
   dedupe_hash_threshold: 8     # hamming distance for perceptual hash dedupe (0-64)
   diversity_weight: 0.5        # balance between quality (0) and diversity (1)
+  content_filter:
+    min_palette_entropy:  2.5    # below this = likely title card (few colors)
+    min_occupancy_score: 15.0    # below this = sparse content (logo/graphic)
+    min_depth_separation: 5.0    # below this = flat image (no depth)
+    min_histogram_std:   20.0    # below this = near-uniform tone (black/white bg)
+    min_saturation_mean:  8.0    # below this = desaturated (credits/text)
 
 # Scoring pillar weights (must sum to 1.0)
 weights:
