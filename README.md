@@ -1,161 +1,109 @@
 # AESTHETIC
 
-AESTHETIC is a local, cross-platform application that finds and ranks the best shots in a video against a standard of cinematic excellence derived from award-winning cinematography. It scores every shot across three pillars — Technical, Creative, and Subjective — using a Golden Baseline built from Oscar-winning and ASC-awarded reference material. The Web UI is the primary interface. It runs entirely locally with no servers.
+AESTHETIC is a local desktop application that finds and ranks the best shots in a video against a standard of cinematic excellence derived from Oscar-winning and ASC-awarded cinematography. You give it a video. It gives you back the shots most worth keeping, explained and ready for an editor to use.
 
-> Status: Phase 0 complete. Foundation stable. Pipeline implementation in progress.
+It runs entirely on your machine. No servers. No cloud. No subscription.
 
----
-
-## Vision
-
-AESTHETIC is designed to be the definitive tool for automated cinematic shot analysis. It does not ask what looks good to you — it measures how close a shot comes to what the industry has already agreed is excellent.
-
-Instead of just detecting cuts, AESTHETIC understands and ranks shots. It provides a quantifiable, data-driven system for identifying the most cinematically powerful moments in any video, scored against a reference corpus of award-winning work.
-
-**Core goals**
-
-**Implement a granular, multi-pillar scoring engine**
-Score every shot against a comprehensive matrix broken down by cinematic category (Exposure, Lighting, Composition, Color, Movement, Image Quality, Narrative) and analytical pillar (Technical, Creative, Subjective), as specified in `AESTHETIC_Metric.md`.
-
-**Quantify the technical**
-Provide objective, reproducible, and verifiable metrics for every shot — histogram statistics, optical flow smoothness, clipping percentages, color palette entropy, sharpness proxies, and more. This establishes a firm, data-driven foundation of quality.
-
-**Score against cinematic excellence**
-The Golden Baseline is not a personal taste profile. It is a curated, versioned corpus of stills and frames from Oscar-winning and ASC-awarded cinematography. The Creative pillar scores new footage by measuring its proximity to this corpus in embedding space — how closely does this shot resemble work the industry has already judged as great.
-
-**Leverage AI vision models**
-CLIP embeddings power the Creative pillar similarity scoring. MiDaS provides depth estimation. YOLO handles subject and face detection. A vision-language model generates the human-readable rationale explaining why each shot scored the way it did. All model inference results are cached in per-frame sidecars so re-scoring is fast.
-
-**Provide a transparent and interactive GUI**
-The interface makes the entire analysis process visible. Verbose logs, per-shot score breakdowns, visual scopes (histogram, waveform, RGB parade, vectorscope), and plain-language rationale for every selected shot.
+> Current status: core pipeline complete through Phase 10. Scoring intelligence improvements in progress.
 
 ---
 
-## Table of contents
+## What it actually does
 
-- [Vision](#vision)
-- [Key outcomes](#key-outcomes)
-- [Example use cases](#example-use-cases)
-- [Current state](#current-state)
-- [Features](#features)
-- [Architecture overview](#architecture-overview)
-- [Repository layout](#repository-layout)
-- [Requirements](#requirements)
-- [Setup](#setup)
-- [Configuration](#configuration)
-- [Scoring pillars](#scoring-pillars)
-- [Scoring categories](#scoring-categories)
-- [Selection strategy](#selection-strategy)
-- [Golden Baseline](#golden-baseline)
-- [Roadmap](#roadmap)
-- [Milestones](#milestones)
-- [Quality bar](#quality-bar)
-- [Known risks](#known-risks)
-- [Contributing](#contributing)
-- [FAQ](#faq)
-- [License](#license)
+You submit a video file or a web URL. AESTHETIC breaks the video into scenes, samples candidate frames from each, measures everything measurable about every frame, compares those measurements against a corpus of award-winning cinematography, and selects the best shots. It then exports a contact sheet, timecoded clips, an EDL for your NLE, and a CSV — everything an editor needs to start building a selects package or showreel without sitting through the whole tape.
+
+The pipeline in plain English:
+
+1. **Ingest** — read the video's metadata via ffprobe (duration, fps, resolution, codec)
+2. **Scene detection** — step through frames detecting cuts using pixel diff + quadrant comparison + SSIM. Multi-signal so it catches reverse angles and coverage changes, not just hard cuts
+3. **Sample** — extract N candidate frames from each scene with seeded jitter so sampling is deterministic and even
+4. **Measure** — compute every metric in `AESTHETIC_Metric.md` for every candidate frame across seven categories: exposure, lighting, composition, movement, color, image quality, narrative
+5. **Infer** — run CLIP to generate an embedding for each frame, MiDaS for depth, YOLO for subject detection
+6. **Classify** — determine shot scale, movement type, scene type, and shot intent using the inference results
+7. **Aggregate** — collapse per-frame measurements into a single score per shot. Temporal variance is an explicit signal — a shot inconsistent across its duration scores lower
+8. **Score against baseline** — compare each shot's CLIP embedding against the Golden Baseline corpus via cosine similarity. This is the Creative pillar score
+9. **Select** — rank shots by combined score, filter title cards and graphics, apply duration weighting, run facility location selection to maximise both quality and diversity
+10. **Export** — hero frames, trimmed clips, contact sheet, EDL with correct SMPTE timecodes, CSV timecode list, full manifest JSON
 
 ---
 
-## Design principles
+## The Golden Baseline
 
-- Deterministic by seed
-- Always write something even when heavy features are unavailable
-- Modular agents with simple contracts and JSON sidecars
-- Heavy work in subprocess workers with timeouts and graceful fallbacks
-- One canonical API surface — `aesthetic/bridge/api.py`
-- Score shots as durations, not individual frames
+This is the heart of the system. A curated, versioned corpus of frames and stills from Oscar-winning and ASC-awarded cinematography. Every candidate shot is compared against it. A high Creative pillar score means the shot resembles something the industry has already judged as excellent.
 
----
+It is not personal taste. It is not trainable per-user. It is an objective standard derived from the best work in the field.
 
-## Key outcomes
+The baseline lives in `aesthetic/data/baseline/`. It is versioned — every time you add new material a new version is created and old ones are kept. Every analysis manifest records which baseline version produced its results so scores are always reproducible.
 
-- Rank every shot in a submitted video against a standard of award-winning cinematography
-- Explain why each shot scored the way it did with numeric evidence and plain-language rationale
-- Export a selects package an editor can work from directly: hero clips, contact sheet, scored manifest
-- Run locally with deterministic, reproducible results
-- Produce outputs that surface shots, not just frames — accurate in/out timecodes are the primary deliverable
+Build and expand the baseline from the Advanced section of the UI:
+- **Train (new)** — ingest a folder of reference stills to create an initial baseline
+- **Augment** — add new stills to an existing baseline without replacing it
+- **Browse Reference Video** — ingest a full reference film. Runs the complete pipeline on it to extract frames with full metrics including motion data. Always augments, never replaces
+
+All reference material passes a QC filter before ingestion — aspect ratio check, subtitle detection, non-cinematic content detection, and upscale detection. Anything that looks like a title card, watermark, or artificially processed image is rejected before it can pollute the corpus.
 
 ---
 
-## Example use cases
+## The scoring pillars
 
-**Showreel assembly**
-Submit a DP's body of work. AESTHETIC flags and ranks the shots that score closest to cinematic excellence, producing a shortlist the editor uses as the foundation for a showreel. Removes subjectivity and tedium from the selects process.
+**Technical (50% default)** — objective pixel math. Measures whether the shot was executed correctly. Sharpness, exposure, noise, motion stability, color accuracy.
 
-**Production dailies review**
-Submit a day's footage. Get back the best shots from each scene ranked by composite score, with per-category breakdowns showing exactly where each shot is strong or weak.
+**Creative (30% default)** — cosine similarity against the Golden Baseline in CLIP embedding space. Measures how closely this shot resembles award-winning work. Intentional stylistic deviation is handled by tunable delta curves.
 
-**Archive and cataloguing**
-Submit archival or library footage. Surface the most cinematically valuable moments for licensing, preservation priority, or highlight reels.
+**Subjective (20% default)** — what the industry has collectively responded to emotionally and artistically, as encoded in the baseline corpus. This is the pillar that allows cinematography to be an art form. A technically perfect shot that is emotionally empty should not score the same as one that is both technically sound and aesthetically powerful.
 
----
-
-## Current state
-
-- `aesthetic/bridge/api.py` — canonical API, all UI calls route here
-- `aesthetic/app.py` — thin pywebview boot shell only
-- `aesthetic/webui/index.html` — Web UI scaffold with tabs for Analysis, Scoring Matrix, Log, and Golden Baseline
-- `aesthetic/baseline.py` — fully implemented `BaselineStore` with versioned golden promotion, staging/augment buffers, and online statistics
-- `aesthetic/config/__init__.py` — config loading and all path constants
-- `aesthetic/agents/` — all six pipeline agents stubbed, implementation in progress
-- `aesthetic/models/` — data contracts stubbed, implementation in progress
-- `AESTHETIC_Metric.md` — complete metrics specification
-
-Pipeline agents not yet implemented:
-- Ingest (ffprobe metadata)
-- Scene detection
-- Candidate sampling
-- Metrics engine
-- Selection and dedupe
-- Export
+All weights are configurable in `config.yaml`.
 
 ---
 
-## Features
+## What gets exported
 
-**Implemented**
-- Web UI with Analysis, Scoring Matrix, Log, and Golden Baseline tabs
-- Job creation and mock analysis flow (end-to-end UI testable)
-- Manifest export to disk
-- `BaselineStore` — versioned golden baseline with staging, augment, and promotion model
-- Config loading from `config/config.yaml`
-- Deterministic mock scoring seeded from config
+After every analysis job, the output folder contains:
 
-**Planned**
-- ffprobe ingest and scene detection
-- Per-scene candidate frame sampling with seeded jitter
-- Full metrics engine (all categories in `AESTHETIC_Metric.md`)
-- CLIP embedding per frame for Creative pillar similarity scoring
-- MiDaS depth estimation
-- YOLO subject and face detection
-- NIMA / LAION aesthetic predictor for Subjective pillar
-- VLM rationale generation per selected shot
-- Shot-level score aggregation (temporal variance aware)
-- Global selection with facility location diversity objective
-- Perceptual hash and cosine deduplication
-- Hero clip export via FFmpeg trim list
-- Contact sheet generation
-- Visual scopes per shot card (histogram, waveform, RGB parade, vectorscope)
-- SSE progress events for pipeline stages
-- Golden Baseline corpus ingestion UI
+- **`frames/`** — hero frames named with score prefix so they sort by quality in Explorer
+- **`clips/`** — trimmed hero scene clips via ffmpeg stream copy with accurate in/out timecodes
+- **`contact_sheet.jpg`** — tiled overview of all selected shots with rank, score, and timecode annotations
+- **`<stem>_<job_id>.edl`** — CMX 3600 EDL using your actual source frame rate with correct drop-frame handling for 29.97/59.94. Importable into Premiere, Resolve, and Avid
+- **`<stem>_selects.csv`** — timecode list with all scores and classifications per shot
+- **`<stem>_<job_id>_manifest.json`** — full run record: every decision explained, baseline version hash, config snapshot, pipeline timing
 
 ---
 
-## Architecture overview
+## Shot classification
 
-Pipeline as local modules:
+Every selected shot is classified for:
+
+- **Shot scale** — extreme close through extreme wide. YOLO person detection size with CLIP zero-shot and rule-based fallbacks
+- **Movement type** — static / pan / tilt / dolly / handheld / drone. From optical flow signals
+- **Scene type** — interior day / interior night / exterior day / exterior night. CLIP zero-shot
+- **Shot intent** — intimate / establishing / action / dialogue / transitional. CLIP zero-shot
+
+Classifications are stamped on every shot in the manifest, EDL comments, and CSV. They also feed the pillar interaction logic and narrative diversity constraints in selection.
+
+---
+
+## Architecture
 
 ```
-Ingest -> Scenes -> Candidates -> Metrics -> Model Inference -> Shot Aggregation -> Selection -> Export -> Manifest
+Video file or URL
+    │
+    ▼
+Ingest → Scene Detection → Candidate Sampling → Metrics Engine
+    │
+    ▼
+AI Inference (CLIP + MiDaS + YOLO) → Shot Classification
+    │
+    ▼
+Shot Aggregation → Baseline Similarity Scoring
+    │
+    ▼
+Selection (rank → dedupe → duration filter → non-cinematic filter → facility location)
+    │
+    ▼
+Export (frames + clips + contact sheet + EDL + CSV + manifest)
 ```
 
-- Every stage reads a validated model and returns a validated model
-- Everything important is JSON-serializable and written to a per-job sidecar
-- Model inference results (CLIP embeddings, depth maps, detection results) are cached — re-scoring never re-runs inference
-- Heavy work runs in a subprocess worker with timeout and graceful fallback
-- Web UI is local only — pywebview window talks directly to `bridge/api.py` via JS bridge
-- No HTTP server, no external services, no network required
+Every stage reads a validated Pydantic model and returns one. Everything important is JSON-serialised to a per-job sidecar. Re-scoring after a baseline update reuses cached sidecars — inference does not re-run.
 
 ---
 
@@ -164,56 +112,42 @@ Ingest -> Scenes -> Candidates -> Metrics -> Model Inference -> Shot Aggregation
 ```
 AestheticApp/
 ├── aesthetic/
-│   ├── agents/                   # one module per pipeline stage
-│   │   ├── __init__.py
-│   │   ├── ingest.py             # ffprobe metadata → VideoMeta
-│   │   ├── scenes.py             # scene detection → scenes.json
-│   │   ├── sampling.py           # candidate frame extraction → candidates.json
-│   │   ├── metrics.py            # per-frame metrics → FrameMetrics sidecars
-│   │   ├── selection.py          # global ranking, diversity, dedupe → shots.json
-│   │   └── export.py             # hero clips, contact sheet, manifest
+│   ├── agents/
+│   │   ├── ingest.py            # ffprobe → VideoMeta
+│   │   ├── scenes.py            # multi-signal scene detection
+│   │   ├── sampling.py          # candidate frame extraction
+│   │   ├── metrics.py           # per-frame metrics engine (7 categories)
+│   │   ├── inference.py         # CLIP + MiDaS + YOLO + VLM
+│   │   ├── classifier.py        # shot scale / movement / scene / intent
+│   │   ├── aggregation.py       # frame → shot score collapse
+│   │   ├── selection.py         # ranking + diversity + dedupe + duration
+│   │   ├── export.py            # frames + clips + EDL + CSV + manifest
+│   │   └── baseline_trainer.py  # corpus ingestion from stills and video
 │   ├── bridge/
-│   │   ├── __init__.py
-│   │   └── api.py                # canonical API surface (pywebview JS bridge)
+│   │   └── api.py               # canonical pywebview JS bridge
 │   ├── config/
-│   │   ├── __init__.py           # path constants and config loader
-│   │   └── config.yaml           # runtime configuration
-│   ├── data/                     # runtime data (gitignored)
-│   │   ├── uploads/              # incoming video and reference stills
-│   │   ├── jobs/                 # per-job artifacts
-│   │   │   └── <job_id>/
-│   │   │       ├── manifest.json
-│   │   │       ├── scenes.json
-│   │   │       ├── candidates.json
-│   │   │       ├── shots.json
-│   │   │       ├── frames/       # extracted candidate frames
-│   │   │       └── metrics/      # per-frame FrameMetrics sidecars
-│   │   └── baseline/             # Golden Baseline store
-│   │       ├── staging.json
-│   │       ├── augment.json
-│   │       └── golden/
-│   │           ├── active.json
-│   │           └── v0001.json
+│   │   └── config.yaml          # all runtime settings
+│   ├── data/                    # runtime data (gitignored)
+│   │   ├── baseline/
+│   │   │   ├── embeddings/      # per-still CLIP embedding files
+│   │   │   └── golden/          # versioned golden snapshots
+│   │   └── jobs/<job_id>/
+│   │       ├── frames/          # candidate frames
+│   │       ├── metrics/         # FrameMetrics JSON sidecars
+│   │       ├── depth/           # MiDaS depth maps
+│   │       ├── scenes.json
+│   │       ├── candidates.json
+│   │       ├── shots.json
+│   │       └── manifest.json
 │   ├── models/
-│   │   ├── __init__.py
-│   │   ├── job.py                # Job, VideoMeta, Shot models
-│   │   └── scores.py             # FrameMetrics, ShotScore, Manifest models
-│   ├── storage/
-│   │   ├── __init__.py
-│   │   └── fs.py                 # path helpers
+│   │   ├── job.py               # VideoMeta, Job, Scene, Shot, CandidateFrame
+│   │   └── scores.py            # FrameMetrics, ShotScore, CategoryScore, Manifest
 │   ├── webui/
-│   │   ├── __init__.py
-│   │   └── index.html            # single-page Web UI
-│   ├── __init__.py
-│   ├── app.py                    # pywebview boot shell (thin wrapper only)
-│   └── baseline.py               # BaselineStore implementation
-├── outputs/                      # exported deliverables (gitignored)
-│   └── <job_id>/
-│       ├── <stem>_<job_id>_manifest.json
-│       ├── frames/               # hero frames with score prefix
-│       ├── clips/                # hero scene clips
-│       └── contact_sheet.jpg
-├── AESTHETIC_Metric.md           # complete metrics specification
+│   │   └── index.html           # single-page UI
+│   ├── app.py                   # pywebview boot shell only
+│   └── baseline.py              # BaselineStore — versioned corpus management
+├── outputs/                     # exported deliverables (gitignored)
+├── AESTHETIC_Metric.md          # complete metrics specification
 ├── README.md
 └── requirements.txt
 ```
@@ -223,26 +157,16 @@ AestheticApp/
 ## Requirements
 
 - Python 3.12
-- FFmpeg on PATH (required for scene detection, sampling, and export)
+- FFmpeg on PATH
+- NVIDIA GPU recommended — CPU-only works but is slower
 
-**Python packages — core**
-- pywebview
-- opencv-python
-- numpy
-- pillow
-- tqdm
-- pyyaml
-- scikit-image
-- scipy
+```bash
+# Install torch with CUDA first (RTX 30xx series / CUDA 12.8):
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128 --no-cache-dir
 
-**Python packages — AI vision (optional, GPU-accelerated where available)**
-- open-clip-torch (CLIP embeddings for Creative pillar)
-- torch (required by CLIP and optional MiDaS)
-- timm (required by MiDaS)
-- ultralytics (YOLO for subject and face detection)
-
-**External API (optional)**
-- Anthropic or OpenAI API key for VLM rationale generation (called per selected shot only, not per frame)
+# Then everything else:
+pip install -r requirements.txt --no-cache-dir
+```
 
 ---
 
@@ -252,9 +176,9 @@ AestheticApp/
 git clone https://github.com/electrichobo/AestheticApp.git
 cd AestheticApp
 python -m venv .venv
-.venv\Scripts\activate        # Windows
-source .venv/bin/activate     # macOS / Linux
-pip install -r requirements.txt
+.venv\Scripts\Activate.ps1        # Windows PowerShell
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128 --no-cache-dir
+pip install -r requirements.txt --no-cache-dir
 python -m aesthetic.app
 ```
 
@@ -262,198 +186,82 @@ python -m aesthetic.app
 
 ## Configuration
 
-`aesthetic/config/config.yaml` controls all runtime behaviour:
+Key settings in `aesthetic/config/config.yaml`:
 
 ```yaml
-io:
-  outputs_dir: "data/outputs"
-  baseline_path: "data/baseline.json"
-
-runtime:
-  seed: 42
-  cpu_guard_pct: 85
-  gpu_guard_pct: 90
+scenes:
+  threshold: 22.0              # MAD threshold — lower = more cuts detected
+  min_scene_len_frames: 12
 
 extract:
   per_scene_candidates: 9
-  per_scene_keep_pct: 0.4
-  min_scene_len_frames: 12
+
+selection:
+  top_k: 10
+  min_shot_duration_sec: 2.0   # score penalty below this
+  soft_min_duration_sec: 1.0   # hard exclude below this
 
 weights:
-  technical: 0.50
-  creative:  0.30
+  technical:  0.50
+  creative:   0.30
   subjective: 0.20
 
 features:
-  qc_pack_enabled: false      # enables VMAF/PSNR/SSIM when reference exists
-  clip_enabled: true          # CLIP embedding for Creative pillar
-  vlm_rationale_enabled: false # VLM API call for shot rationale text
-  gpu_enabled: false          # GPU acceleration for model inference
+  clip_enabled: true
+  midas_enabled: true
+  yolo_enabled: true
+  vlm_rationale_enabled: false
+  gpu_enabled: true
 ```
 
 ---
 
-## Scoring pillars
+## What is still coming
 
-Every shot is scored across three pillars. The pillars are combined using the weights in `config.yaml`.
+**Scoring intelligence (in progress)**
+- Pillar interaction logic — a creatively excellent but technically imperfect shot should outrank a technically average shot that is also creatively average
+- Baseline stratification — cluster the corpus by visual style so Creative scores compare like-for-like
+- Narrative diversity constraints — ensure final picks span shot scales and intent types
 
-**Technical**
-Objective, math-based metrics. Reproducible and verifiable. Measures whether the shot is executed correctly — exposure, focus, stability, color accuracy, image quality.
+**Editor feedback (planned)**
+- Thumbs up/down on shot cards, persisted across sessions, resettable
 
-**Creative**
-Similarity to the Golden Baseline corpus in CLIP embedding space. Measures how closely the shot resembles award-winning cinematography. Intentional stylistic deviation is handled through tunable delta curves — a controlled underexposure scores differently from an accidental one.
-
-**Subjective**
-Industry taste proxy. Combines the implicit subjective judgments encoded in the Golden Baseline corpus (what Academy and ASC voters responded to emotionally and artistically) with signals from aesthetic predictor models (NIMA, LAION). Weighted to allow variance in creative preference without abandoning the objective standard. Cinematography is an art, not a mathematical proof.
-
----
-
-## Scoring categories
-
-Each pillar score is broken down by category. Full metric specifications are in `AESTHETIC_Metric.md`.
-
-| Category | Key metrics |
-|---|---|
-| Exposure | Histogram distribution, clipping, SNR, PSNR, SSIM, temporal consistency |
-| Lighting | Dynamic range, key-fill ratio, color temperature, shadow detail/noise, hard vs soft transition |
-| Composition | Rule of thirds, face placement, center of mass, negative space, depth separation, occupancy maps, shot scale |
-| Camera Movement | Optical flow, smoothness, stabilization, motion blur, movement type, trajectory |
-| Color | WB deviation, saturation, palette entropy, skin tone ΔE, chroma noise, grading uniformity |
-| Image Quality | Sharpness (MTF proxy), lens distortion, vignetting, chromatic aberration, compression artifacts |
-| Narrative & Aesthetic | Saliency consistency, visual storytelling effectiveness, compelling degree MOS |
-
-**Additional metrics under evaluation**
-- Shot rhythm: pacing relative to surrounding shots, cut point quality, temporal arc
-- Focus and depth: focus plane consistency, bokeh quality proxy, depth of field intentionality
-- Subject rendering: skin texture retention, eye catchlight detection, subject separation
-- Noise character: grain character (film vs digital), noise spatial frequency
-- Lens character: flare character (anamorphic vs spherical), format/aspect ratio detection
-- Scene classification: interior/exterior, day/night, scene type — used to improve Creative pillar like-for-like comparison
-
----
-
-## Selection strategy
-
-1. Per-scene ranking by total score — apply `per_scene_keep_pct` to form a shortlist per scene
-2. Global pool formed from all per-scene winners
-3. Deduplication by perceptual hash
-4. Diversity constraint via cosine similarity on metric vectors — prevents clustering around a single setup
-5. Facility location objective (or k-medoids proxy) for final selection — maximises both quality and coverage
-6. `top_k` guaranteed even when degraded
-
-Output: `shots.json` listing selected shots with scores, timecodes, and deduplication evidence.
-
----
-
-## Golden Baseline
-
-The Golden Baseline is an objective cinematic excellence standard, not a personal taste profile.
-
-It is built from reference stills and frames extracted from Oscar-winning films and ASC-awarded cinematography. It is curated once and versioned — not trained per-user at runtime. New award cycles can be added via the augment buffer without rebuilding from scratch.
-
-**How it works**
-1. Reference stills are processed through the same metrics pipeline as candidate frames
-2. CLIP embeddings are generated per still and stored in the `BaselineStore`
-3. At scoring time, each candidate frame is embedded and its cosine similarity against the baseline corpus is computed
-4. The Creative pillar score reflects proximity to the nearest cluster of reference material
-5. The active golden version hash is stamped into every manifest for reproducibility
-
-**Baseline states**
-- `staging.json` — buffer for new reference material before promotion
-- `augment.json` — additive buffer applied on top of an existing golden
-- `golden/v000N.json` — versioned, immutable golden snapshots
-- `golden/active.json` — pointer to the currently active version
-
----
-
-## Roadmap
-
-See the full interactive checklist in `AESTHETIC_roadmap.md`.
-
-**Phase 0** — Foundation cleanup ✅
-**Phase 1** — Data contracts and models
-**Phase 2** — Ingest and scene detection
-**Phase 3** — Candidate frame sampling
-**Phase 4** — Metrics engine
-**Phase 5** — Shot score aggregation
-**Phase 6** — AI vision model integration
-**Phase 7** — Golden Baseline corpus build
-**Phase 8** — Global selection
-**Phase 9** — Export deliverables
-**Phase 10** — UI pipeline integration
-**Phase 11** — Hardening and tests
-**Phase 12** — Packaging and release
-
----
-
-## Milestones
-
-- M0: Repo scaffold, config, UI layout, BaselineStore — ✅ complete
-- M1: Minimal pipeline — short clip produces scenes, candidates, metrics, shots, manifest
-- M2: Scene detection and sampling stable on test set
-- M3: Technical metrics and per-scene selection complete
-- M4: Global selection, diversity, and dedupe validated
-- M5: Golden Baseline corpus built, Creative and Subjective pillars scoring
-- M6: Hero clip export, contact sheet, full manifest
-- M7: Packaging — self-contained local app for Windows and macOS
-
----
-
-## Quality bar
-
-| Milestone | Acceptance criteria |
-|---|---|
-| M1 | Input video produces scenes.json, candidates.json, metrics sidecars, shots.json, manifest.json |
-| M2 | Deterministic output — same video + seed = identical results every run |
-| M3 | All Technical metrics in AESTHETIC_Metric.md implemented and unit tested |
-| M4 | Selected shots show diversity across scenes with dedupe enforced |
-| M5 | Scoring a reference still against the baseline it came from returns a high Creative score |
-| M6 | Hero clips are playable. Contact sheet matches shots.json. Manifest is human-readable |
-| M7 | One-file install. No Python required. Runs on CPU-only hardware |
-
----
-
-## Known risks
-
-- FFmpeg availability and codec variance across platforms
-- High resolution sources causing memory spikes during frame extraction
-- Scene detection threshold tuning on animation, hard flash cuts, or long static shots
-- GPU driver and CUDA version variance on mixed hardware
-- VLM API latency and cost at scale (mitigated by calling per selected shot only)
-- Golden Baseline corpus licensing — reference stills must be cleared for this use
-
----
-
-## Contributing
-
-Read `AESTHETIC_Metric.md` for the complete metrics specification before contributing to the pipeline.
-
-- Keep stage contracts JSON-serializable and versioned
-- Prefer small modules per stage over monolithic pipeline files
-- Document every artifact emitted by a stage (path, schema, fallback behaviour)
-- Preserve deterministic behaviour — explicit seeds and stable sorting everywhere
-- All baseline operations must route through `BaselineStore` in `baseline.py`
-- All UI API calls must route through `aesthetic/bridge/api.py`
-- Pull requests must include tests for any new metric or pipeline stage
+**UX improvements (planned)**
+- Richer contact sheet annotations — scale icon, movement type, strongest category per tile
+- Baseline corpus browser — see what the Golden Baseline actually looks like visually
+- Run comparison — compare two analysis runs side by side
 
 ---
 
 ## FAQ
 
-**Where is the metrics specification?**
-`AESTHETIC_Metric.md` in the repo root.
+**What is the Golden Baseline?**
+A curated corpus of frames from Oscar and ASC award-winning films. The reference standard everything is scored against. Not personal taste — objective cinematic excellence.
 
 **Does it require a GPU?**
-No. GPU acceleration is optional. CLIP and all model inference can run on CPU, more slowly.
+No. Everything runs on CPU. A GPU makes it significantly faster.
 
-**Does it require an internet connection?**
-No. The VLM rationale feature makes an optional API call, but all other processing is fully local.
+**Does it need internet?**
+Not for analysis. The VLM rationale feature (optional) calls an external API. Web URL ingestion uses yt-dlp which needs internet to download the video.
 
-**What is the Golden Baseline?**
-A curated, versioned corpus of stills from award-winning cinematography. It is the reference standard all submitted shots are scored against. It is not trained per-user.
+**Why shots and not frames?**
+A shot is a duration with an in-point and out-point — what an editor actually needs. Hero frames are thumbnails only.
 
-**Why are shots scored as durations rather than individual frames?**
-Because a shot is a temporal unit. A frame that looks great in isolation but is surrounded by motion blur and instability is not a great shot. The scoring engine aggregates frame-level metrics across the shot duration, with temporal variance as an explicit signal.
+**Can I submit a full feature film?**
+Yes. Processing time on a GPU is significant — plan for 30-60 minutes per feature. For baseline training this is a one-time cost.
+
+**Where are the metrics?**
+`AESTHETIC_Metric.md` in the repo root.
+
+---
+
+## Contributing
+
+- All baseline reads/writes go through `BaselineStore` in `baseline.py`
+- All UI calls go through `aesthetic/bridge/api.py`
+- Every pipeline stage produces a validated Pydantic model
+- Deterministic everywhere — explicit seeds, stable sorting
+- Keep stage contracts JSON-serialisable and versioned
 
 ---
 
