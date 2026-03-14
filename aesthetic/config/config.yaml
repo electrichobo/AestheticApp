@@ -54,6 +54,13 @@ category_weights:
   quality:     0.10
   narrative:   0.08
 
+# Pillar interaction and harmonisation
+scoring:
+  alignment_threshold:  72.0   # Creative+Subjective must both exceed this for bonus
+  alignment_bonus_cap:  12.0   # maximum bonus points from alignment
+  technical_floor:      25.0   # Technical below this = catastrophic failure
+  technical_floor_cap:  72.0   # catastrophically bad shots cannot exceed this total
+
 # Feature flags
 features:
   qc_pack_enabled:        false   # enables VMAF/PSNR/SSIM (requires reference video)

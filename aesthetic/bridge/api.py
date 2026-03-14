@@ -529,18 +529,15 @@ class AestheticAPI:
                             score.creative_total = round(sim, 2)
                             break
 
-                # rebuild total with creative
-                if score.technical_total is not None and score.creative_total is not None:
-                    w = cfg.get("weights", {})
-                    wt = float(w.get("technical",  0.50))
-                    wc = float(w.get("creative",   0.30))
-                    score.total_score = round(
-                        (score.technical_total * wt + score.creative_total * wc) / (wt + wc),
-                        2
-                    )
-
                 # attach classification to shot
-                cls = shot_classifications.get(scene.scene_id, {})
+                cls        = shot_classifications.get(scene.scene_id, {})
+                shot_intent = cls.get("shot_intent", "unknown")
+
+                # harmonised scoring — replaces simple weighted average
+                # applies intent-aware category weights and creative/subjective alignment bonus
+                from ..agents.scoring import compute_harmonised_score
+                score = compute_harmonised_score(score, shot_intent, cfg)
+
                 hero_frame = scene_candidates_list[len(scene_candidates_list)//2].path if scene_candidates_list else None
 
                 try:
