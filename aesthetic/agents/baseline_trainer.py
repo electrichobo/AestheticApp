@@ -134,6 +134,275 @@ def get_baseline_status(data_dir: Path) -> Dict[str, Any]:
     return store.get_summary()
 
 
+def train_baseline_from_video(
+    video_path:           str,
+    data_dir:             Path,
+    config:               Dict[str, Any],
+    note:                 str = "",
+    sensitivity:          int = 50,
+    per_scene_candidates: int = 6,
+    progress_cb:          Optional[Callable[[int, int, str], None]] = None,
+) -> Dict[str, Any]:
+    """
+    Ingest a reference video file into the Golden Baseline corpus.
+
+    Runs the full pipeline on the video — ingest, scene detection, candidate
+    sampling, full metrics engine, CLIP embedding — and pushes results into
+    the augment buffer, then merges with the active golden to produce a new
+    versioned snapshot.
+
+    This is always an AUGMENT operation — it never replaces the existing
+    corpus. The stills already in the baseline are preserved.
+
+    Video frames provide metrics that stills cannot:
+      - Optical flow, smoothness, stabilization, jerkiness
+      - Temporal exposure consistency
+      - Motion blur amount and direction
+      - Movement type classification
+      - Path trajectory
+      - Cross-frame color and lighting consistency
+
+    Args:
+        video_path:           Absolute path to the reference video file.
+        data_dir:             Root data directory.
+        config:               Full config dict.
+        note:                 Description stamped into the golden version.
+                              Defaults to the video filename.
+        sensitivity:          Scene detection sensitivity (1-100).
+        per_scene_candidates: Frames to sample per scene. Lower = faster,
+                              higher = richer baseline. 6 is a good default.
+        progress_cb:          Optional callback(current, total, stage_name).
+
+    Returns:
+        Summary dict with scene count, frame count, and baseline version info.
+    """
+    from ..agents.ingest  import ingest
+    from ..agents.scenes  import detect_scenes, sensitivity_to_threshold
+    from ..agents.sampling import sample_candidates
+    from ..agents.metrics import compute_frame_metrics
+    from ..agents.inference import run_frame_inference
+
+    video_path = str(video_path)
+    video_file = Path(video_path)
+
+    if not video_file.exists():
+        return {"ok": False, "error": f"Video file not found: {video_path}"}
+
+    features = config.get("features", {})
+    gpu      = bool(features.get("gpu_enabled", False))
+    device   = _get_device(gpu)
+    seed     = config.get("runtime", {}).get("seed", 42)
+    store    = BaselineStore(data_dir)
+
+    # working directory for this video's extracted frames
+    work_dir = data_dir / "baseline" / "video_work" / video_file.stem[:32]
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        # --- stage 1: ingest ---
+        if progress_cb:
+            progress_cb(0, 100, f"Ingesting {video_file.name}…")
+        video_meta = ingest(video_path)
+
+        # --- stage 2: scene detection ---
+        if progress_cb:
+            progress_cb(5, 100, f"Detecting scenes…")
+        threshold = sensitivity_to_threshold(sensitivity)
+        scenes    = detect_scenes(
+            video_meta, work_dir,
+            threshold=threshold,
+            config=config,
+            seed=seed,
+        )
+        if progress_cb:
+            progress_cb(15, 100, f"Found {len(scenes)} scenes")
+
+        # --- stage 3: sample candidates ---
+        if progress_cb:
+            progress_cb(20, 100, "Sampling candidate frames…")
+        candidates = sample_candidates(
+            video_meta, scenes, work_dir,
+            per_scene_candidates=per_scene_candidates,
+            seed=seed,
+        )
+        total_frames = len(candidates)
+        if progress_cb:
+            progress_cb(30, 100, f"Extracted {total_frames} candidate frames")
+
+        # --- stage 4: metrics + inference ---
+        from collections import defaultdict
+        by_scene = defaultdict(list)
+        for c in candidates:
+            by_scene[c.scene_id].append(c)
+
+        processed = 0
+        failed    = 0
+
+        for fi, candidate in enumerate(candidates):
+            if progress_cb and fi % 10 == 0:
+                pct = 30 + int((fi / total_frames) * 60)
+                progress_cb(pct, 100, f"Processing frame {fi+1}/{total_frames}…")
+
+            try:
+                # full metrics — includes temporal signals when prev frame available
+                scene_cands = by_scene[candidate.scene_id]
+                idx_in_scene = scene_cands.index(candidate)
+                prev_path = scene_cands[idx_in_scene - 1].path if idx_in_scene > 0 else None
+
+                fm = compute_frame_metrics(
+                    candidate.path,
+                    candidate.scene_id,
+                    candidate.timestamp,
+                    work_dir,
+                    config,
+                    prev_frame_path=prev_path,
+                )
+
+                # CLIP embedding
+                if features.get("clip_enabled", True):
+                    fm = run_frame_inference(fm, candidate.path, work_dir, config)
+
+                # build baseline record from full FrameMetrics
+                record = _frame_metrics_to_baseline_record(fm)
+                if record:
+                    store.update_augment([record])
+                    # store embedding
+                    if fm.inference.clip_embedding:
+                        _store_embedding(
+                            Path(candidate.path),
+                            fm.inference.clip_embedding,
+                            fm.inference.clip_model_version,
+                            data_dir,
+                        )
+                    processed += 1
+                else:
+                    failed += 1
+
+            except Exception as exc:
+                failed += 1
+                print(f"[baseline_trainer] frame {fi} failed: {exc}")
+
+        # --- stage 5: promote augment to new golden ---
+        if progress_cb:
+            progress_cb(92, 100, "Promoting to new golden version…")
+
+        promotion: Dict[str, Any] = {}
+        if processed > 0:
+            film_note = note or f"reference video: {video_file.name} ({processed} frames)"
+            promotion = store.apply_augment_to_new_golden(note=film_note)
+
+        if progress_cb:
+            progress_cb(100, 100, "Done")
+
+        return {
+            "ok":            True,
+            "video":         video_file.name,
+            "scene_count":   len(scenes),
+            "frame_count":   total_frames,
+            "processed":     processed,
+            "failed":        failed,
+            "promotion":     promotion,
+        }
+
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def _frame_metrics_to_baseline_record(fm) -> Optional[Dict[str, float]]:
+    """
+    Convert a full FrameMetrics object into a flat dict for BaselineStore.
+    Covers all 48+ metrics including the temporal/video-only ones that
+    stills cannot provide.
+    """
+    record: Dict[str, float] = {}
+
+    def _add(key: str, val) -> None:
+        if val is not None and isinstance(val, (int, float)):
+            record[key] = round(float(val), 6)
+
+    e = fm.exposure
+    _add("histogram_mean",      e.histogram_mean)
+    _add("histogram_median",    e.histogram_median)
+    _add("histogram_std",       e.histogram_std)
+    _add("histogram_skew",      e.histogram_skew)
+    _add("histogram_kurtosis",  e.histogram_kurtosis)
+    _add("highlight_clip_pct",  e.highlight_clip_pct)
+    _add("shadow_clip_pct",     e.shadow_clip_pct)
+    _add("psnr",                e.psnr)
+    _add("ssim",                e.ssim)
+    _add("third_moment_18gray", e.third_moment_18gray)
+    _add("snr_luma",            e.snr_luma)
+    _add("snr_chroma",          e.snr_chroma)
+    _add("temporal_consistency",e.temporal_consistency)
+    _add("exposure_intent",     e.exposure_intent)
+
+    li = fm.lighting
+    _add("dynamic_range_stops", li.dynamic_range_stops)
+    _add("key_fill_ratio",      li.key_fill_ratio)
+    _add("color_temp_kelvin",   li.color_temp_kelvin)
+    _add("color_temp_deviation",li.color_temp_deviation)
+    _add("shadow_detail",       li.shadow_detail)
+    _add("shadow_noise",        li.shadow_noise)
+    _add("transition_hardness", li.transition_hardness)
+    _add("light_motivation",    li.light_motivation)
+
+    co = fm.composition
+    _add("rule_of_thirds",      co.rule_of_thirds)
+    _add("face_placement",      co.face_placement)
+    _add("center_of_mass_x",    co.center_of_mass_x)
+    _add("center_of_mass_y",    co.center_of_mass_y)
+    _add("negative_space_ratio",co.negative_space_ratio)
+    _add("depth_separation",    co.depth_separation)
+    _add("occupancy_map_score", co.occupancy_map_score)
+    _add("symmetry_score",      co.symmetry_score)
+    _add("headroom",            co.headroom)
+    _add("lead_room",           co.lead_room)
+    _add("frame_balance",       co.frame_balance)
+
+    mv = fm.movement
+    _add("optical_flow_mean",     mv.optical_flow_mean)
+    _add("optical_flow_std",      mv.optical_flow_std)
+    _add("smoothness",            mv.smoothness)
+    _add("jerkiness",             mv.jerkiness)
+    _add("stabilization",         mv.stabilization)
+    _add("motion_blur_amount",    mv.motion_blur_amount)
+    _add("motion_blur_direction", mv.motion_blur_direction)
+    _add("focus_during_movement", mv.focus_during_movement)
+    _add("trajectory_smoothness", mv.trajectory_smoothness)
+
+    cl = fm.color
+    _add("wb_deviation",          cl.wb_deviation)
+    _add("saturation_mean",       cl.saturation_mean)
+    _add("saturation_uniformity", cl.saturation_uniformity)
+    _add("palette_entropy",       cl.palette_entropy)
+    _add("chroma_noise",          cl.chroma_noise)
+    _add("banding_score",         cl.banding_score)
+    if cl.palette_family is not None:
+        fam_map = {"desaturated":0,"dark":1,"bright":2,"warm":3,"cool":4,"neutral":5}
+        record["palette_family_id"] = float(fam_map.get(cl.palette_family, 5))
+
+    qu = fm.quality
+    _add("sharpness_laplacian",    qu.sharpness_laplacian)
+    _add("sharpness_edge_density", qu.sharpness_edge_density)
+    _add("mtf_proxy",              qu.mtf_proxy)
+    _add("vignetting_stops",       qu.vignetting_stops)
+    _add("ca_width_px",            qu.ca_width_px)
+    _add("flare_contrast_loss",    qu.flare_contrast_loss)
+    _add("compression_blocking",   qu.compression_blocking)
+    _add("compression_banding",    qu.compression_banding)
+    _add("compression_mosquito",   qu.compression_mosquito)
+    _add("compression_ringing",    qu.compression_ringing)
+    _add("texture_retention",      qu.texture_retention)
+
+    na = fm.narrative
+    _add("saliency_consistency", na.saliency_consistency)
+    _add("compelling_mos",       na.compelling_mos)
+
+    _add("clip_embedding_dim", float(len(fm.inference.clip_embedding)) if fm.inference.clip_embedding else None)
+
+    return record if record else None
+
+
 # ---------------------------------------------------------------------------
 # Per-image processing
 # ---------------------------------------------------------------------------

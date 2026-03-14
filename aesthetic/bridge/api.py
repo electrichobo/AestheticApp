@@ -104,7 +104,8 @@ class AestheticAPI:
             from ..agents.baseline_trainer import train_baseline_from_folder
 
             def progress_cb(current: int, total: int, filename: str) -> None:
-                self._push_progress("baseline_training", f"[{current}/{total}] {filename}", int(current / total * 100))
+                pct = int(current / total * 100) if total > 0 else 0
+                self._push_progress("baseline_training", f"[{current}/{total}] {filename}", pct)
 
             result = train_baseline_from_folder(
                 source_dir=source_dir,
@@ -114,7 +115,32 @@ class AestheticAPI:
                 mode=mode,
                 progress_cb=progress_cb,
             )
-            self._baseline = BaselineStore(DATA_DIR)   # reload after training
+            self._baseline = BaselineStore(DATA_DIR)
+            return {"ok": True, "result": result}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def train_baseline_from_video(self, video_path: str, note: str = "", sensitivity: int = 50) -> Dict[str, Any]:
+        """
+        Ingest a reference video file into the Golden Baseline corpus.
+        Always augments — never replaces existing stills or previous versions.
+        """
+        try:
+            from ..agents.baseline_trainer import train_baseline_from_video
+
+            def progress_cb(current: int, total: int, stage: str) -> None:
+                self._push_progress("baseline_video", stage, current)
+
+            result = train_baseline_from_video(
+                video_path=video_path,
+                data_dir=DATA_DIR,
+                config=self._cfg,
+                note=note,
+                sensitivity=sensitivity,
+                per_scene_candidates=self._cfg.get("extract", {}).get("per_scene_candidates", 6),
+                progress_cb=progress_cb,
+            )
+            self._baseline = BaselineStore(DATA_DIR)
             return {"ok": True, "result": result}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}

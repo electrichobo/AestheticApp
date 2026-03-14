@@ -138,9 +138,9 @@
             <p class="text-xs text-gray-600">The trained Golden Baseline is always used unless you specify a different stills folder here.</p>
           </div>
 
-          <!-- Baseline actions -->
+          <!-- Baseline actions — stills -->
           <div class="space-y-1.5">
-            <label class="block text-xs text-gray-400">Train / augment baseline</label>
+            <label class="block text-xs text-gray-400">Add reference stills</label>
             <div class="flex gap-2">
               <button id="trainBaselineBtn"
                 class="flex-1 py-1.5 px-2 rounded text-xs font-medium text-white bg-amber-700 hover:bg-amber-600">
@@ -151,6 +151,16 @@
                 Augment
               </button>
             </div>
+          </div>
+
+          <!-- Baseline actions — reference video -->
+          <div class="space-y-1.5">
+            <label class="block text-xs text-gray-400">Add reference video</label>
+            <button id="addVideoBaselineBtn"
+              class="w-full py-1.5 px-2 rounded text-xs font-medium text-white bg-indigo-800 hover:bg-indigo-700">
+              Browse Reference Video…
+            </button>
+            <p class="text-xs text-gray-600">Ingests full metrics including motion data. Always augments — never replaces existing corpus.</p>
             <p id="baselineStatus" class="text-xs text-gray-500">—</p>
           </div>
 
@@ -600,6 +610,37 @@ document.getElementById('trainBaselineBtn').addEventListener('click', async () =
   } else {
     document.getElementById('baselineStatus').textContent = `error: ${r.error}`;
     log(`baseline error: ${r.error}`);
+  }
+});
+
+document.getElementById('addVideoBaselineBtn').addEventListener('click', async () => {
+  hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview.api;
+  if(!hasBridge) return;
+  // open native file dialog for video
+  const r = await window.pywebview.api.open_file_dialog();
+  if(!r.ok){ log(r.error || 'no file selected'); return; }
+
+  const path = r.path;
+  const name = path.replace(/\\/g, '/').split('/').pop();
+  document.getElementById('baselineStatus').textContent = `ingesting ${name}…`;
+  log(`adding reference video to baseline: ${path}`);
+
+  const sens = parseInt(document.getElementById('sensitivitySlider').value, 10);
+  const res  = await window.pywebview.api.train_baseline_from_video(
+    path,
+    `reference video: ${name}`,
+    sens
+  );
+
+  if(res.ok){
+    const d = res.result;
+    document.getElementById('baselineStatus').textContent =
+      `v${d.promotion?.version} — +${d.processed} frames from ${d.scene_count} scenes`;
+    log(`baseline updated: ${d.processed}/${d.frame_count} frames ingested from ${name} → v${d.promotion?.version}`);
+    loadBaseline();
+  } else {
+    document.getElementById('baselineStatus').textContent = `error: ${res.error}`;
+    log(`video baseline error: ${res.error}`);
   }
 });
 
