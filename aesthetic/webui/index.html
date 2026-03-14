@@ -99,7 +99,7 @@
         </button>
         <button id="exportBtn"
           class="w-full py-2 px-3 rounded text-sm font-medium text-white bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed" disabled>
-          Export
+          Open Output Folder
         </button>
       </div>
 
@@ -427,6 +427,7 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
   document.getElementById('analyzeBtn').disabled = false;
 
   if(r.ok){
+    lastResults = r;
     renderResults(r);
     renderMatrix(r.shots);
     renderDownloads(r);
@@ -444,10 +445,14 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
 // ---------------------------------------------------------------------------
 document.getElementById('exportBtn').addEventListener('click', async () => {
   hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview.api;
-  if(!hasBridge || !currentJobId) return;
-  const r = await window.pywebview.api.export_manifest(currentJobId);
-  if(r.ok) log(`manifest: ${r.path}`);
-  else      log(`export error: ${r.error}`);
+  if(!hasBridge) return;
+  if(lastResults && lastResults.output_dir){
+    await window.pywebview.api.open_output_folder(lastResults.output_dir);
+  } else if(currentJobId){
+    // fallback — open the jobs folder
+    const r = await window.pywebview.api.get_job_status(currentJobId);
+    log('no output folder yet — run analysis first');
+  }
 });
 
 // ---------------------------------------------------------------------------
