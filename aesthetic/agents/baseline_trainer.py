@@ -96,6 +96,8 @@ def train_baseline_from_folder(
             errors.append(str(img_path.name))
             continue
 
+        # result is None for both failures and QC rejections
+
         # add to the appropriate buffer
         if mode == "augment":
             store.update_augment([result])
@@ -116,13 +118,15 @@ def train_baseline_from_folder(
                 note=note or f"initial corpus: {processed} reference stills"
             )
 
+    qc_rejected = failed  # failed includes QC rejections
     return {
-        "ok":        True,
-        "processed": processed,
-        "failed":    failed,
-        "errors":    errors[:20],   # cap error list for display
-        "promotion": promotion,
-        "total":     len(images),
+        "ok":          True,
+        "processed":   processed,
+        "failed":      qc_rejected,
+        "errors":      errors[:20],
+        "promotion":   promotion,
+        "total":       len(images),
+        "qc_pass_rate": round(processed / len(images) * 100, 1) if images else 0,
     }
 
 
@@ -416,35 +420,38 @@ def _process_reference_still(
     """
     Process a single reference still:
     - Validate it can be loaded
+    - Run corpus QC checks — reject unsuitable images
     - Generate CLIP embedding
-    - Compute a lightweight technical metric summary
+    - Compute full technical metric summary
     - Return a flat dict suitable for BaselineStore.update_staging()
 
-    Returns None on failure.
+    Returns None on failure or QC rejection.
     """
     try:
         # validate image loads
         img = cv2.imread(str(img_path))
         if img is None:
             return None
-        if img.shape[0] < 64 or img.shape[1] < 64:
-            return None   # too small to be useful
+
+        # --- Corpus QC pass ---
+        qc_result = _corpus_qc(img, img_path)
+        if not qc_result["pass"]:
+            print(f"[trainer] QC rejected {img_path.name}: {qc_result['reason']}")
+            return None
 
         # CLIP embedding
         embedding, version = _run_clip(str(img_path), device)
         if embedding is None:
             return None
 
-        # lightweight technical metrics (reuse metrics engine)
+        # full technical metrics
         tech = _compute_reference_metrics(img)
 
         # build the record stored in BaselineStore
-        # pass all computed metrics through — each becomes a statistical dimension
-        # clip_embedding_dim is a sentinel so BaselineStore always has at least one entry
         record: Dict[str, Any] = {"clip_embedding_dim": float(len(embedding))}
         record.update({k: v for k, v in tech.items() if isinstance(v, (int, float))})
 
-        # store embedding separately in a companion file
+        # store embedding separately
         _store_embedding(img_path, embedding, version, data_dir)
 
         return record
@@ -452,6 +459,91 @@ def _process_reference_still(
     except Exception as exc:
         print(f"[trainer] Failed to process {img_path.name}: {exc}")
         return None
+
+
+def _corpus_qc(img: np.ndarray, img_path: Path) -> Dict[str, Any]:
+    """
+    Run quality control checks on a reference still before ingesting it.
+    Returns {"pass": True} or {"pass": False, "reason": "..."}.
+
+    Checks:
+    1. Minimum resolution — too small to contain meaningful cinematic information
+    2. Cinema aspect ratio — reject portrait, square, or non-widescreen images
+    3. Non-cinematic content — title cards, graphics, logos
+    4. Subtitle/watermark detection — text in the lower third
+    5. Suspect sharpness profile — upscaled or artificially processed images
+    """
+    h, w = img.shape[:2]
+
+    # 1. minimum resolution
+    if w < 480 or h < 270:
+        return {"pass": False, "reason": f"resolution too low ({w}x{h})"}
+
+    # 2. aspect ratio — must be roughly widescreen (wider than 1.2:1)
+    ar = w / h
+    if ar < 1.2:
+        return {"pass": False, "reason": f"non-widescreen aspect ratio ({ar:.2f})"}
+
+    # 3. non-cinematic content — reuse our title card signals
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    flat = gray.flatten()
+    lab  = cv2.cvtColor(img, cv2.COLOR_BGR2Lab).astype(np.float32)
+    hsv  = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+    nc_flags = 0
+
+    # low color entropy
+    hue_flat  = hsv[:, :, 0].flatten().astype(np.float32)
+    hist_h, _ = np.histogram(hue_flat, bins=36, range=(0, 180))
+    hist_h    = hist_h.astype(np.float32) + 1e-6
+    hist_h   /= hist_h.sum()
+    entropy   = float(-np.sum(hist_h * np.log2(hist_h)))
+    if entropy < 2.5:
+        nc_flags += 1
+
+    # low saturation
+    a_ch = lab[:, :, 1]
+    b_ch = lab[:, :, 2]
+    chroma = np.sqrt(a_ch**2 + b_ch**2)
+    if float(np.mean(chroma)) < 8.0:
+        nc_flags += 1
+
+    # near-uniform tone
+    if float(np.std(flat)) < 15.0:
+        nc_flags += 1
+
+    # very sparse content
+    bg_thresh = float(np.percentile(gray, 20))
+    occ = float(np.mean(gray > bg_thresh * 1.5))
+    if occ < 0.10:
+        nc_flags += 1
+
+    if nc_flags >= 3:
+        return {"pass": False, "reason": "non-cinematic content (title card / logo / graphic)"}
+
+    # 4. subtitle / watermark detection — look for horizontal text bands
+    #    in the lower 20% of the frame (subtitle zone)
+    lower_band = gray[int(h * 0.80):, :]
+    edges      = cv2.Canny(lower_band.astype(np.uint8), 50, 150)
+    # high horizontal edge density in the lower band = likely subtitles
+    h_grad  = cv2.Sobel(lower_band.astype(np.uint8), cv2.CV_32F, 1, 0, ksize=3)
+    h_density = float(np.mean(np.abs(h_grad)))
+    if h_density > 25.0 and float(np.mean(edges > 0)) > 0.08:
+        return {"pass": False, "reason": "possible subtitles or watermark in lower third"}
+
+    # 5. suspect sharpness profile — very high Laplacian variance
+    #    combined with very low texture retention = artificial sharpening
+    lap     = cv2.Laplacian(gray.astype(np.uint8), cv2.CV_32F)
+    lap_var = float(lap.var())
+    blur    = cv2.GaussianBlur(gray.astype(np.uint8), (5, 5), 0)
+    diff    = cv2.absdiff(gray.astype(np.uint8), blur)
+    mask    = diff > 10
+    texture = float(np.var(lap[mask])) if mask.any() else 0.0
+
+    if lap_var > 5000.0 and texture < 100.0:
+        return {"pass": False, "reason": "suspect sharpness profile (possible upscale or artificial sharpening)"}
+
+    return {"pass": True, "reason": "ok"}
 
 
 def _compute_reference_metrics(img: np.ndarray) -> Dict[str, float]:

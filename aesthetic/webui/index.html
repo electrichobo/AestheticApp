@@ -604,8 +604,10 @@ document.getElementById('trainBaselineBtn').addEventListener('click', async () =
   log(`training baseline: ${dir}`);
   const r = await window.pywebview.api.train_baseline(dir, 'trained via UI', 'staging');
   if(r.ok){
-    document.getElementById('baselineStatus').textContent = `v${r.result?.promotion?.version} — ${r.result?.processed} stills`;
-    log(`baseline v${r.result?.promotion?.version} trained: ${r.result?.processed}/${r.result?.total}`);
+    const d   = r.result;
+    const qc  = d?.qc_pass_rate !== undefined ? ` (${d.qc_pass_rate}% QC pass)` : '';
+    document.getElementById('baselineStatus').textContent = `v${d?.promotion?.version} — ${d?.processed} stills${qc}`;
+    log(`baseline v${d?.promotion?.version}: ${d?.processed}/${d?.total} accepted, ${d?.failed} QC rejected`);
     loadBaseline();
   } else {
     document.getElementById('baselineStatus').textContent = `error: ${r.error}`;
