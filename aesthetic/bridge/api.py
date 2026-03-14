@@ -547,6 +547,7 @@ class AestheticAPI:
                 config=cfg,
                 scenes=scenes,
                 shots=shots,
+                video_meta=video_meta,
                 baseline_version=self._baseline.get_summary().get("active", {}).get("version", 0),
                 seed=seed,
             )

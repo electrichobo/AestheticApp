@@ -85,8 +85,9 @@ def export_job(
     # --- EDL and CSV timecode list ---
     t0 = time.time()
     stem = Path(job.source_file).stem
-    edl_path = _export_edl(selected_shots, output_dir, stem, job.job_id)
-    csv_path = _export_csv(selected_shots, output_dir, stem)
+    fps  = job.video_meta.fps if job.video_meta else 24.0
+    edl_path = _export_edl(selected_shots, output_dir, stem, job.job_id, fps)
+    csv_path = _export_csv(selected_shots, output_dir, stem, fps)
     timing["edl_csv"] = round(time.time() - t0, 2)
 
     # --- contact sheet ---
@@ -393,25 +394,25 @@ def _export_edl(
     output_dir: Path,
     stem:       str,
     job_id:     str,
+    fps:        float = 24.0,
 ) -> Optional[Path]:
     """
-    Export a CMX 3600 EDL — the industry standard edit decision list.
+    Export a CMX 3600 EDL using the actual source frame rate.
+    Handles drop-frame timecode for 29.97 and 59.94 fps.
     Importable directly into Premiere Pro, DaVinci Resolve, and Avid.
-
-    Each selected shot becomes one edit event with accurate in/out timecodes.
-    Source timecodes reference the original source file.
-    Record timecodes start from 01:00:00:00 and are sequential.
     """
     if not shots:
         return None
 
     try:
+        drop_frame = _is_drop_frame(fps)
+        fc         = _fcm_string(fps)
+
         lines = []
         lines.append(f"TITLE: AESTHETIC — {stem}")
-        lines.append("FCM: NON-DROP FRAME")
+        lines.append(f"FCM: {fc}")
         lines.append("")
 
-        # record timeline starts at 01:00:00:00
         record_start_sec = 3600.0
 
         for shot in shots:
@@ -422,15 +423,14 @@ def _export_edl(
             score      = shot.get("total_score") or 0.0
             shot_id    = shot.get("shot_id", f"shot_{event_num:04d}")
 
-            src_in  = _seconds_to_tc(start_time)
-            src_out = _seconds_to_tc(end_time)
-            rec_in  = _seconds_to_tc(record_start_sec)
-            rec_out = _seconds_to_tc(record_start_sec + duration)
+            src_in  = _seconds_to_tc(start_time,              fps, drop_frame)
+            src_out = _seconds_to_tc(end_time,                fps, drop_frame)
+            rec_in  = _seconds_to_tc(record_start_sec,        fps, drop_frame)
+            rec_out = _seconds_to_tc(record_start_sec + duration, fps, drop_frame)
 
-            # CMX 3600 event line: EVENT  REEL  TRACK  TRANS  SRC_IN  SRC_OUT  REC_IN  REC_OUT
             lines.append(f"{event_num:03d}  AX  V  C  {src_in} {src_out} {rec_in} {rec_out}")
             lines.append(f"* FROM CLIP NAME: {stem}")
-            lines.append(f"* AESTHETIC: {shot_id} | Score: {score:.1f}")
+            lines.append(f"* AESTHETIC: {shot_id} | Score: {score:.1f} | FPS: {fps:.3f}")
             lines.append("")
 
             record_start_sec += duration
@@ -444,17 +444,77 @@ def _export_edl(
         return None
 
 
-def _seconds_to_tc(seconds: float, fps: float = 24.0) -> str:
+def _is_drop_frame(fps: float) -> bool:
+    """Return True if this frame rate uses drop-frame timecode."""
+    return abs(fps - 29.97) < 0.01 or abs(fps - 59.94) < 0.01
+
+
+def _fcm_string(fps: float) -> str:
+    """Return the FCM header string for a given frame rate."""
+    if _is_drop_frame(fps):
+        return "DROP FRAME"
+    return "NON-DROP FRAME"
+
+
+def _seconds_to_tc(seconds: float, fps: float = 24.0, drop_frame: bool = False) -> str:
     """
-    Convert seconds to SMPTE timecode string HH:MM:SS:FF.
-    Defaults to 24fps — will be made configurable via VideoMeta in Phase 10.
+    Convert seconds to SMPTE timecode string HH:MM:SS:FF (or HH:MM:SS;FF for drop-frame).
+
+    Drop-frame timecode (used for 29.97 and 59.94 fps) skips frame numbers 00 and 01
+    at the start of each minute, except every 10th minute, to compensate for the
+    fractional frame rate. This keeps wall-clock time accurate over long durations.
+
+    Non-drop frame timecode is used for all other rates (24, 25, 30, 48, 50, 60).
     """
+    if drop_frame:
+        return _seconds_to_df_tc(seconds, fps)
+
+    nominal_fps = round(fps)
     total_frames = int(round(seconds * fps))
-    ff = total_frames % int(fps)
-    ss = (total_frames // int(fps)) % 60
-    mm = (total_frames // int(fps) // 60) % 60
-    hh = total_frames // int(fps) // 3600
+    ff = total_frames % nominal_fps
+    ss = (total_frames // nominal_fps) % 60
+    mm = (total_frames // nominal_fps // 60) % 60
+    hh = total_frames // nominal_fps // 3600
     return f"{hh:02d}:{mm:02d}:{ss:02d}:{ff:02d}"
+
+
+def _seconds_to_df_tc(seconds: float, fps: float = 29.97) -> str:
+    """
+    Convert seconds to drop-frame SMPTE timecode (HH:MM:SS;FF).
+    Uses the standard SMPTE drop-frame calculation.
+    """
+    # nominal fps for drop-frame is always the rounded value
+    nominal = round(fps)
+    drop_frames = 2 if nominal == 30 else 4   # 2 for 29.97, 4 for 59.94
+
+    total_frames  = int(round(seconds * fps))
+    frames_per_10 = nominal * 60 * 10 - drop_frames * 9
+    frames_per_1  = nominal * 60 - drop_frames
+
+    d, m = divmod(total_frames, frames_per_10)
+    hh   = d // 6
+    mm10 = d % 6
+
+    if m < nominal * 60:
+        mm1 = 0
+        ff  = m
+    else:
+        m  -= nominal * 60
+        mm1, ff = divmod(m, frames_per_1)
+        mm1 += 1
+
+    mm = mm10 * 10 + mm1
+    ss, ff = divmod(ff, nominal)
+
+    # handle overflow
+    if ss >= 60:
+        ss -= 60
+        mm += 1
+    if mm >= 60:
+        mm -= 60
+        hh += 1
+
+    return f"{hh:02d}:{mm:02d}:{ss:02d};{ff:02d}"
 
 
 # ---------------------------------------------------------------------------
@@ -465,13 +525,10 @@ def _export_csv(
     shots:      List[Dict[str, Any]],
     output_dir: Path,
     stem:       str,
+    fps:        float = 24.0,
 ) -> Optional[Path]:
     """
-    Export a simple CSV timecode list.
-    Columns: rank, shot_id, scene_id, start_tc, end_tc, start_sec, end_sec,
-             duration_sec, total_score, technical, creative, subjective,
-             exposure, lighting, composition, movement, color, quality, narrative,
-             baseline_similarity, temporal_variance, movement_type, shot_scale
+    Export a simple CSV timecode list using the actual source frame rate.
     """
     if not shots:
         return None
@@ -480,10 +537,13 @@ def _export_csv(
         import csv
         import io
 
+        drop_frame = _is_drop_frame(fps)
+
         fieldnames = [
             "rank", "shot_id", "scene_id",
             "start_tc", "end_tc",
             "start_sec", "end_sec", "duration_sec",
+            "fps",
             "total_score", "technical", "creative", "subjective",
             "exposure", "lighting", "composition",
             "movement", "color", "quality", "narrative",
@@ -503,11 +563,12 @@ def _export_csv(
                 "rank":               shot.get("rank"),
                 "shot_id":            shot.get("shot_id"),
                 "scene_id":           shot.get("scene_id"),
-                "start_tc":           _seconds_to_tc(start),
-                "end_tc":             _seconds_to_tc(end),
+                "start_tc":           _seconds_to_tc(start, fps, drop_frame),
+                "end_tc":             _seconds_to_tc(end,   fps, drop_frame),
                 "start_sec":          round(start, 3),
                 "end_sec":            round(end, 3),
                 "duration_sec":       round(end - start, 3),
+                "fps":                round(fps, 3),
                 "total_score":        shot.get("total_score"),
                 "technical":          shot.get("technical_total"),
                 "creative":           shot.get("creative_total"),
