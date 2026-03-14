@@ -137,26 +137,23 @@ def run_shot_rationale(
 
 
 def compute_baseline_similarity(
-    embedding:        List[float],
-    baseline_store,
+    embedding: List[float],
+    data_dir:  Path,
 ) -> Optional[float]:
     """
-    Compute cosine similarity between a frame's CLIP embedding and the
-    Golden Baseline corpus embeddings.
+    Compute cosine similarity between a frame CLIP embedding and the
+    Golden Baseline corpus embeddings stored by the baseline trainer.
 
     Args:
-        embedding:      CLIP embedding vector for the candidate frame.
-        baseline_store: BaselineStore instance with loaded golden baseline.
+        embedding: CLIP embedding vector for the candidate frame.
+        data_dir:  Root data directory (embeddings live under data_dir/baseline/embeddings/).
 
     Returns:
-        Similarity score 0.0 - 100.0, or None if baseline has no embeddings.
+        Similarity score 0.0-100.0, or None if no baseline embeddings exist.
     """
     try:
-        active = baseline_store.load_active_golden()
-        if not active:
-            return None
-
-        corpus_embeddings = active.get("clip_embeddings", [])
+        from .baseline_trainer import _build_embeddings_index
+        corpus_embeddings = _build_embeddings_index(data_dir)
         if not corpus_embeddings:
             return None
 
@@ -173,11 +170,11 @@ def compute_baseline_similarity(
         if not similarities:
             return None
 
-        # use the mean of the top-5 most similar baseline frames
+        # mean of top-5 most similar baseline frames
         top_k = sorted(similarities, reverse=True)[:5]
         score = float(np.mean(top_k))
 
-        # convert cosine similarity (-1 to 1) to 0-100 score
+        # cosine similarity (-1 to 1) -> 0-100
         return round((score + 1.0) / 2.0 * 100.0, 2)
 
     except Exception:

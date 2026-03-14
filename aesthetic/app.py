@@ -1,10 +1,7 @@
 # aesthetic/app.py
 #
-# Boot shell only. This file does ONE thing: open the pywebview desktop window
-# and hand it the canonical API from bridge/api.py.
-#
-# Do not add config logic, baseline logic, job handling, or any other
-# business logic here. All of that lives in aesthetic/bridge/api.py.
+# Boot shell only. Opens the pywebview window and hands it AestheticAPI.
+# All business logic lives in aesthetic/bridge/api.py.
 
 import webview
 
@@ -15,15 +12,17 @@ APP_NAME = "AESTHETIC"
 
 
 def main() -> None:
-    api = AestheticAPI()
-    webview.create_window(
+    api    = AestheticAPI()
+    window = webview.create_window(
         APP_NAME,
         (WEB_DIR / "index.html").as_uri(),
         width=1280,
-        height=820,
+        height=860,
         resizable=True,
         js_api=api,
     )
+    # store window reference so open_file_dialog can access it
+    api._window = window
     webview.start(http_server=False)
 
 

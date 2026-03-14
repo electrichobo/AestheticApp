@@ -30,6 +30,7 @@ scipy
 pydantic
 imageio
 imageio-ffmpeg
+yt-dlp
 
 # -----------------------------------------------------------------------
 # Phase 6 - AI vision models

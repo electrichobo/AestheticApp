@@ -62,3 +62,15 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+
+#Test scripts
+test_*.py
+
+# Model weights (large binaries — download at runtime)
+*.pt
+*.pth
+*.onnx
+
+# Logo/asset test files
+*.tif
+*.tiff

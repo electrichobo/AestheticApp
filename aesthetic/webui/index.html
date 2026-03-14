@@ -12,269 +12,610 @@
     ::-webkit-scrollbar-thumb:hover{ background:#6366f1 }
     .tab-link{ transition:all .2s }
     .tab-panel{ animation:fadeIn .25s ease }
-    @keyframes fadeIn{ from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:translateY(0)} }
-    .metric-list{ list-style:none; margin:0; padding:0; font-size:.8rem }
-    .metric-list li{ display:flex; justify-content:space-between; border-bottom:1px solid #1f2937; padding:4px 0 }
-    .metric-list li:last-child{ border-bottom:none }
-    .metric-name{ color:#9ca3af; margin-right:8px }
-    .metric-value{ color:#e5e7eb; font-weight:500 }
+    @keyframes fadeIn{ from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+    .progress-bar-inner{ transition:width .4s ease }
+    .shot-card{ transition:box-shadow .15s }
+    .shot-card:hover{ box-shadow:0 0 0 1px #4f46e5 }
+    .score-bar{ height:4px; border-radius:2px; background:#374151 }
+    .score-bar-fill{ height:4px; border-radius:2px; transition:width .6s ease }
+    .toggle-section{ overflow:hidden; transition:max-height .3s ease }
+    .toggle-section.collapsed{ max-height:0 }
+    .toggle-section.expanded{ max-height:600px }
   </style>
 </head>
 <body class="h-full flex flex-col text-gray-200">
+
   <!-- Header -->
-  <header class="bg-gray-800 border-b border-gray-700/50 shadow">
-    <div class="mx-auto max-w-7xl px-4 py-3 sm:px-6 lg:px-8 flex items-center justify-between">
-      <h1 class="text-xl sm:text-2xl font-bold tracking-tight text-white">AESTHETIC</h1>
+  <header class="bg-gray-800 border-b border-gray-700/50 shadow flex-shrink-0">
+    <div class="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
+      <h1 class="text-xl font-bold tracking-tight text-white">AESTHETIC</h1>
       <span id="bridgeStatus" class="text-xs text-indigo-300">checking bridge…</span>
     </div>
   </header>
 
-  <!-- Main -->
-  <div class="flex-1 flex flex-col md:flex-row min-h-0">
-    <!-- Left column -->
-    <aside class="w-full md:w-96 bg-gray-900 border-r border-gray-700/50 p-4 overflow-y-auto space-y-4">
-      <div class="space-y-3">
-        <!-- URL loader -->
-        <div class="space-y-2">
-          <label for="urlInput" class="block text-sm font-medium text-gray-300">Load from URL</label>
-          <div class="flex gap-2">
-            <input id="urlInput" type="url" placeholder="https://example.com/video.mp4"
-                   class="flex-1 rounded bg-gray-800 border border-gray-700 px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-600">
-            <button id="loadUrlBtn" class="px-3 py-2 rounded text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700">Load</button>
-          </div>
-          <p class="text-xs text-gray-400">Tips: Some hosts may block cross‑origin playback. This only sets the source string; analysis uses the path/URL you create the job with.</p>
+  <div class="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden">
+
+    <!-- Left sidebar -->
+    <aside class="w-full md:w-80 bg-gray-900 border-r border-gray-700/50 p-4 overflow-y-auto space-y-4 flex-shrink-0">
+
+      <!-- Source — tabs for local vs URL -->
+      <div class="space-y-2">
+        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider">Video Source</label>
+
+        <!-- Source type toggle -->
+        <div class="flex rounded overflow-hidden border border-gray-700 text-xs">
+          <button id="srcLocalBtn" onclick="setSrcMode('local')"
+            class="flex-1 py-1.5 bg-indigo-600 text-white font-medium">Local File</button>
+          <button id="srcUrlBtn" onclick="setSrcMode('url')"
+            class="flex-1 py-1.5 bg-gray-800 text-gray-400 hover:bg-gray-700 font-medium">Web URL</button>
         </div>
 
-        <!-- File loader -->
-        <video id="videoPlayer" class="w-full bg-black rounded" controls></video>
-        <input type="file" id="fileInput" accept="video/*"
-          class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 cursor-pointer">
-        <p id="fileName" class="text-sm text-gray-400 truncate">No source selected.</p>
-
-        <!-- Sensitivity (kept, per request) -->
-        <div class="space-y-2 pt-2">
-          <div class="flex justify-between items-center">
-            <label for="sensitivitySlider" class="block text-sm font-medium text-gray-300">Shot Detection Sensitivity</label>
-            <span id="sensitivityValue" class="text-sm font-medium text-indigo-300">50</span>
-          </div>
-          <input id="sensitivitySlider" type="range" min="1" max="100" value="50"
-            class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-            oninput="document.getElementById('sensitivityValue').textContent = this.value">
-          <div class="flex justify-between text-xs text-gray-400">
-            <span>Fewer Shots</span><span>More Shots</span>
-          </div>
+        <!-- Local file input -->
+        <div id="localInputSection" class="space-y-1.5">
+          <button id="browseBtn" disabled
+            class="w-full py-1.5 px-3 rounded text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed">
+            Browse for Video File…
+          </button>
+          <p id="fileName" class="text-xs text-gray-500 truncate">No file selected</p>
         </div>
 
-        <div class="grid grid-cols-2 gap-2 mt-3">
-          <button id="createJobBtn" class="py-2 px-3 rounded text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-600" disabled>Create Job</button>
-          <button id="analyzeBtn" class="py-2 px-3 rounded text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:bg-gray-600" disabled>Analyze</button>
-          <button id="exportBtn" class="col-span-2 py-2 px-3 rounded text-sm font-medium text-white bg-gray-700 hover:bg-gray-600 disabled:bg-gray-600" disabled>Export Manifest</button>
+        <!-- URL input -->
+        <div id="urlInputSection" class="hidden space-y-1.5">
+          <input id="urlInput" type="url" placeholder="https://youtube.com/watch?v=… or direct .mp4 URL"
+            class="w-full rounded bg-gray-800 border border-gray-700 px-3 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-600">
+          <button id="loadUrlBtn"
+            class="w-full py-1.5 px-3 rounded text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700">
+            Set URL Source
+          </button>
+          <p class="text-xs text-gray-600">YouTube, Vimeo, and direct video URLs supported via yt-dlp.</p>
+        </div>
+
+        <!-- Video preview -->
+        <video id="videoPlayer" class="w-full bg-black rounded hidden mt-1" controls></video>
+        <p id="sourceLabel" class="text-xs text-gray-500 hidden truncate"></p>
+      </div>
+
+      <!-- Sensitivity -->
+      <div class="space-y-2">
+        <div class="flex justify-between">
+          <label class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Scene Sensitivity</label>
+          <span id="sensitivityValue" class="text-xs font-medium text-indigo-300">50</span>
+        </div>
+        <input id="sensitivitySlider" type="range" min="1" max="100" value="50"
+          class="w-full h-1.5 bg-gray-700 rounded appearance-none cursor-pointer"
+          oninput="document.getElementById('sensitivityValue').textContent=this.value">
+        <div class="flex justify-between text-xs text-gray-500"><span>Fewer scenes</span><span>More scenes</span></div>
+      </div>
+
+      <!-- Actions -->
+      <div class="space-y-2">
+        <button id="createJobBtn"
+          class="w-full py-2 px-3 rounded text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed" disabled>
+          Load
+        </button>
+        <button id="analyzeBtn"
+          class="w-full py-2 px-3 rounded text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed" disabled>
+          Find Best Shots
+        </button>
+        <button id="exportBtn"
+          class="w-full py-2 px-3 rounded text-sm font-medium text-white bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed" disabled>
+          Export
+        </button>
+      </div>
+
+      <!-- Progress -->
+      <div id="progressSection" class="hidden space-y-2">
+        <div class="flex justify-between text-xs">
+          <span id="progressStage" class="text-gray-400 truncate">—</span>
+          <span id="progressPct" class="text-indigo-300 flex-shrink-0 ml-2">0%</span>
+        </div>
+        <div class="score-bar">
+          <div id="progressBar" class="progress-bar-inner score-bar-fill bg-indigo-500" style="width:0%"></div>
         </div>
       </div>
+
+      <!-- Downloads -->
+      <div id="downloadsSection" class="hidden space-y-2">
+        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider">Outputs</label>
+        <div id="downloadLinks" class="space-y-1"></div>
+      </div>
+
+      <!-- Advanced / Baseline — collapsed by default -->
+      <div class="border-t border-gray-700/50 pt-3">
+        <button onclick="toggleAdvanced()"
+          class="w-full flex items-center justify-between text-xs font-semibold text-gray-400 uppercase tracking-wider hover:text-gray-300">
+          <span>Advanced / Baseline</span>
+          <span id="advancedChevron" class="text-gray-600">▶</span>
+        </button>
+
+        <div id="advancedSection" class="toggle-section collapsed mt-3 space-y-3">
+
+          <!-- Baseline override -->
+          <div class="space-y-1.5">
+            <label class="block text-xs text-gray-400">Baseline corpus override</label>
+            <input id="baselineDirInput" type="text" placeholder="Leave blank to use active golden baseline"
+              class="w-full rounded bg-gray-800 border border-gray-700 px-3 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-indigo-600">
+            <p class="text-xs text-gray-600">The trained Golden Baseline is always used unless you specify a different stills folder here.</p>
+          </div>
+
+          <!-- Baseline actions -->
+          <div class="space-y-1.5">
+            <label class="block text-xs text-gray-400">Train / augment baseline</label>
+            <div class="flex gap-2">
+              <button id="trainBaselineBtn"
+                class="flex-1 py-1.5 px-2 rounded text-xs font-medium text-white bg-amber-700 hover:bg-amber-600">
+                Train (new)
+              </button>
+              <button id="augmentBaselineBtn"
+                class="flex-1 py-1.5 px-2 rounded text-xs font-medium text-white bg-gray-700 hover:bg-gray-600">
+                Augment
+              </button>
+            </div>
+            <p id="baselineStatus" class="text-xs text-gray-500">—</p>
+          </div>
+
+          <!-- Baseline display -->
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="text-xs text-gray-400">Active baseline status</label>
+              <button onclick="loadBaseline()" class="text-xs text-indigo-400 hover:text-indigo-300">refresh</button>
+            </div>
+            <pre id="baselineDisplay" class="text-xs text-gray-400 bg-gray-800 rounded p-2 overflow-x-auto border border-gray-700 max-h-40">not loaded</pre>
+          </div>
+
+        </div>
+      </div>
+
     </aside>
 
-    <!-- Right column -->
-    <main class="flex-1 p-4 md:p-6 lg:p-8 space-y-6 overflow-y-auto">
+    <!-- Right main -->
+    <main class="flex-1 flex flex-col min-h-0 overflow-hidden">
+
       <!-- Tabs -->
-      <div class="border-b border-gray-700">
-        <nav class="-mb-px flex space-x-8" aria-label="Tabs">
-          <a href="#" id="tab-analysis" class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-indigo-500 text-indigo-400" onclick="showTab('analysis')">Analysis Results</a>
-          <a href="#" id="tab-matrix" class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500" onclick="showTab('matrix')">Scoring Matrix</a>
-          <a href="#" id="tab-log" class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500" onclick="showTab('log')">Verbose Log</a>
-          <a href="#" id="tab-baseline" class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500" onclick="showTab('baseline')">Golden Baseline</a>
+      <div class="border-b border-gray-700 flex-shrink-0 px-4">
+        <nav class="-mb-px flex space-x-6">
+          <a href="#" id="tab-analysis" onclick="showTab('analysis');return false"
+            class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-indigo-500 text-indigo-400">Results</a>
+          <a href="#" id="tab-matrix" onclick="showTab('matrix');return false"
+            class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200">Matrix</a>
+          <a href="#" id="tab-log" onclick="showTab('log');return false"
+            class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200">Log</a>
+          <a href="#" id="tab-baseline" onclick="showTab('baseline');return false"
+            class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200">Baseline</a>
         </nav>
       </div>
 
-      <!-- Analysis -->
-      <div id="panel-analysis" class="tab-panel space-y-4">
-        <div id="resultsPlaceholder" class="text-center text-gray-400 p-8 bg-gray-800/50 rounded border border-gray-700">
-          Choose a file or paste a URL, create a job, then click Analyze.
+      <div class="flex-1 overflow-y-auto p-4 md:p-6">
+
+        <!-- Analysis -->
+        <div id="panel-analysis" class="tab-panel space-y-4">
+          <div id="resultsPlaceholder" class="text-center text-gray-500 p-12 bg-gray-800/40 rounded border border-gray-700/50">
+            <p class="text-sm">Select a video, create a job, then click Find Best Shots.</p>
+          </div>
+          <div id="analysisStats" class="hidden text-xs text-gray-400 mb-2"></div>
+          <div id="analysisResults" class="space-y-3"></div>
         </div>
-        <div id="analysisResults" class="space-y-4"></div>
-      </div>
 
-      <!-- Matrix (placeholder for future weights visualization) -->
-      <div id="panel-matrix" class="tab-panel hidden space-y-4">
-        <h3 class="text-lg font-semibold text-white">Scoring Matrix</h3>
-        <div class="bg-gray-800 p-3 rounded border border-gray-700">
-          <p class="text-sm text-gray-300">Category weights and pillar blends will be displayed here when the Golden Baseline governs them.</p>
-        </div>
-      </div>
-
-      <!-- Log -->
-      <div id="panel-log" class="tab-panel hidden">
-        <textarea id="statusLog" readonly class="w-full h-[60vh] rounded p-2 bg-gray-950 border border-gray-700 text-gray-300 text-sm"></textarea>
-      </div>
-
-      <!-- Golden Baseline -->
-      <div id="panel-baseline" class="tab-panel hidden space-y-4">
-        <div class="flex items-center justify-between">
-          <h3 class="text-lg font-semibold text-white">Golden Baseline</h3>
-          <div class="space-x-2">
-            <button id="loadBaselineBtn" class="py-1.5 px-3 rounded text-xs font-medium text-white bg-gray-700 hover:bg-gray-600">Load</button>
-            <button id="saveBaselineBtn" class="py-1.5 px-3 rounded text-xs font-medium text-white bg-gray-700 hover:bg-gray-600">Save</button>
+        <!-- Matrix -->
+        <div id="panel-matrix" class="tab-panel hidden">
+          <div id="matrixContent">
+            <p class="text-sm text-gray-400">Run an analysis to see the scoring matrix.</p>
           </div>
         </div>
-        <div class="bg-gray-800 p-3 rounded border border-gray-700">
-          <pre id="baselineDisplay" class="text-xs text-gray-300 overflow-x-auto">not loaded</pre>
-          <p class="mt-2 text-xs text-gray-400">Note: In production, training and locking are driven via CLI. This tab only mirrors the current baseline JSON.</p>
+
+        <!-- Log -->
+        <div id="panel-log" class="tab-panel hidden">
+          <textarea id="statusLog" readonly
+            class="w-full h-96 rounded p-3 bg-gray-950 border border-gray-700 text-gray-300 text-xs font-mono resize-none"></textarea>
         </div>
+
+        <!-- Baseline -->
+        <div id="panel-baseline" class="tab-panel hidden space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-white">Golden Baseline Status</h3>
+            <button onclick="loadBaseline()" class="py-1 px-3 rounded text-xs font-medium text-white bg-gray-700 hover:bg-gray-600">Refresh</button>
+          </div>
+          <pre id="baselineDisplayFull" class="text-xs text-gray-300 bg-gray-800 rounded p-3 overflow-x-auto border border-gray-700">not loaded</pre>
+        </div>
+
       </div>
     </main>
   </div>
 
-  <script>
-    // Bridge detection
-    const bridgeStatus = document.getElementById('bridgeStatus');
-    const hasBridge = typeof window.pywebview !== 'undefined' && window.pywebview.api;
-    bridgeStatus.textContent = hasBridge ? 'bridge: connected' : 'bridge: not available (browser demo mode)';
+<script>
+// ---------------------------------------------------------------------------
+// Bridge — wait for pywebview to inject before checking
+// ---------------------------------------------------------------------------
+let hasBridge = false;
 
-    // Elements
-    const urlInput = document.getElementById('urlInput');
-    const loadUrlBtn = document.getElementById('loadUrlBtn');
-    const fileInput = document.getElementById('fileInput');
-    const fileName = document.getElementById('fileName');
-    const createJobBtn = document.getElementById('createJobBtn');
-    const analyzeBtn = document.getElementById('analyzeBtn');
-    const exportBtn = document.getElementById('exportBtn');
-    const baselineDisplay = document.getElementById('baselineDisplay');
-    const loadBaselineBtn = document.getElementById('loadBaselineBtn');
-    const saveBaselineBtn = document.getElementById('saveBaselineBtn');
-    const statusLog = document.getElementById('statusLog');
-    const resultsPlaceholder = document.getElementById('resultsPlaceholder');
-    const analysisResults = document.getElementById('analysisResults');
-    const videoPlayer = document.getElementById('videoPlayer');
-    const sensitivitySlider = document.getElementById('sensitivitySlider');
+function initBridge() {
+  hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview.api;
+  document.getElementById('bridgeStatus').textContent = hasBridge
+    ? 'bridge: connected'
+    : 'bridge: not available (browser mode)';
+  if(hasBridge) {
+    // enable the browse button as soon as bridge is ready
+    const browseBtn = document.getElementById('browseBtn');
+    if(browseBtn) browseBtn.disabled = false;
+    loadBaseline();
+  }
+}
 
-    let currentJobId = null;
-    let currentSource = null; // path or URL
+// pywebview fires this event when the JS API is ready
+window.addEventListener('pywebviewready', initBridge);
 
-    function log(line){
-      const ts = new Date().toLocaleTimeString();
-      statusLog.value += `[${ts}] ${line}\n`;
-      statusLog.scrollTop = statusLog.scrollHeight;
-    }
+// fallback poll — some pywebview versions don't fire the event reliably
+let _bridgeCheckCount = 0;
+const _bridgePoll = setInterval(() => {
+  _bridgeCheckCount++;
+  if(typeof window.pywebview !== 'undefined' && window.pywebview.api) {
+    clearInterval(_bridgePoll);
+    if(!hasBridge) initBridge();
+  }
+  if(_bridgeCheckCount > 20) clearInterval(_bridgePoll); // stop after 10s
+}, 500);
 
-    function showTab(tabName){
-      ['analysis','matrix','log','baseline'].forEach(n => {
-        document.getElementById('panel-'+n).classList.add('hidden');
-        document.getElementById('tab-'+n).classList.remove('border-indigo-500', 'text-indigo-400');
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let currentJobId  = null;
+let currentSource = null;   // absolute path or URL string
+let srcMode       = 'local';
+let pollInterval  = null;
+
+// ---------------------------------------------------------------------------
+// Source mode toggle
+// ---------------------------------------------------------------------------
+function setSrcMode(mode){
+  srcMode = mode;
+  document.getElementById('localInputSection').classList.toggle('hidden', mode !== 'local');
+  document.getElementById('urlInputSection').classList.toggle('hidden',   mode !== 'url');
+  document.getElementById('srcLocalBtn').className = 'flex-1 py-1.5 font-medium text-xs ' +
+    (mode === 'local' ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700');
+  document.getElementById('srcUrlBtn').className = 'flex-1 py-1.5 font-medium text-xs ' +
+    (mode === 'url'   ? 'bg-indigo-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700');
+}
+
+// ---------------------------------------------------------------------------
+// Native file browser — pywebview dialog returns real absolute path
+// ---------------------------------------------------------------------------
+document.getElementById('browseBtn').addEventListener('click', async () => {
+  // re-check bridge at click time — it may have connected after page load
+  hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview.api;
+  if(!hasBridge){ log('bridge not available — please restart the app'); return; }
+  const r = await window.pywebview.api.open_file_dialog();
+  if(!r.ok){ log(r.error || 'no file selected'); return; }
+
+  currentSource = r.path;
+  const parts   = r.path.replace(/\\/g, '/').split('/');
+  const name    = parts[parts.length - 1];
+  document.getElementById('fileName').textContent = name;
+  document.getElementById('sourceLabel').textContent = name;
+  document.getElementById('sourceLabel').classList.remove('hidden');
+  document.getElementById('createJobBtn').disabled = false;
+  log('file selected: ' + r.path);
+
+  // preview for browser-friendly formats only
+  const player = document.getElementById('videoPlayer');
+  const ext    = name.split('.').pop().toLowerCase();
+  if(['mp4','webm','ogg','m4v'].includes(ext)){
+    player.src = 'file:///' + r.path.replace(/\\/g, '/');
+    player.classList.remove('hidden');
+    player.onerror = function(){ player.classList.add('hidden'); };
+  } else {
+    player.classList.add('hidden');
+    log('preview not available for .' + ext + ' — analysis will work fine');
+  }
+});
+
+// ---------------------------------------------------------------------------
+// URL input
+// ---------------------------------------------------------------------------
+document.getElementById('loadUrlBtn').addEventListener('click', () => {
+  const url = document.getElementById('urlInput').value.trim();
+  if(!url){ return; }
+  currentSource = url;
+  document.getElementById('sourceLabel').textContent = url;
+  document.getElementById('sourceLabel').classList.remove('hidden');
+
+  // try direct preview for plain video URLs
+  const player = document.getElementById('videoPlayer');
+  if(url.match(/\.(mp4|webm|ogg)(\?.*)?$/i)){
+    player.src = url;
+    player.classList.remove('hidden');
+  } else {
+    player.classList.add('hidden');
+    log('web URL set — preview not available for this source (analysis will work)');
+  }
+
+  document.getElementById('createJobBtn').disabled = !hasBridge;
+  log(`URL source set: ${url}`);
+});
+
+// ---------------------------------------------------------------------------
+// Advanced toggle
+// ---------------------------------------------------------------------------
+function toggleAdvanced(){
+  const section = document.getElementById('advancedSection');
+  const chevron = document.getElementById('advancedChevron');
+  const open    = section.classList.contains('expanded');
+  section.classList.toggle('collapsed', open);
+  section.classList.toggle('expanded',  !open);
+  chevron.textContent = open ? '▶' : '▼';
+}
+
+// ---------------------------------------------------------------------------
+// UI helpers
+// ---------------------------------------------------------------------------
+function log(line){
+  const el = document.getElementById('statusLog');
+  el.value += `[${new Date().toLocaleTimeString()}] ${line}\n`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function showTab(name){
+  ['analysis','matrix','log','baseline'].forEach(n => {
+    document.getElementById('panel-'+n).classList.add('hidden');
+    const t = document.getElementById('tab-'+n);
+    t.classList.remove('border-indigo-500','text-indigo-400');
+    t.classList.add('border-transparent','text-gray-400');
+  });
+  document.getElementById('panel-'+name).classList.remove('hidden');
+  const a = document.getElementById('tab-'+name);
+  a.classList.add('border-indigo-500','text-indigo-400');
+  a.classList.remove('border-transparent','text-gray-400');
+}
+
+function setProgress(stage, pct){
+  document.getElementById('progressSection').classList.remove('hidden');
+  document.getElementById('progressStage').textContent = stage;
+  document.getElementById('progressPct').textContent   = Math.max(0, pct) + '%';
+  document.getElementById('progressBar').style.width   = Math.max(0, pct) + '%';
+}
+
+function scoreColor(v){ return v===null||v===undefined?'text-gray-400':v>=75?'text-green-400':v>=55?'text-yellow-400':'text-red-400'; }
+function scoreBg(v){    return v===null||v===undefined?'bg-gray-600':v>=75?'bg-green-500':v>=55?'bg-yellow-500':'bg-red-500'; }
+function fmt(s){ const m=Math.floor(s/60).toString().padStart(2,'0'),ss=Math.floor(s%60).toString().padStart(2,'0'); return `${m}:${ss}`; }
+function fmtScore(v){ return v!==null&&v!==undefined?Number(v).toFixed(1):'—'; }
+
+// ---------------------------------------------------------------------------
+// Job creation
+// ---------------------------------------------------------------------------
+document.getElementById('createJobBtn').addEventListener('click', async () => {
+  hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview.api;
+  if(!hasBridge || !currentSource) return;
+  const r = await window.pywebview.api.create_job(currentSource);
+  if(r.ok){
+    currentJobId = r.job_id;
+    document.getElementById('analyzeBtn').disabled = false;
+    document.getElementById('exportBtn').disabled  = false;
+    log(`job created: ${currentJobId}`);
+  } else {
+    log(`job error: ${r.error}`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Analysis
+// ---------------------------------------------------------------------------
+document.getElementById('analyzeBtn').addEventListener('click', async () => {
+  hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview.api;
+  if(!hasBridge || !currentJobId) return;
+
+  document.getElementById('analyzeBtn').disabled = true;
+  document.getElementById('resultsPlaceholder').style.display = '';
+  document.getElementById('analysisResults').innerHTML = '';
+  document.getElementById('analysisStats').classList.add('hidden');
+  setProgress('Starting…', 0);
+  showTab('log');
+  log('analysis started');
+
+  pollInterval = setInterval(async () => {
+    const p = await window.pywebview.api.poll_progress(currentJobId);
+    if(p.ok && p.events && p.events.length > 0){
+      p.events.forEach(ev => {
+        log(ev.message);
+        if(ev.pct >= 0) setProgress(ev.message, ev.pct);
       });
-      document.getElementById('panel-' + tabName).classList.remove('hidden');
-      document.getElementById('tab-' + tabName).classList.add('border-indigo-500', 'text-indigo-400');
     }
+  }, 600);
 
-    // Baseline
-    async function loadBaseline(){
-      if(!hasBridge){ baselineDisplay.textContent = 'bridge unavailable'; return; }
-      const resp = await window.pywebview.api.load_baseline();
-      baselineDisplay.textContent = JSON.stringify(resp.baseline || {}, null, 2);
-      log('baseline loaded');
-    }
+  const sens = parseInt(document.getElementById('sensitivitySlider').value, 10);
+  const r    = await window.pywebview.api.analyze(currentJobId, sens);
 
-    async function saveBaseline(){
-      if(!hasBridge){ return; }
-      try{
-        const obj = JSON.parse(baselineDisplay.textContent);
-        const resp = await window.pywebview.api.save_baseline(obj);
-        if(resp.ok) log('baseline saved');
-      }catch(e){
-        alert('Baseline JSON is invalid.');
-      }
-    }
+  clearInterval(pollInterval);
+  document.getElementById('analyzeBtn').disabled = false;
 
-    loadBaselineBtn.addEventListener('click', loadBaseline);
-    saveBaselineBtn.addEventListener('click', saveBaseline);
+  if(r.ok){
+    renderResults(r);
+    renderMatrix(r.shots);
+    renderDownloads(r);
+    showTab('analysis');
+    setProgress('Complete', 100);
+    log(`complete — ${r.selected_count} shots from ${r.scene_count} scenes`);
+  } else {
+    log(`error: ${r.error}`);
+    setProgress('Error', 0);
+  }
+});
 
-    // URL handling
-    loadUrlBtn.addEventListener('click', () => {
-      const url = urlInput.value.trim();
-      if(!url){ return; }
-      currentSource = url;
-      fileName.textContent = url;
-      try{
-        videoPlayer.src = url;
-      }catch(e){
-        // ignore playback errors; analysis does not rely on playing in the tag
-      }
-      createJobBtn.disabled = !hasBridge;
-      log('URL set as source');
-    });
+// ---------------------------------------------------------------------------
+// Export
+// ---------------------------------------------------------------------------
+document.getElementById('exportBtn').addEventListener('click', async () => {
+  hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview.api;
+  if(!hasBridge || !currentJobId) return;
+  const r = await window.pywebview.api.export_manifest(currentJobId);
+  if(r.ok) log(`manifest: ${r.path}`);
+  else      log(`export error: ${r.error}`);
+});
 
-    // File handling
-    fileInput.addEventListener('change', (e)=>{
-      const f = e.target.files[0];
-      if(!f){ return; }
-      currentSource = f.name; // we only pass the name/path string to the API stub
-      fileName.textContent = f.name;
-      const url = URL.createObjectURL(f);
-      videoPlayer.src = url;
-      createJobBtn.disabled = !hasBridge;
-      log('file selected');
-    });
+// ---------------------------------------------------------------------------
+// Results
+// ---------------------------------------------------------------------------
+function renderResults(r){
+  document.getElementById('resultsPlaceholder').style.display = 'none';
+  const stats = document.getElementById('analysisStats');
+  stats.classList.remove('hidden');
+  stats.innerHTML = `<span class="font-medium text-white">${r.scene_count}</span> scenes &nbsp;·&nbsp; <span class="font-medium text-white">${r.selected_count}</span> shots selected`;
 
-    // Job + analyze
-    createJobBtn.addEventListener('click', async ()=>{
-      if(!hasBridge || !currentSource){ return; }
-      const r = await window.pywebview.api.create_job(currentSource);
-      if(r.ok){
-        currentJobId = r.job_id;
-        analyzeBtn.disabled = false;
-        exportBtn.disabled = false;
-        log(`job created: ${currentJobId}`);
-      } else {
-        log(`job error: ${r.error || 'unknown'}`);
-      }
-    });
+  const results = document.getElementById('analysisResults');
+  results.innerHTML = '';
+  (r.shots || []).forEach(s => results.appendChild(makeShotCard(s)));
+}
 
-    analyzeBtn.addEventListener('click', async ()=>{
-      if(!hasBridge || !currentJobId){ return; }
-      log('analyzing…');
-      const sens = parseInt(sensitivitySlider.value, 10);
-      const r = await window.pywebview.api.analyze(currentJobId, sens);
-      if(r.ok){
-        resultsPlaceholder.style.display = 'none';
-        analysisResults.innerHTML = '';
-        r.shots.forEach(shot => analysisResults.appendChild(makeShotCard(shot)));
-        showTab('analysis');
-        log(`analysis complete: ${r.shots.length} shots`);
-      } else {
-        log(`analysis error: ${r.error || 'unknown'}`);
-      }
-    });
+function makeShotCard(shot){
+  const card     = document.createElement('div');
+  card.className = 'shot-card bg-gray-800 border border-gray-700/50 rounded overflow-hidden';
+  const score    = shot.totalScore;
+  const cats     = ['exposure','lighting','composition','movement','color','quality','narrative'];
 
-    exportBtn.addEventListener('click', async ()=>{
-      if(!hasBridge || !currentJobId){ return; }
-      const r = await window.pywebview.api.export_manifest(currentJobId);
-      if(r.ok){ log(`manifest written: ${r.path}`); }
-      else { log(`export error: ${r.error || 'unknown'}`); }
-    });
+  const heroHtml = shot.hero_frame
+    ? `<img src="file:///${shot.hero_frame.replace(/\\/g,'/')}" class="w-full h-36 object-cover" onerror="this.style.display='none'">`
+    : '';
 
-    // Shot card renderer
-    function makeShotCard(shot){
-      const card = document.createElement('div');
-      card.className = 'bg-gray-800 border border-gray-700/50 rounded shadow overflow-hidden';
-      const totalColor = shot.totalScore > 85 ? 'text-green-400' : (shot.totalScore > 70 ? 'text-yellow-400' : 'text-red-400');
-      card.innerHTML = `
-        <div class="p-4 flex items-center justify-between">
-          <h3 class="text-lg font-semibold text-white">Shot ${shot.id} <span class="text-sm font-normal text-gray-400">(${fmt(shot.start)}-${fmt(shot.end)})</span></h3>
-          <div class="text-right">
-            <span class="text-2xl font-bold ${totalColor}">${shot.totalScore}</span>
-            <span class="block text-xs text-gray-400">Total</span>
-          </div>
+  const catHtml = cats.map(k => {
+    const v = shot.scores?.[k]?.total;
+    return `<div>
+      <div class="flex justify-between text-xs mb-0.5">
+        <span class="text-gray-500 capitalize">${k}</span>
+        <span class="${scoreColor(v)}">${fmtScore(v)}</span>
+      </div>
+      <div class="score-bar"><div class="score-bar-fill ${scoreBg(v)}" style="width:${v?Math.round(v):0}%"></div></div>
+    </div>`;
+  }).join('');
+
+  const baseline = shot.baseline_similarity!=null
+    ? `<span class="text-xs text-indigo-300 ml-2">∼ baseline: ${Number(shot.baseline_similarity).toFixed(1)}</span>`
+    : '';
+
+  const rationale = shot.rationale
+    ? `<p class="text-xs text-gray-400 italic mt-2 pt-2 border-t border-gray-700">${shot.rationale}</p>`
+    : '';
+
+  card.innerHTML = `
+    ${heroHtml}
+    <div class="p-3">
+      <div class="flex items-start justify-between mb-2">
+        <div>
+          <span class="text-xs font-semibold text-gray-300">Shot ${shot.id}</span>
+          <span class="text-xs text-gray-500 ml-2">${fmt(shot.start)} — ${fmt(shot.end)}</span>
+          ${shot.duration ? `<span class="text-xs text-gray-600 ml-1">${Number(shot.duration).toFixed(1)}s</span>` : ''}
+          ${baseline}
         </div>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 p-3">
-          ${Object.entries(shot.scores).map(([k,v]) => `
-            <div class="bg-gray-900/60 rounded p-2">
-              <div class="text-xs uppercase text-blue-300">${k}</div>
-              <div class="text-lg font-bold text-white">${v.total ?? 0}</div>
-            </div>`).join('')}
-        </div>`;
-      return card;
-    }
+        <div class="text-right flex-shrink-0 ml-3">
+          <span class="text-xl font-bold ${scoreColor(score)}">${fmtScore(score)}</span>
+          <span class="block text-xs text-gray-500">score</span>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-x-4 gap-y-1.5">${catHtml}</div>
+      ${rationale}
+    </div>`;
+  return card;
+}
 
-    function fmt(s){ const m=Math.floor(s/60).toString().padStart(2,'0'); const ss=Math.floor(s%60).toString().padStart(2,'0'); return `${m}:${ss}`; }
+// ---------------------------------------------------------------------------
+// Matrix
+// ---------------------------------------------------------------------------
+function renderMatrix(shots){
+  const el   = document.getElementById('matrixContent');
+  if(!shots||!shots.length){ el.innerHTML='<p class="text-sm text-gray-400">No shots.</p>'; return; }
+  const cats = ['exposure','lighting','composition','movement','color','quality','narrative'];
+  const rows = shots.map(s => `
+    <tr class="border-b border-gray-700/40">
+      <td class="px-3 py-2 text-xs text-gray-400 whitespace-nowrap">Shot ${s.id}</td>
+      <td class="px-3 py-2 text-center text-xs font-semibold ${scoreColor(s.totalScore)}">${fmtScore(s.totalScore)}</td>
+      ${cats.map(k=>`<td class="px-3 py-2 text-center text-xs ${scoreColor(s.scores?.[k]?.total)}">${fmtScore(s.scores?.[k]?.total)}</td>`).join('')}
+    </tr>`).join('');
+  el.innerHTML = `<div class="overflow-x-auto">
+    <table class="w-full text-left bg-gray-800 rounded border border-gray-700 text-xs">
+      <thead><tr class="border-b border-gray-700 text-gray-400 uppercase">
+        <th class="px-3 py-2">Shot</th>
+        <th class="px-3 py-2 text-center">Total</th>
+        ${cats.map(c=>`<th class="px-3 py-2 text-center">${c}</th>`).join('')}
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
 
-  </script>
+// ---------------------------------------------------------------------------
+// Downloads
+// ---------------------------------------------------------------------------
+function renderDownloads(r){
+  const section = document.getElementById('downloadsSection');
+  const links   = document.getElementById('downloadLinks');
+  section.classList.remove('hidden');
+  links.innerHTML = '';
+  [
+    { label:'Contact Sheet', path: r.contact_sheet },
+    { label:'EDL',           path: r.edl_path },
+    { label:'CSV Timecodes', path: r.csv_path },
+    { label:'Output Folder', path: r.output_dir },
+  ].forEach(({label, path}) => {
+    if(!path) return;
+    const btn = document.createElement('button');
+    btn.className = 'w-full text-left text-xs text-indigo-400 hover:text-indigo-300 truncate py-0.5';
+    btn.textContent = (label === 'Output Folder' ? '\u{1F4C1} ' : '\u2193 ') + label;
+    btn.title = path;
+    btn.onclick = async () => {
+      hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview.api;
+      if(label === 'Output Folder' && hasBridge){
+        await window.pywebview.api.open_output_folder(path);
+      } else {
+        log('output: ' + path);
+      }
+    };
+    links.appendChild(btn);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Baseline
+// ---------------------------------------------------------------------------
+async function loadBaseline(){
+  if(!hasBridge) return;
+  const r = await window.pywebview.api.load_baseline();
+  const txt = JSON.stringify(r.baseline||{}, null, 2);
+  document.getElementById('baselineDisplay').textContent     = txt;
+  document.getElementById('baselineDisplayFull').textContent = txt;
+  document.getElementById('baselineStatus').textContent      = r.ok ? 'loaded' : (r.error||'error');
+}
+
+document.getElementById('trainBaselineBtn').addEventListener('click', async () => {
+  if(!hasBridge) return;
+  const dir = document.getElementById('baselineDirInput').value.trim();
+  if(!dir){ alert('Enter path to reference stills folder in the Advanced section'); return; }
+  document.getElementById('baselineStatus').textContent = 'training…';
+  log(`training baseline: ${dir}`);
+  const r = await window.pywebview.api.train_baseline(dir, 'trained via UI', 'staging');
+  if(r.ok){
+    document.getElementById('baselineStatus').textContent = `v${r.result?.promotion?.version} — ${r.result?.processed} stills`;
+    log(`baseline v${r.result?.promotion?.version} trained: ${r.result?.processed}/${r.result?.total}`);
+    loadBaseline();
+  } else {
+    document.getElementById('baselineStatus').textContent = `error: ${r.error}`;
+    log(`baseline error: ${r.error}`);
+  }
+});
+
+document.getElementById('augmentBaselineBtn').addEventListener('click', async () => {
+  if(!hasBridge) return;
+  const dir = document.getElementById('baselineDirInput').value.trim();
+  if(!dir){ alert('Enter path to additional stills folder in the Advanced section'); return; }
+  document.getElementById('baselineStatus').textContent = 'augmenting…';
+  log(`augmenting baseline: ${dir}`);
+  const r = await window.pywebview.api.train_baseline(dir, 'augmented via UI', 'augment');
+  if(r.ok){
+    document.getElementById('baselineStatus').textContent = `v${r.result?.promotion?.version} — ${r.result?.processed} added`;
+    log(`baseline augmented: ${r.result?.processed} stills → v${r.result?.promotion?.version}`);
+    loadBaseline();
+  } else {
+    document.getElementById('baselineStatus').textContent = `error: ${r.error}`;
+    log(`augment error: ${r.error}`);
+  }
+});
+
+// Init — bridge detection handled by pywebviewready event above
+</script>
 </body>
 </html>

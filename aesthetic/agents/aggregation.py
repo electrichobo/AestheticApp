@@ -31,6 +31,55 @@ from ..models.scores import (
 # Public entry point
 # ---------------------------------------------------------------------------
 
+def is_non_cinematic_scene(frames: List[FrameMetrics], threshold: float = 0.6) -> bool:
+    """
+    Return True if the majority of frames in a scene look like title cards,
+    credits, logos, or static graphics rather than cinematic content.
+
+    Checks raw per-frame metrics before any aggregation so technically sharp
+    text cards don't sneak through the scoring pipeline.
+
+    A scene is flagged if more than `threshold` fraction of its frames
+    fail at least 3 of 5 cinematic content signals.
+    """
+    if not frames:
+        return False
+
+    flagged = 0
+    for f in frames:
+        signals_failed = 0
+
+        # low color entropy — title cards have very few distinct hues
+        entropy = f.color.palette_entropy
+        if entropy is not None and entropy < 2.8:
+            signals_failed += 1
+
+        # low saturation — black/white/grey dominates
+        sat = f.color.saturation_mean
+        if sat is not None and sat < 10.0:
+            signals_failed += 1
+
+        # flat image — no depth at all
+        depth = f.composition.depth_separation
+        if depth is not None and depth < 4.0:
+            signals_failed += 1
+
+        # sparse content — little meaningful content in frame
+        occ = f.composition.occupancy_map_score
+        if occ is not None and occ < 12.0:
+            signals_failed += 1
+
+        # low histogram std — near-uniform tone (black bg or white bg)
+        hist_std = f.exposure.histogram_std
+        if hist_std is not None and hist_std < 18.0:
+            signals_failed += 1
+
+        if signals_failed >= 3:
+            flagged += 1
+
+    return (flagged / len(frames)) >= threshold
+
+
 def aggregate_shot(
     shot_id:  str,
     scene_id: int,
@@ -49,9 +98,20 @@ def aggregate_shot(
     Returns:
         Populated ShotScore with Technical pillar subtotal and category breakdowns.
         Creative and Subjective pillars are populated in Phase 7 after baseline scoring.
+        Returns a near-zero score if the scene is detected as non-cinematic content.
     """
     if not frames:
         return ShotScore(shot_id=shot_id, scene_id=scene_id)
+
+    # filter title cards, credits, logos before scoring
+    if is_non_cinematic_scene(frames):
+        return ShotScore(
+            shot_id=shot_id,
+            scene_id=scene_id,
+            total_score=0.0,
+            technical_total=0.0,
+            frame_count=len(frames),
+        )
 
     weights = config.get("weights", {})
     w_tech  = float(weights.get("technical",  0.50))
