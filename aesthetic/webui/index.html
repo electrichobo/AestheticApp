@@ -164,6 +164,16 @@
             <p id="baselineStatus" class="text-xs text-gray-500">—</p>
           </div>
 
+          <!-- Cluster index -->
+          <div class="space-y-1.5">
+            <label class="block text-xs text-gray-400">Style cluster index</label>
+            <button id="rebuildClustersBtn"
+              class="w-full py-1.5 px-2 rounded text-xs font-medium text-white bg-gray-700 hover:bg-gray-600">
+              Rebuild Style Clusters
+            </button>
+            <p class="text-xs text-gray-600">Rebuilds after adding new baseline material. Clusters enable like-for-like Creative pillar scoring.</p>
+          </div>
+
           <!-- Baseline display -->
           <div>
             <div class="flex items-center justify-between mb-1">
@@ -660,6 +670,19 @@ document.getElementById('augmentBaselineBtn').addEventListener('click', async ()
   } else {
     document.getElementById('baselineStatus').textContent = `error: ${r.error}`;
     log(`augment error: ${r.error}`);
+  }
+});
+
+document.getElementById('rebuildClustersBtn').addEventListener('click', async () => {
+  hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview.api;
+  if(!hasBridge) return;
+  log('rebuilding style cluster index…');
+  const r = await window.pywebview.api.rebuild_cluster_index();
+  if(r.ok){
+    const d = r.result;
+    log(`clusters rebuilt: ${d?.n_clusters} clusters from ${d?.total} embeddings`);
+  } else {
+    log(`cluster rebuild error: ${r.error}`);
   }
 });
 

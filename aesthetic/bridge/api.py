@@ -205,6 +205,19 @@ class AestheticAPI:
             return {"ok": True, "path": str(p)}
         return {"ok": False, "error": f"Cannot resolve path for: {filename}"}
 
+    def rebuild_cluster_index(self) -> Dict[str, Any]:
+        """
+        Force a rebuild of the style cluster index from the current baseline corpus.
+        Call this after adding new material to the baseline.
+        """
+        try:
+            from ..agents.stratification import rebuild_cluster_index
+            bv     = self._baseline.get_summary().get("active", {}).get("version", 0)
+            result = rebuild_cluster_index(DATA_DIR, bv)
+            return {"ok": True, "result": result}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def open_file_dialog(self) -> Dict[str, Any]:
         """
         Open a native Windows file picker using ctypes GetOpenFileName.
@@ -506,7 +519,6 @@ class AestheticAPI:
             # --- stage 6: aggregation ---
             self._push_progress(job_id, "Aggregating shot scores…", 76)
             from ..agents.aggregation import aggregate_shot
-            from ..agents.inference import compute_baseline_similarity
 
             shots: List[Shot]     = []
             scores                = []
@@ -519,15 +531,25 @@ class AestheticAPI:
                 shot_id = f"shot_{scene.scene_id:04d}"
                 score   = aggregate_shot(shot_id, scene.scene_id, scene_frames, cfg)
 
-                # Creative pillar — baseline similarity
+                # Creative pillar — stratified baseline similarity
                 scene_candidates_list = by_scene[scene.scene_id]
                 for fm in scene_frames:
                     if fm.inference.clip_embedding:
-                        sim = compute_baseline_similarity(fm.inference.clip_embedding, DATA_DIR)
+                        from ..agents.stratification import compute_stratified_similarity
+                        bv  = self._baseline.get_summary().get("active", {}).get("version", 0)
+                        sim_result = compute_stratified_similarity(
+                            fm.inference.clip_embedding, DATA_DIR, baseline_version=bv
+                        )
+                        sim = sim_result.get("score")
                         if sim is not None:
                             score.baseline_similarity_score = sim
                             score.creative_total = round(sim, 2)
-                            break
+                            # store cluster info for manifest and UI
+                            score.rationale = (
+                                f"Style cluster: {sim_result.get('cluster_label', 'unknown')} "
+                                f"(confidence: {sim_result.get('cluster_confidence', 0):.0%})"
+                            ) if not score.rationale else score.rationale
+                        break
 
                 # attach classification to shot
                 cls        = shot_classifications.get(scene.scene_id, {})
