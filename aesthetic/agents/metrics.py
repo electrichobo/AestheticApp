@@ -73,10 +73,19 @@ def compute_frame_metrics(
     path = Path(frame_path)
     frame_id = path.stem
 
-    # load the frame
-    bgr = cv2.imread(str(path))
+    # load the frame — return empty FrameMetrics rather than raising
+    # so the pipeline can continue even if individual frames are unreadable
+    try:
+        bgr = cv2.imread(str(path))
+    except Exception:
+        bgr = None
     if bgr is None:
-        raise ValueError(f"Could not load frame image: {frame_path}")
+        return FrameMetrics(
+            frame_id=Path(frame_path).stem,
+            scene_id=scene_id,
+            timestamp=timestamp,
+            frame_path=frame_path,
+        )
 
     # load previous frame for motion metrics if available
     prev_bgr: Optional[np.ndarray] = None
@@ -253,12 +262,14 @@ def _compute_lighting(bgr: np.ndarray) -> LightingMetrics:
     dr_stops   = round(np.log2(dr_range / 100.0 * 255.0 + 1.0), 2) if dr_range > 0 else 0.0
 
     # key to fill ratio estimate
-    # split image into highlight and shadow zones, compare mean luminance
-    bright_mask = L > np.percentile(L, 75)
-    shadow_mask = L < np.percentile(L, 25)
+    # use >= and <= so the masks are never empty even when pixels cluster at extremes
+    p75         = float(np.percentile(L, 75))
+    p25         = float(np.percentile(L, 25))
+    bright_mask = L >= p75
+    shadow_mask = L <= p25
     key_mean    = float(np.mean(L[bright_mask])) if bright_mask.any() else 0.0
     fill_mean   = float(np.mean(L[shadow_mask])) + 1.0 if shadow_mask.any() else 1.0
-    key_fill    = round(key_mean / fill_mean, 2)
+    key_fill    = round(key_mean / fill_mean, 2) if fill_mean > 1.0 else 0.0
 
     # color temperature estimate via blue/red channel ratio
     b_mean = float(np.mean(bgr[:, :, 0].astype(np.float32)))
@@ -613,13 +624,17 @@ def _compute_color(bgr: np.ndarray) -> ColorMetrics:
     lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2Lab).astype(np.float32)
     L, a, b = lab[:, :, 0], lab[:, :, 1], lab[:, :, 2]
 
-    # white balance deviation — ideal WB has a* and b* near zero
-    a_mean = float(np.mean(a))
-    b_mean = float(np.mean(b))
+    # white balance deviation — ideal WB has a* and b* near zero.
+    # OpenCV encodes 8-bit Lab with a* and b* shifted by 128 so neutral = 128.
+    # We subtract 128 to centre on zero before computing deviation.
+    a_centered = a - 128.0
+    b_centered = b - 128.0
+    a_mean     = float(np.mean(a_centered))
+    b_mean     = float(np.mean(b_centered))
     wb_deviation = round(float(np.sqrt(a_mean**2 + b_mean**2)), 3)
 
-    # saturation in Lab (chroma = sqrt(a^2 + b^2))
-    chroma = np.sqrt(a**2 + b**2)
+    # saturation in Lab (chroma = sqrt(a_centered^2 + b_centered^2))
+    chroma = np.sqrt(a_centered**2 + b_centered**2)
     sat_mean        = round(float(np.mean(chroma)), 2)
     sat_uniformity  = round(max(0.0, 100.0 - float(np.std(chroma))), 2)
 

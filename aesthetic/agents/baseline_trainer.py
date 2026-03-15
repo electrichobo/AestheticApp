@@ -492,7 +492,7 @@ def _corpus_qc(img: np.ndarray, img_path: Path) -> Dict[str, Any]:
 
     nc_flags = 0
 
-    # low color entropy
+    # low color entropy — title cards have near-zero hue variety
     hue_flat  = hsv[:, :, 0].flatten().astype(np.float32)
     hist_h, _ = np.histogram(hue_flat, bins=36, range=(0, 180))
     hist_h    = hist_h.astype(np.float32) + 1e-6
@@ -501,21 +501,32 @@ def _corpus_qc(img: np.ndarray, img_path: Path) -> Dict[str, Any]:
     if entropy < 2.5:
         nc_flags += 1
 
-    # low saturation
-    a_ch = lab[:, :, 1]
-    b_ch = lab[:, :, 2]
+    # low saturation — black/white/grey has zero chroma
+    # OpenCV 8-bit Lab has a*/b* centred at 128 — subtract before measuring
+    a_ch   = lab[:, :, 1].astype(np.float32) - 128.0
+    b_ch   = lab[:, :, 2].astype(np.float32) - 128.0
     chroma = np.sqrt(a_ch**2 + b_ch**2)
-    if float(np.mean(chroma)) < 8.0:
+    sat_mean = float(np.mean(chroma))
+    if sat_mean < 8.0:
         nc_flags += 1
 
-    # near-uniform tone
-    if float(np.std(flat)) < 15.0:
+    # bimodal histogram — title cards have pixels clustered at extremes (black + white)
+    # measure fraction of pixels in the two extreme deciles vs the middle
+    p10 = float(np.percentile(flat, 10))
+    p90 = float(np.percentile(flat, 90))
+    extreme_px = float(np.mean((flat < p10 + 10) | (flat > p90 - 10)))
+    if extreme_px > 0.85:
         nc_flags += 1
 
-    # very sparse content
+    # very sparse content — almost no mid-tone pixels
     bg_thresh = float(np.percentile(gray, 20))
     occ = float(np.mean(gray > bg_thresh * 1.5))
     if occ < 0.10:
+        nc_flags += 1
+
+    # zero saturation — perfectly achromatic content (0 chroma pixels)
+    zero_sat_pct = float(np.mean(chroma < 2.0))
+    if zero_sat_pct > 0.90:
         nc_flags += 1
 
     if nc_flags >= 3:
@@ -523,12 +534,20 @@ def _corpus_qc(img: np.ndarray, img_path: Path) -> Dict[str, Any]:
 
     # 4. subtitle / watermark detection — look for horizontal text bands
     #    in the lower 20% of the frame (subtitle zone)
+    # Subtitle text produces edges that are denser at the top/bottom of each
+    # character row than in the interior — measure variance of horizontal
+    # edge density across rows. Random noise has uniform row-by-row density.
     lower_band = gray[int(h * 0.80):, :]
     edges      = cv2.Canny(lower_band.astype(np.uint8), 50, 150)
-    # high horizontal edge density in the lower band = likely subtitles
-    h_grad  = cv2.Sobel(lower_band.astype(np.uint8), cv2.CV_32F, 1, 0, ksize=3)
-    h_density = float(np.mean(np.abs(h_grad)))
-    if h_density > 25.0 and float(np.mean(edges > 0)) > 0.08:
+    # per-row edge density
+    row_densities = np.mean(edges > 0, axis=1).astype(np.float32)
+    # subtitle text: rows alternate dense (text) and sparse (gaps between lines)
+    row_variance  = float(np.var(row_densities))
+    h_grad        = cv2.Sobel(lower_band.astype(np.uint8), cv2.CV_32F, 1, 0, ksize=3)
+    h_density     = float(np.mean(np.abs(h_grad)))
+    overall_edge  = float(np.mean(edges > 0))
+    # require both high density AND structured row variance (not random noise)
+    if h_density > 25.0 and overall_edge > 0.08 and row_variance > 0.02:
         return {"pass": False, "reason": "possible subtitles or watermark in lower third"}
 
     # 5. suspect sharpness profile — very high Laplacian variance

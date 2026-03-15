@@ -583,11 +583,12 @@ def _swap_for_category(
     sorted_selected = sorted(selected, key=lambda x: x[1].total_score or 0.0)
     victim = None
     for shot, score in sorted_selected:
-        # skip if this shot is already in the target category
+        # skip if this shot is already in the target category — no point swapping it
         if matches(shot):
             continue
-        # check if removing it would leave its category empty
-        same_cat = [s for s, _ in selected if s.shot_id != shot.shot_id and matches(s)]
+        # this shot is our candidate victim — take it
+        # (we intentionally don't restrict to "same category must have other members"
+        #  because with small top_k pools that always blocks the swap)
         victim = (shot, score)
         break
 
