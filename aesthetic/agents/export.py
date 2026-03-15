@@ -319,7 +319,7 @@ def _export_contact_sheet(
     rows = (len(thumbs) + cols - 1) // cols
 
     sheet_w = cols * (thumb_w + padding) + padding
-    sheet_h = header_h + rows * (thumb_h + padding + 30) + padding
+    sheet_h = header_h + rows * (thumb_h + padding + 40) + padding
     sheet   = np.zeros((sheet_h, sheet_w, 3), dtype=np.uint8)
     sheet[:] = (20, 20, 20)
 
@@ -342,17 +342,21 @@ def _export_contact_sheet(
 
         # overlay border
         rank  = shot.get("rank", i + 1)
-        score = shot.get("total_score") or 0.0
-        start = shot.get("start_time", 0.0)
-        end   = shot.get("end_time",   0.0)
+        score        = shot.get("total_score") or 0.0
+        start        = shot.get("start_time", 0.0)
+        end          = shot.get("end_time",   0.0)
+        scale        = shot.get("shot_scale",    "")
+        movement     = shot.get("movement_type", "")
+        scene_type   = shot.get("scene_type",    "")
+        shot_intent  = shot.get("shot_intent",   "")
 
         # score-based border color
         if score >= 75:
-            border_color = (75, 200, 100)    # green
+            border_color = (75, 200, 100)
         elif score >= 55:
-            border_color = (75, 180, 220)    # yellow-ish
+            border_color = (75, 180, 220)
         else:
-            border_color = (100, 100, 200)   # red-ish
+            border_color = (100, 100, 200)
 
         cv2.rectangle(sheet, (x, y), (x+thumb_w, y+thumb_h), border_color, 2)
 
@@ -365,17 +369,70 @@ def _export_contact_sheet(
             cv2.FONT_HERSHEY_SIMPLEX, 0.42, border_color, 1, cv2.LINE_AA,
         )
 
-        # timecode below thumbnail
-        tc_text = f"{_fmt_tc(start)} — {_fmt_tc(end)}"
+        # strongest category badge top-right
+        scores_dict = shot.get("scores", {})
+        if scores_dict:
+            best_cat = max(scores_dict.items(), key=lambda kv: kv[1] or 0, default=(None, None))
+            if best_cat[0]:
+                cat_label = best_cat[0][:3].upper()   # EXP / LIT / COM / MOV / COL / QUA / NAR
+                cv2.rectangle(sheet, (x+thumb_w-36, y), (x+thumb_w, y+20), (0, 0, 0), -1)
+                cv2.putText(
+                    sheet, cat_label,
+                    (x+thumb_w-32, y+14),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 180, 100), 1, cv2.LINE_AA,
+                )
+
+        # classification tags below thumbnail
+        # line 1: timecode + duration
+        tc_text = f"{_fmt_tc(start)}-{_fmt_tc(end)}"
         cv2.putText(
             sheet, tc_text,
-            (x, y + thumb_h + 18),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.38, (160, 160, 160), 1, cv2.LINE_AA,
+            (x, y + thumb_h + 14),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.35, (160, 160, 160), 1, cv2.LINE_AA,
         )
+
+        # line 2: scale + movement icons
+        scale_abbr   = _abbrev_scale(scale)
+        movement_sym = _symbol_movement(movement)
+        intent_abbr  = shot_intent[:3].upper() if shot_intent and shot_intent != "unknown" else ""
+        tag_text     = " ".join(filter(None, [scale_abbr, movement_sym, intent_abbr]))
+        if tag_text:
+            cv2.putText(
+                sheet, tag_text,
+                (x, y + thumb_h + 26),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.32, (120, 140, 180), 1, cv2.LINE_AA,
+            )
 
     out_path = output_dir / "contact_sheet.jpg"
     cv2.imwrite(str(out_path), sheet, [cv2.IMWRITE_JPEG_QUALITY, 90])
     return out_path
+
+
+def _abbrev_scale(scale: str) -> str:
+    """Short label for shot scale annotation on contact sheet."""
+    mapping = {
+        "extreme_close": "ECU",
+        "close":         "CU",
+        "medium_close":  "MCU",
+        "medium":        "MS",
+        "medium_wide":   "MWS",
+        "wide":          "WS",
+        "extreme_wide":  "EWS",
+    }
+    return mapping.get(scale, "")
+
+
+def _symbol_movement(movement: str) -> str:
+    """Short symbol for movement type annotation on contact sheet."""
+    mapping = {
+        "static":   "●",
+        "pan":      "→",
+        "tilt":     "↑",
+        "dolly":    "▶",
+        "handheld": "~",
+        "drone":    "^",
+    }
+    return mapping.get(movement, "")
 
 
 def _fmt_tc(seconds: float) -> str:

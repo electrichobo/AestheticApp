@@ -386,6 +386,215 @@ class AestheticAPI:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    # -----------------------------------------------------------------------
+    # Editor feedback
+    # -----------------------------------------------------------------------
+
+    def save_feedback(self, job_id: str, shot_id: str, rating: int) -> Dict[str, Any]:
+        """
+        Save editor feedback for a shot.
+        rating: 1 = thumbs up, -1 = thumbs down, 0 = neutral/reset
+        Feedback persists across sessions in data/feedback/<job_id>.json
+        """
+        try:
+            feedback_dir  = DATA_DIR / "feedback"
+            feedback_dir.mkdir(parents=True, exist_ok=True)
+            feedback_path = feedback_dir / f"{job_id}.json"
+
+            feedback: Dict[str, Any] = {}
+            if feedback_path.exists():
+                try:
+                    feedback = json.loads(feedback_path.read_text(encoding="utf-8"))
+                except Exception:
+                    feedback = {}
+
+            if rating == 0:
+                feedback.pop(shot_id, None)   # reset to neutral
+            else:
+                feedback[shot_id] = {
+                    "rating":    rating,
+                    "shot_id":   shot_id,
+                    "job_id":    job_id,
+                    "timestamp": _now_iso(),
+                }
+
+            feedback_path.write_text(json.dumps(feedback, indent=2), encoding="utf-8")
+            return {"ok": True, "shot_id": shot_id, "rating": rating}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def get_feedback(self, job_id: str) -> Dict[str, Any]:
+        """Return all feedback for a job."""
+        try:
+            feedback_path = DATA_DIR / "feedback" / f"{job_id}.json"
+            if not feedback_path.exists():
+                return {"ok": True, "feedback": {}}
+            feedback = json.loads(feedback_path.read_text(encoding="utf-8"))
+            return {"ok": True, "feedback": feedback}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def reset_feedback(self, job_id: str) -> Dict[str, Any]:
+        """Reset all feedback for a job to neutral."""
+        try:
+            feedback_path = DATA_DIR / "feedback" / f"{job_id}.json"
+            if feedback_path.exists():
+                feedback_path.unlink()
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def get_all_feedback(self) -> Dict[str, Any]:
+        """Return aggregated feedback across all jobs — used for future learning."""
+        try:
+            feedback_dir = DATA_DIR / "feedback"
+            if not feedback_dir.exists():
+                return {"ok": True, "feedback": {}, "total": 0}
+            all_feedback: Dict[str, Any] = {}
+            for p in feedback_dir.glob("*.json"):
+                try:
+                    job_feedback = json.loads(p.read_text(encoding="utf-8"))
+                    all_feedback[p.stem] = job_feedback
+                except Exception:
+                    continue
+            total = sum(len(v) for v in all_feedback.values())
+            return {"ok": True, "feedback": all_feedback, "total": total}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # -----------------------------------------------------------------------
+    # Baseline corpus browser
+    # -----------------------------------------------------------------------
+
+    def get_baseline_thumbnails(self, limit: int = 48) -> Dict[str, Any]:
+        """
+        Return a sample of reference still paths from the baseline corpus
+        for display in the corpus browser UI.
+        Returns up to limit paths, sampled evenly across the corpus.
+        """
+        try:
+            embeddings_dir = DATA_DIR / "baseline" / "embeddings"
+            if not embeddings_dir.exists():
+                return {"ok": True, "thumbnails": [], "total": 0}
+
+            # embedding files reference their source — read source paths
+            embedding_files = sorted(embeddings_dir.glob("*.json"))
+            total           = len(embedding_files)
+
+            # sample evenly
+            if total <= limit:
+                sample = embedding_files
+            else:
+                step   = total / limit
+                sample = [embedding_files[int(i * step)] for i in range(limit)]
+
+            thumbnails = []
+            for ef in sample:
+                try:
+                    record = json.loads(ef.read_text(encoding="utf-8"))
+                    source = record.get("source", "")
+                    # find the original image in uploads or common locations
+                    thumbnails.append({
+                        "filename": source,
+                        "model":    record.get("model"),
+                    })
+                except Exception:
+                    continue
+
+            return {"ok": True, "thumbnails": thumbnails, "total": total}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    # -----------------------------------------------------------------------
+    # Run comparison
+    # -----------------------------------------------------------------------
+
+    def get_job_list(self) -> Dict[str, Any]:
+        """Return a list of completed jobs available for comparison."""
+        try:
+            jobs = []
+            for job_dir in sorted(JOBS_DIR.iterdir(), reverse=True):
+                if not job_dir.is_dir():
+                    continue
+                shots_path = job_dir / "shots.json"
+                manifest_path = job_dir / "manifest.json"
+                if not shots_path.exists():
+                    continue
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+                    shots    = json.loads(shots_path.read_text(encoding="utf-8"))
+                    jobs.append({
+                        "job_id":       job_dir.name,
+                        "source_file":  manifest.get("source_file", "unknown"),
+                        "created":      manifest.get("created", ""),
+                        "shot_count":   len(shots),
+                        "baseline_version": manifest.get("baseline_version", 0),
+                    })
+                except Exception:
+                    continue
+            return {"ok": True, "jobs": jobs}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def compare_jobs(self, job_id_a: str, job_id_b: str) -> Dict[str, Any]:
+        """
+        Compare the shot selections from two jobs.
+        Returns shots unique to A, unique to B, and common to both
+        (matched by scene_id and approximate timecode).
+        """
+        try:
+            def load_shots(job_id: str) -> List[Dict]:
+                p = JOBS_DIR / job_id / "shots.json"
+                if not p.exists():
+                    return []
+                return json.loads(p.read_text(encoding="utf-8"))
+
+            shots_a = load_shots(job_id_a)
+            shots_b = load_shots(job_id_b)
+
+            # match shots by scene_id
+            scenes_a = {s["scene_id"]: s for s in shots_a}
+            scenes_b = {s["scene_id"]: s for s in shots_b}
+
+            common   = []
+            only_a   = []
+            only_b   = []
+
+            all_scenes = set(scenes_a.keys()) | set(scenes_b.keys())
+            for scene_id in sorted(all_scenes):
+                in_a = scene_id in scenes_a
+                in_b = scene_id in scenes_b
+                if in_a and in_b:
+                    common.append({
+                        "scene_id":    scene_id,
+                        "shot_a":      scenes_a[scene_id],
+                        "shot_b":      scenes_b[scene_id],
+                        "score_delta": round(
+                            (scenes_a[scene_id].get("total_score") or 0) -
+                            (scenes_b[scene_id].get("total_score") or 0), 2
+                        ),
+                    })
+                elif in_a:
+                    only_a.append(scenes_a[scene_id])
+                else:
+                    only_b.append(scenes_b[scene_id])
+
+            return {
+                "ok":      True,
+                "job_a":   job_id_a,
+                "job_b":   job_id_b,
+                "common":  common,
+                "only_a":  only_a,
+                "only_b":  only_b,
+                "summary": {
+                    "common_count": len(common),
+                    "only_a_count": len(only_a),
+                    "only_b_count": len(only_b),
+                },
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def get_job_status(self, job_id: str) -> Dict[str, Any]:
         job_dir = JOBS_DIR / job_id
         if not job_dir.exists():

@@ -202,6 +202,10 @@
             class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200">Log</a>
           <a href="#" id="tab-baseline" onclick="showTab('baseline');return false"
             class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200">Baseline</a>
+          <a href="#" id="tab-corpus" onclick="showTab('corpus');return false"
+            class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200">Corpus</a>
+          <a href="#" id="tab-compare" onclick="showTab('compare');return false"
+            class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200">Compare</a>
         </nav>
       </div>
 
@@ -238,6 +242,33 @@
           <pre id="baselineDisplayFull" class="text-xs text-gray-300 bg-gray-800 rounded p-3 overflow-x-auto border border-gray-700">not loaded</pre>
         </div>
 
+        <!-- Corpus Browser -->
+        <div id="panel-corpus" class="tab-panel hidden space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-white">Golden Baseline Corpus</h3>
+            <button onclick="loadCorpus()" class="py-1 px-3 rounded text-xs font-medium text-white bg-gray-700 hover:bg-gray-600">Load</button>
+          </div>
+          <p class="text-xs text-gray-500" id="corpusCount">—</p>
+          <div id="corpusGrid" class="grid grid-cols-4 gap-2"></div>
+        </div>
+
+        <!-- Run Comparison -->
+        <div id="panel-compare" class="tab-panel hidden space-y-4">
+          <h3 class="text-sm font-semibold text-white">Compare Runs</h3>
+          <div class="grid grid-cols-2 gap-2">
+            <div class="space-y-1">
+              <label class="text-xs text-gray-400">Run A</label>
+              <select id="compareJobA" class="w-full rounded bg-gray-800 border border-gray-700 px-2 py-1.5 text-xs text-gray-200 focus:outline-none"></select>
+            </div>
+            <div class="space-y-1">
+              <label class="text-xs text-gray-400">Run B</label>
+              <select id="compareJobB" class="w-full rounded bg-gray-800 border border-gray-700 px-2 py-1.5 text-xs text-gray-200 focus:outline-none"></select>
+            </div>
+          </div>
+          <button onclick="runComparison()" class="w-full py-1.5 px-3 rounded text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700">Compare</button>
+          <div id="compareResults" class="space-y-3 text-xs text-gray-400">Select two runs and click Compare.</div>
+        </div>
+
       </div>
     </main>
   </div>
@@ -258,6 +289,7 @@ function initBridge() {
     const browseBtn = document.getElementById('browseBtn');
     if(browseBtn) browseBtn.disabled = false;
     loadBaseline();
+    loadJobList();
   }
 }
 
@@ -374,7 +406,7 @@ function log(line){
 }
 
 function showTab(name){
-  ['analysis','matrix','log','baseline'].forEach(n => {
+  ['analysis','matrix','log','baseline','corpus','compare'].forEach(n => {
     document.getElementById('panel-'+n).classList.add('hidden');
     const t = document.getElementById('tab-'+n);
     t.classList.remove('border-indigo-500','text-indigo-400');
@@ -448,6 +480,8 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
 
   if(r.ok){
     lastResults = r;
+    feedbackState = {};   // reset feedback state for new job
+    loadFeedbackForJob(currentJobId);
     renderResults(r);
     renderMatrix(r.shots);
     renderDownloads(r);
@@ -518,6 +552,11 @@ function makeShotCard(shot){
     ? `<p class="text-xs text-gray-400 italic mt-2 pt-2 border-t border-gray-700">${shot.rationale}</p>`
     : '';
 
+  const shotKey = shot.shot_id || ('shot_' + shot.id);
+  const fb      = feedbackState[shotKey] || 0;
+  const scaleTag  = shot.shot_scale  && shot.shot_scale  !== 'unknown' ? `<span class="text-xs text-gray-600 ml-1">${shot.shot_scale.replace(/_/g,' ')}</span>` : '';
+  const intentTag = shot.shot_intent && shot.shot_intent !== 'unknown' ? `<span class="text-xs text-indigo-500 ml-1">${shot.shot_intent}</span>` : '';
+
   card.innerHTML = `
     ${heroHtml}
     <div class="p-3">
@@ -526,16 +565,36 @@ function makeShotCard(shot){
           <span class="text-xs font-semibold text-gray-300">Shot ${shot.id}</span>
           <span class="text-xs text-gray-500 ml-2">${fmt(shot.start)} — ${fmt(shot.end)}</span>
           ${shot.duration ? `<span class="text-xs text-gray-600 ml-1">${Number(shot.duration).toFixed(1)}s</span>` : ''}
+          ${scaleTag}${intentTag}
           ${baseline}
         </div>
-        <div class="text-right flex-shrink-0 ml-3">
-          <span class="text-xl font-bold ${scoreColor(score)}">${fmtScore(score)}</span>
-          <span class="block text-xs text-gray-500">score</span>
+        <div class="flex items-center gap-2 ml-3">
+          <div class="text-right">
+            <span class="text-xl font-bold ${scoreColor(score)}">${fmtScore(score)}</span>
+            <span class="block text-xs text-gray-500">score</span>
+          </div>
+          <div class="flex flex-col gap-1">
+            <button data-key="${shotKey}" data-rating="1"
+              class="feedback-btn w-6 h-6 rounded text-xs flex items-center justify-center ${fb===1?'bg-green-600 text-white':'bg-gray-700 text-gray-400 hover:bg-green-800'}"
+              title="Good shot">+</button>
+            <button data-key="${shotKey}" data-rating="-1"
+              class="feedback-btn w-6 h-6 rounded text-xs flex items-center justify-center ${fb===-1?'bg-red-700 text-white':'bg-gray-700 text-gray-400 hover:bg-red-900'}"
+              title="Pass on this shot">–</button>
+          </div>
         </div>
       </div>
       <div class="grid grid-cols-2 gap-x-4 gap-y-1.5">${catHtml}</div>
       ${rationale}
     </div>`;
+
+  // wire feedback button clicks
+  card.querySelectorAll('.feedback-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const key    = btn.dataset.key;
+      const rating = parseInt(btn.dataset.rating);
+      setFeedback(key, rating, btn);
+    });
+  });
   return card;
 }
 
@@ -685,6 +744,130 @@ document.getElementById('rebuildClustersBtn').addEventListener('click', async ()
     log(`cluster rebuild error: ${r.error}`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Editor feedback
+// ---------------------------------------------------------------------------
+let feedbackState = {};   // shot_id -> rating (1, -1, 0)
+
+async function setFeedback(shotKey, rating, btn) {
+  hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview.api;
+  // toggle: clicking same rating again resets to neutral
+  const current = feedbackState[shotKey] || 0;
+  const newRating = current === rating ? 0 : rating;
+  feedbackState[shotKey] = newRating;
+
+  // update button styles in all cards
+  document.querySelectorAll(`.feedback-btn[data-key="${shotKey}"]`).forEach(b => {
+    const r = parseInt(b.dataset.rating);
+    if(r === 1){
+      b.className = b.className.replace(/bg-green-600 text-white|bg-gray-700 text-gray-400 hover:bg-green-800/g, '');
+      b.className += newRating === 1 ? ' bg-green-600 text-white' : ' bg-gray-700 text-gray-400 hover:bg-green-800';
+    } else {
+      b.className = b.className.replace(/bg-red-700 text-white|bg-gray-700 text-gray-400 hover:bg-red-900/g, '');
+      b.className += newRating === -1 ? ' bg-red-700 text-white' : ' bg-gray-700 text-gray-400 hover:bg-red-900';
+    }
+  });
+
+  if(hasBridge && currentJobId){
+    await window.pywebview.api.save_feedback(currentJobId, shotKey, newRating);
+  }
+}
+
+async function loadFeedbackForJob(jobId) {
+  if(!hasBridge || !jobId) return;
+  const r = await window.pywebview.api.get_feedback(jobId);
+  if(r.ok){
+    feedbackState = {};
+    Object.entries(r.feedback || {}).forEach(([key, val]) => {
+      feedbackState[key] = val.rating || 0;
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Corpus browser
+// ---------------------------------------------------------------------------
+async function loadCorpus() {
+  hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview.api;
+  if(!hasBridge) return;
+  const r = await window.pywebview.api.get_baseline_thumbnails(48);
+  if(!r.ok){ log('corpus error: ' + r.error); return; }
+
+  document.getElementById('corpusCount').textContent =
+    `${r.total} reference stills in corpus (showing ${r.thumbnails.length})`;
+
+  const grid = document.getElementById('corpusGrid');
+  grid.innerHTML = '';
+
+  r.thumbnails.forEach(t => {
+    const div = document.createElement('div');
+    div.className = 'bg-gray-800 rounded overflow-hidden';
+    div.title = t.filename;
+    div.innerHTML = `<div class="h-16 bg-gray-700 flex items-center justify-center text-gray-500 text-xs p-1 text-center leading-tight">${t.filename}</div>`;
+    grid.appendChild(div);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Run comparison
+// ---------------------------------------------------------------------------
+async function loadJobList() {
+  hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview.api;
+  if(!hasBridge) return;
+  const r = await window.pywebview.api.get_job_list();
+  if(!r.ok) return;
+
+  ['compareJobA','compareJobB'].forEach(id => {
+    const sel = document.getElementById(id);
+    sel.innerHTML = '<option value="">— select run —</option>';
+    r.jobs.forEach(j => {
+      const name = (j.source_file || j.job_id).split(/[/\\]/).pop();
+      const opt  = document.createElement('option');
+      opt.value       = j.job_id;
+      opt.textContent = `${name} (${j.shot_count} shots, v${j.baseline_version})`;
+      sel.appendChild(opt);
+    });
+  });
+}
+
+async function runComparison() {
+  hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview.api;
+  if(!hasBridge) return;
+  const a = document.getElementById('compareJobA').value;
+  const b = document.getElementById('compareJobB').value;
+  if(!a || !b){ alert('Select two runs to compare'); return; }
+  if(a === b){ alert('Select two different runs'); return; }
+
+  const r = await window.pywebview.api.compare_jobs(a, b);
+  const el = document.getElementById('compareResults');
+  if(!r.ok){ el.textContent = 'Error: ' + r.error; return; }
+
+  const s = r.summary;
+  el.innerHTML = `
+    <div class="grid grid-cols-3 gap-2 mb-3">
+      <div class="bg-gray-800 rounded p-2 text-center">
+        <div class="text-lg font-medium text-white">${s.common_count}</div>
+        <div class="text-xs text-gray-500">in both</div>
+      </div>
+      <div class="bg-gray-800 rounded p-2 text-center">
+        <div class="text-lg font-medium text-green-400">${s.only_a_count}</div>
+        <div class="text-xs text-gray-500">only in A</div>
+      </div>
+      <div class="bg-gray-800 rounded p-2 text-center">
+        <div class="text-lg font-medium text-indigo-400">${s.only_b_count}</div>
+        <div class="text-xs text-gray-500">only in B</div>
+      </div>
+    </div>
+    ${r.common.length ? '<p class="text-xs text-gray-400 mb-1">Score deltas (A vs B):</p>' + r.common.map(c =>
+      `<div class="flex justify-between text-xs py-0.5 border-b border-gray-700/40">
+        <span class="text-gray-400">Scene ${c.scene_id}</span>
+        <span class="${c.score_delta > 0 ? 'text-green-400' : c.score_delta < 0 ? 'text-red-400' : 'text-gray-500'}">
+          ${c.score_delta > 0 ? '+' : ''}${c.score_delta.toFixed(1)}
+        </span>
+      </div>`
+    ).join('') : ''}`;
+}
 
 // Init — bridge detection handled by pywebviewready event above
 </script>
