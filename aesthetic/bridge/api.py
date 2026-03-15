@@ -47,6 +47,7 @@ class AestheticAPI:
         self._baseline = BaselineStore(DATA_DIR)
         # progress log per job: job_id -> list of {stage, message, pct}
         self._progress: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        self._baseline_video_result: Dict[str, Any] = {}
         # active job state cache
         self._jobs: Dict[str, Job] = {}
 
@@ -122,28 +123,59 @@ class AestheticAPI:
 
     def train_baseline_from_video(self, video_path: str, note: str = "", sensitivity: int = 50) -> Dict[str, Any]:
         """
-        Ingest a reference video file into the Golden Baseline corpus.
+        Start baseline video ingest in a background thread.
+        Returns immediately with a task_id the UI can poll via poll_baseline_video_progress().
         Always augments — never replaces existing stills or previous versions.
         """
-        try:
-            from ..agents.baseline_trainer import train_baseline_from_video
+        import threading
 
-            def progress_cb(current: int, total: int, stage: str) -> None:
-                self._push_progress("baseline_video", stage, current)
+        task_id = f"baseline_video_{Path(video_path).stem[:24]}"
+        self._progress[task_id] = []
+        self._baseline_video_result[task_id] = {"status": "running"}
 
-            result = train_baseline_from_video(
-                video_path=video_path,
-                data_dir=DATA_DIR,
-                config=self._cfg,
-                note=note,
-                sensitivity=sensitivity,
-                per_scene_candidates=self._cfg.get("extract", {}).get("per_scene_candidates", 6),
-                progress_cb=progress_cb,
-            )
-            self._baseline = BaselineStore(DATA_DIR)
-            return {"ok": True, "result": result}
-        except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+        def _run():
+            try:
+                from ..agents.baseline_trainer import train_baseline_from_video as _train
+
+                def progress_cb(current: int, total: int, stage: str) -> None:
+                    self._push_progress(task_id, stage, current)
+
+                result = _train(
+                    video_path=video_path,
+                    data_dir=DATA_DIR,
+                    config=self._cfg,
+                    note=note,
+                    sensitivity=sensitivity,
+                    per_scene_candidates=self._cfg.get("extract", {}).get("per_scene_candidates", 6),
+                    progress_cb=progress_cb,
+                )
+                self._baseline = BaselineStore(DATA_DIR)
+                self._baseline_video_result[task_id] = {"status": "complete", "result": result}
+                self._push_progress(task_id, "Baseline ingest complete", 100)
+            except Exception as exc:
+                self._baseline_video_result[task_id] = {"status": "error", "error": str(exc)}
+                self._push_progress(task_id, f"Error: {exc}", -1)
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        return {"ok": True, "task_id": task_id}
+
+    def poll_baseline_video_progress(self, task_id: str) -> Dict[str, Any]:
+        """
+        Poll progress events for a running baseline video ingest.
+        Returns accumulated progress events and current status.
+        """
+        events = self._progress.get(task_id, [])
+        # drain the queue
+        self._progress[task_id] = []
+        result_info = self._baseline_video_result.get(task_id, {"status": "unknown"})
+        return {
+            "ok":     True,
+            "events": events,
+            "status": result_info.get("status", "unknown"),
+            "result": result_info.get("result"),
+            "error":  result_info.get("error"),
+        }
 
     # -----------------------------------------------------------------------
     # Jobs
@@ -285,7 +317,7 @@ class AestheticAPI:
             )
             result = subprocess.run(
                 ["powershell", "-NoProfile", "-Command", script],
-                capture_output=True, text=True, timeout=60
+                capture_output=True, text=True, timeout=300
             )
             path = result.stdout.strip()
             if path and Path(path).exists():
