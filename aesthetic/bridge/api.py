@@ -117,6 +117,13 @@ class AestheticAPI:
                 progress_cb=progress_cb,
             )
             self._baseline = BaselineStore(DATA_DIR)
+            # auto-rebuild style clusters after stills augment
+            try:
+                from ..agents.stratification import rebuild_cluster_index
+                bv = self._baseline.get_summary().get("active", {}).get("version", 0)
+                rebuild_cluster_index(DATA_DIR, bv)
+            except Exception as cluster_exc:
+                print(f"[bridge] cluster rebuild failed (non-fatal): {cluster_exc}")
             return {"ok": True, "result": result}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -150,6 +157,14 @@ class AestheticAPI:
                     progress_cb=progress_cb,
                 )
                 self._baseline = BaselineStore(DATA_DIR)
+                # auto-rebuild style clusters after augment
+                try:
+                    self._push_progress(task_id, "Rebuilding style clusters…", 98)
+                    from ..agents.stratification import rebuild_cluster_index
+                    bv = self._baseline.get_summary().get("active", {}).get("version", 0)
+                    rebuild_cluster_index(DATA_DIR, bv)
+                except Exception as cluster_exc:
+                    print(f"[bridge] cluster rebuild failed (non-fatal): {cluster_exc}")
                 self._baseline_video_result[task_id] = {"status": "complete", "result": result}
                 self._push_progress(task_id, "Baseline ingest complete", 100)
             except Exception as exc:
