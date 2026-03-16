@@ -233,47 +233,126 @@ def train_baseline_from_video(
         if progress_cb:
             progress_cb(30, 100, f"Extracted {total_frames} candidate frames")
 
-        # --- stage 4: metrics + inference ---
+        # --- stage 4: metrics + inference (parallel, CPU-capped, resumable) ---
         from collections import defaultdict
         by_scene = defaultdict(list)
         for c in candidates:
             by_scene[c.scene_id].append(c)
 
-        processed = 0
+        # --- resume: skip frames already in the embeddings index ---
+        embeddings_dir = data_dir / "baseline" / "embeddings"
+        embeddings_dir.mkdir(parents=True, exist_ok=True)
+        already_done = {p.stem for p in embeddings_dir.glob("*.json")}
+
+        remaining = [c for c in candidates if Path(c.path).stem[:64] not in already_done]
+        skipped   = total_frames - len(remaining)
+        if skipped > 0:
+            if progress_cb:
+                progress_cb(30, 100, f"Resuming — skipping {skipped} already-processed frames")
+            print(f"[baseline_trainer] resume: skipping {skipped} frames, {len(remaining)} remaining")
+        total_remaining = len(remaining)
+
+        processed = skipped   # count resumed frames as processed
         failed    = 0
 
-        for fi, candidate in enumerate(candidates):
-            if progress_cb and fi % 10 == 0:
-                pct = 30 + int((fi / total_frames) * 60)
-                progress_cb(pct, 100, f"Processing frame {fi+1}/{total_frames}…")
+        if total_remaining == 0:
+            if progress_cb:
+                progress_cb(90, 100, "All frames already processed — skipping to promotion")
+        else:
+            # --- determine worker count based on CPU cap ---
+            import psutil
+            import concurrent.futures
+            import time as _time
 
-            try:
-                # full metrics — includes temporal signals when prev frame available
-                scene_cands = by_scene[candidate.scene_id]
-                idx_in_scene = scene_cands.index(candidate)
-                prev_path = scene_cands[idx_in_scene - 1].path if idx_in_scene > 0 else None
+            cpu_cap_pct  = float(config.get("runtime", {}).get("cpu_cap_pct", 60.0))
+            physical_cores = psutil.cpu_count(logical=False) or psutil.cpu_count() or 4
+            # use floor of (cap * physical_cores), minimum 1, maximum physical_cores - 1
+            # keep at least one core free for the OS and UI
+            max_workers  = max(1, min(
+                physical_cores - 1,
+                int(physical_cores * cpu_cap_pct / 100.0)
+            ))
+            print(f"[baseline_trainer] using {max_workers}/{physical_cores} cores "
+                  f"(cap: {cpu_cap_pct:.0f}%)")
+            if progress_cb:
+                progress_cb(30, 100,
+                    f"Processing {total_remaining} frames on {max_workers} cores "
+                    f"({cpu_cap_pct:.0f}% CPU cap)…")
 
-                fm = compute_frame_metrics(
-                    candidate.path,
-                    candidate.scene_id,
-                    candidate.timestamp,
-                    work_dir,
-                    config,
-                    prev_frame_path=prev_path,
-                )
+            # --- build per-frame args list ---
+            frame_args = []
+            for c in remaining:
+                scene_cands  = by_scene[c.scene_id]
+                idx_in_scene = scene_cands.index(c)
+                prev_path    = scene_cands[idx_in_scene - 1].path if idx_in_scene > 0 else None
+                frame_args.append((c.path, c.scene_id, c.timestamp, str(work_dir), config, prev_path))
 
-                # CLIP embedding
-                if features.get("clip_enabled", True):
-                    fm = run_frame_inference(fm, candidate.path, work_dir, config)
+            # --- parallel metrics (CPU-bound, process pool) ---
+            metrics_results = {}   # path -> FrameMetrics
+            t_start = _time.time()
+            completed_count = 0
 
-                # build baseline record from full FrameMetrics
+            with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+                future_map = {
+                    executor.submit(_compute_frame_metrics_worker, args): args[0]
+                    for args in frame_args
+                }
+                for future in concurrent.futures.as_completed(future_map):
+                    frame_path = future_map[future]
+                    completed_count += 1
+                    try:
+                        fm = future.result()
+                        if fm is not None:
+                            metrics_results[frame_path] = fm
+                    except Exception as exc:
+                        failed += 1
+                        print(f"[baseline_trainer] metrics failed for {frame_path}: {exc}")
+
+                    # progress + ETA every frame
+                    if progress_cb and completed_count % 5 == 0:
+                        elapsed  = _time.time() - t_start
+                        rate     = completed_count / elapsed if elapsed > 0 else 1
+                        remaining_frames = total_remaining - completed_count
+                        eta_sec  = remaining_frames / rate if rate > 0 else 0
+                        eta_str  = _fmt_eta(eta_sec)
+                        pct      = 30 + int((completed_count / total_remaining) * 55)
+                        progress_cb(
+                            pct, 100,
+                            f"Metrics: {completed_count}/{total_remaining} frames "
+                            f"({rate:.1f}/s) — ETA {eta_str}"
+                        )
+
+                    # adaptive throttle: if CPU usage exceeds cap, pause briefly
+                    if completed_count % 20 == 0:
+                        cpu_now = psutil.cpu_percent(interval=0.1)
+                        if cpu_now > cpu_cap_pct + 15:
+                            _time.sleep(0.5)
+
+            # --- CLIP inference (GPU, batched, main thread) ---
+            if features.get("clip_enabled", True) and metrics_results:
+                if progress_cb:
+                    progress_cb(86, 100, f"Running CLIP on {len(metrics_results)} frames…")
+                clip_count = 0
+                for frame_path, fm in metrics_results.items():
+                    try:
+                        fm = run_frame_inference(fm, frame_path, work_dir, config)
+                        metrics_results[frame_path] = fm
+                        clip_count += 1
+                        if progress_cb and clip_count % 100 == 0:
+                            progress_cb(86, 100, f"CLIP: {clip_count}/{len(metrics_results)} frames…")
+                    except Exception as exc:
+                        print(f"[baseline_trainer] CLIP failed for {frame_path}: {exc}")
+
+            # --- write results to store ---
+            if progress_cb:
+                progress_cb(90, 100, "Writing records to baseline store…")
+            for frame_path, fm in metrics_results.items():
                 record = _frame_metrics_to_baseline_record(fm)
                 if record:
                     store.update_augment([record])
-                    # store embedding
                     if fm.inference.clip_embedding:
                         _store_embedding(
-                            Path(candidate.path),
+                            Path(frame_path),
                             fm.inference.clip_embedding,
                             fm.inference.clip_model_version,
                             data_dir,
@@ -281,10 +360,6 @@ def train_baseline_from_video(
                     processed += 1
                 else:
                     failed += 1
-
-            except Exception as exc:
-                failed += 1
-                print(f"[baseline_trainer] frame {fi} failed: {exc}")
 
         # --- stage 5: promote augment to new golden ---
         if progress_cb:
@@ -310,6 +385,40 @@ def train_baseline_from_video(
 
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+def _fmt_eta(seconds: float) -> str:
+    """Format seconds into a human-readable ETA string."""
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    elif seconds < 3600:
+        return f"{int(seconds // 60)}m {int(seconds % 60)}s"
+    else:
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        return f"{h}h {m}m"
+
+
+def _compute_frame_metrics_worker(args: tuple):
+    """
+    Worker function for ProcessPoolExecutor.
+    Runs in a separate process — must be a module-level function (not a lambda or closure).
+    Returns FrameMetrics or None on failure.
+    Each worker process imports the metrics module independently.
+    """
+    frame_path, scene_id, timestamp, work_dir_str, config, prev_frame_path = args
+    try:
+        from aesthetic.agents.metrics import compute_frame_metrics
+        from pathlib import Path
+        fm = compute_frame_metrics(
+            frame_path, scene_id, timestamp,
+            Path(work_dir_str), config,
+            prev_frame_path=prev_frame_path,
+        )
+        return fm
+    except Exception as exc:
+        print(f"[worker] metrics failed for {frame_path}: {exc}")
+        return None
 
 
 def _frame_metrics_to_baseline_record(fm) -> Optional[Dict[str, float]]:

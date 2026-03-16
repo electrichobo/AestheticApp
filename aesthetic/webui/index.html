@@ -174,6 +174,21 @@
             <p class="text-xs text-gray-600">Rebuilds after adding new baseline material. Clusters enable like-for-like Creative pillar scoring.</p>
           </div>
 
+          <!-- Baseline video ingest progress -->
+          <div id="baselineIngestProgress" class="hidden space-y-1.5">
+            <div class="flex items-center justify-between text-xs">
+              <span id="baselineIngestStage" class="text-gray-400 truncate">—</span>
+              <span id="baselineIngestPct" class="text-indigo-300 flex-shrink-0 ml-2">0%</span>
+            </div>
+            <div class="score-bar">
+              <div id="baselineIngestBar" class="progress-bar-inner score-bar-fill bg-indigo-500" style="width:0%"></div>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span id="baselineIngestPulse" class="inline-block w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
+              <span id="baselineIngestEta" class="text-xs text-gray-500">—</span>
+            </div>
+          </div>
+
           <!-- Baseline display -->
           <div>
             <div class="flex items-center justify-between mb-1">
@@ -722,15 +737,32 @@ document.getElementById('addVideoBaselineBtn').addEventListener('click', async (
   const taskId = startRes.task_id;
   log(`ingest started — task: ${taskId}`);
 
+  // show progress UI
+  document.getElementById('baselineIngestProgress').classList.remove('hidden');
+  document.getElementById('baselineIngestBar').style.width = '0%';
+  document.getElementById('baselineIngestPct').textContent = '0%';
+  document.getElementById('baselineIngestEta').textContent = 'calculating…';
+
+  // extract ETA from progress message if present
+  function parseEta(msg) {
+    const m = msg.match(/ETA\s+([\w\s]+)$/);
+    return m ? m[1].trim() : null;
+  }
+
   // poll progress every 2 seconds
   const _baselinePoll = setInterval(async () => {
     const p = await window.pywebview.api.poll_baseline_video_progress(taskId);
     if(!p.ok) return;
 
-    // log each progress event
+    // process each event
     (p.events || []).forEach(ev => {
       log(`[baseline] ${ev.message}`);
-      document.getElementById('baselineStatus').textContent = ev.message;
+      const pct = Math.max(0, Math.min(100, ev.pct || 0));
+      document.getElementById('baselineIngestBar').style.width = pct + '%';
+      document.getElementById('baselineIngestPct').textContent  = pct + '%';
+      document.getElementById('baselineIngestStage').textContent = ev.message;
+      const eta = parseEta(ev.message);
+      if(eta) document.getElementById('baselineIngestEta').textContent = 'ETA: ' + eta;
     });
 
     if(p.status === 'complete'){
@@ -738,6 +770,12 @@ document.getElementById('addVideoBaselineBtn').addEventListener('click', async (
       const d = p.result || {};
       const msg = `v${d.promotion?.version} — +${d.processed || 0} frames from ${d.scene_count || 0} scenes`;
       document.getElementById('baselineStatus').textContent = msg;
+      document.getElementById('baselineIngestBar').style.width = '100%';
+      document.getElementById('baselineIngestPct').textContent = '100%';
+      document.getElementById('baselineIngestStage').textContent = 'Complete';
+      document.getElementById('baselineIngestEta').textContent = 'Done';
+      document.getElementById('baselineIngestPulse').classList.remove('animate-pulse');
+      document.getElementById('baselineIngestPulse').classList.add('bg-green-500');
       document.getElementById('addVideoBaselineBtn').disabled = false;
       document.getElementById('addVideoBaselineBtn').textContent = 'Browse Reference Video…';
       log(`baseline updated: ${d.processed}/${d.frame_count} frames → ${msg}`);
@@ -745,6 +783,9 @@ document.getElementById('addVideoBaselineBtn').addEventListener('click', async (
     } else if(p.status === 'error'){
       clearInterval(_baselinePoll);
       document.getElementById('baselineStatus').textContent = `error: ${p.error}`;
+      document.getElementById('baselineIngestStage').textContent = 'Failed';
+      document.getElementById('baselineIngestPulse').classList.remove('animate-pulse');
+      document.getElementById('baselineIngestPulse').classList.add('bg-red-500');
       document.getElementById('addVideoBaselineBtn').disabled = false;
       document.getElementById('addVideoBaselineBtn').textContent = 'Browse Reference Video…';
       log(`baseline ingest failed: ${p.error}`);
