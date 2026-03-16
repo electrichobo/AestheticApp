@@ -329,13 +329,22 @@ def train_baseline_from_video(
                             _time.sleep(0.5)
 
             # --- CLIP inference (GPU, batched, main thread) ---
-            if features.get("clip_enabled", True) and metrics_results:
+            # MiDaS depth is disabled for baseline ingest — it generates large
+            # PNG files per frame and the depth_separation metric is already
+            # computed from the Laplacian pyramid in the metrics engine.
+            # This alone saves 5+ GB per feature film ingested.
+            baseline_features = dict(features)
+            baseline_features["midas_enabled"] = False
+            baseline_config   = dict(config)
+            baseline_config["features"] = baseline_features
+
+            if baseline_features.get("clip_enabled", True) and metrics_results:
                 if progress_cb:
                     progress_cb(86, 100, f"Running CLIP on {len(metrics_results)} frames…")
                 clip_count = 0
                 for frame_path, fm in metrics_results.items():
                     try:
-                        fm = run_frame_inference(fm, frame_path, work_dir, config)
+                        fm = run_frame_inference(fm, frame_path, work_dir, baseline_config)
                         metrics_results[frame_path] = fm
                         clip_count += 1
                         if progress_cb and clip_count % 100 == 0:
@@ -361,6 +370,13 @@ def train_baseline_from_video(
                 else:
                     failed += 1
 
+        # --- stage 4b: cleanup working files ---
+        # frames, depth maps, and metrics sidecars are not needed after embeddings
+        # are stored. Delete them to reclaim disk space.
+        if progress_cb:
+            progress_cb(91, 100, "Cleaning up working files…")
+        _cleanup_video_work(work_dir)
+
         # --- stage 5: promote augment to new golden ---
         if progress_cb:
             progress_cb(92, 100, "Promoting to new golden version…")
@@ -385,6 +401,29 @@ def train_baseline_from_video(
 
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+def _cleanup_video_work(work_dir: Path) -> None:
+    """
+    Delete temporary working files after baseline video ingest completes.
+    Keeps only the embeddings (stored separately in data/baseline/embeddings/).
+    Deletes: extracted frames, MiDaS depth maps, metrics sidecars.
+    The work_dir itself is left in place (empty) so resume detection still works.
+    """
+    import shutil
+    deleted_bytes = 0
+    for subdir in ["frames", "depth", "metrics"]:
+        target = work_dir / subdir
+        if target.exists():
+            try:
+                size = sum(f.stat().st_size for f in target.rglob("*") if f.is_file())
+                shutil.rmtree(target)
+                deleted_bytes += size
+                print(f"[baseline_trainer] cleaned up {subdir}/ ({size / 1024**2:.0f} MB)")
+            except Exception as exc:
+                print(f"[baseline_trainer] cleanup warning for {subdir}: {exc}")
+    if deleted_bytes > 0:
+        print(f"[baseline_trainer] total reclaimed: {deleted_bytes / 1024**3:.2f} GB")
 
 
 def _fmt_eta(seconds: float) -> str:
