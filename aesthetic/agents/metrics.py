@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 from scipy import ndimage, signal
-from skimage.metrics import structural_similarity as ssim_func
+# skimage imported lazily inside functions to avoid lazy_loader version conflicts
 
 from ..models.scores import (
     ExposureMetrics,
@@ -191,9 +191,11 @@ def _compute_exposure(bgr: np.ndarray) -> ExposureMetrics:
     psnr      = round(10.0 * np.log10((255.0 ** 2) / mse), 2) if mse > 0 else 60.0
 
     # SSIM proxy (vs smoothed self — structural integrity indicator)
+    # skimage imported locally to avoid lazy_loader version conflicts at module load time
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        ssim_val = float(ssim_func(
+        from skimage.metrics import structural_similarity as _ssim_func
+        ssim_val = float(_ssim_func(
             gray.astype(np.uint8),
             blurred.astype(np.uint8),
             data_range=255,
