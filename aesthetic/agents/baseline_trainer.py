@@ -304,7 +304,16 @@ def train_baseline_from_video(
             t_start = _time.time()
             completed_count = 0
 
-            with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+            # use 'spawn' context with explicit executable so workers
+            # inherit the venv Python, not the system Python
+            import sys as _sys
+            import multiprocessing as _mp
+            _ctx = _mp.get_context("spawn")
+            _ctx.set_executable(_sys.executable)
+
+            with concurrent.futures.ProcessPoolExecutor(
+                max_workers=max_workers, mp_context=_ctx
+            ) as executor:
                 future_map = {
                     executor.submit(_compute_frame_metrics_worker, args): args[0]
                     for args in frame_args

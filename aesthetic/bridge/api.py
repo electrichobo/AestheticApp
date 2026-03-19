@@ -743,10 +743,16 @@ class AestheticAPI:
                 frame_args.append((c.path, c.scene_id, c.timestamp,
                                    str(job_dir), cfg, prev_path, repo_root))
 
+            # use explicit venv Python via spawn context
+            import sys as _sys2
+            import multiprocessing as _mp2
+            _ctx2 = _mp2.get_context("spawn")
+            _ctx2.set_executable(_sys2.executable)
+
             # parallel metrics
             metrics_by_path: Dict[str, Any] = {}
             completed = 0
-            with _cf.ProcessPoolExecutor(max_workers=max_workers) as executor:
+            with _cf.ProcessPoolExecutor(max_workers=max_workers, mp_context=_ctx2) as executor:
                 future_map = {
                     executor.submit(_compute_frame_metrics_worker, args): args[0]
                     for args in frame_args
