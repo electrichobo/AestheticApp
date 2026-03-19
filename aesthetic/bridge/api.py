@@ -735,6 +735,7 @@ class AestheticAPI:
                         break
 
             # build args — include prev_path for temporal metrics
+            # CUDA suppression env vars are set inside the worker itself
             frame_args = []
             for fi, c in enumerate(candidates):
                 prev_path = (candidates[fi-1].path
@@ -743,16 +744,18 @@ class AestheticAPI:
                 frame_args.append((c.path, c.scene_id, c.timestamp,
                                    str(job_dir), cfg, prev_path, repo_root))
 
-            # use explicit venv Python via spawn context
-            import sys as _sys2
-            import multiprocessing as _mp2
-            _ctx2 = _mp2.get_context("spawn")
-            _ctx2.set_executable(_sys2.executable)
+            # Use ThreadPoolExecutor on Windows to avoid DLL conflicts
+            # (cublas/BLAS conflict when spawning processes after torch loads).
+            # numpy/OpenCV/scipy release the GIL so threads achieve parallelism.
+            import platform as _plat
+            _executor_cls = (_cf.ThreadPoolExecutor
+                             if _plat.system() == "Windows"
+                             else _cf.ProcessPoolExecutor)
 
             # parallel metrics
             metrics_by_path: Dict[str, Any] = {}
             completed = 0
-            with _cf.ProcessPoolExecutor(max_workers=max_workers, mp_context=_ctx2) as executor:
+            with _executor_cls(max_workers=max_workers) as executor:
                 future_map = {
                     executor.submit(_compute_frame_metrics_worker, args): args[0]
                     for args in frame_args

@@ -304,16 +304,17 @@ def train_baseline_from_video(
             t_start = _time.time()
             completed_count = 0
 
-            # use 'spawn' context with explicit executable so workers
-            # inherit the venv Python, not the system Python
-            import sys as _sys
-            import multiprocessing as _mp
-            _ctx = _mp.get_context("spawn")
-            _ctx.set_executable(_sys.executable)
+            # Use ThreadPoolExecutor on Windows to avoid DLL conflicts (cublas/BLAS)
+            # that occur when spawning new processes after torch has loaded.
+            # numpy/OpenCV/scipy release the GIL during computation so threads
+            # achieve true parallelism for CPU-bound metric work.
+            # ProcessPoolExecutor is used on Linux/macOS where fork is available.
+            import platform as _platform
+            _executor_cls = (concurrent.futures.ThreadPoolExecutor
+                             if _platform.system() == "Windows"
+                             else concurrent.futures.ProcessPoolExecutor)
 
-            with concurrent.futures.ProcessPoolExecutor(
-                max_workers=max_workers, mp_context=_ctx
-            ) as executor:
+            with _executor_cls(max_workers=max_workers) as executor:
                 future_map = {
                     executor.submit(_compute_frame_metrics_worker, args): args[0]
                     for args in frame_args
@@ -463,8 +464,8 @@ def _compute_frame_metrics_worker(args: tuple):
     """
     Worker function for ProcessPoolExecutor.
     Runs in a separate process — must be a module-level function.
-    Injects the repo root into sys.path so aesthetic is importable
-    regardless of how the subprocess was spawned (pywebview, IDE, CLI).
+    Injects the repo root into sys.path and suppresses CUDA/GPU
+    initialisation so workers stay CPU-only and lightweight.
     """
     frame_path, scene_id, timestamp, work_dir_str, config, prev_frame_path, repo_root = args
     import sys
