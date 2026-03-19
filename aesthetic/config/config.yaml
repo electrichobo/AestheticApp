@@ -7,7 +7,7 @@ io:
   baseline_path: "data/baseline.json"
 
 runtime:
-  cpu_cap_pct: 60.0        # maximum CPU usage % for parallel processing (scales to host machine)
+  cpu_cap_pct: 90.0        # maximum CPU usage % for parallel processing (scales to host machine)
   seed: 42
   cpu_guard_pct: 85      # pause pipeline if CPU usage exceeds this %
   gpu_guard_pct: 90      # pause pipeline if GPU usage exceeds this %

@@ -32,9 +32,9 @@ import cv2
 import numpy as np
 
 from ..baseline import BaselineStore
-from ..agents.inference import _run_clip, _get_device
-from ..agents.metrics import compute_frame_metrics
 from ..config import DATA_DIR
+# inference and metrics imported lazily inside functions to avoid
+# torch/cublas DLL conflicts when the module loads in a thread context
 
 
 # Supported image extensions
@@ -78,6 +78,7 @@ def train_baseline_from_folder(
 
     features  = config.get("features", {})
     gpu       = bool(features.get("gpu_enabled", False))
+    from ..agents.inference import _get_device
     device    = _get_device(gpu)
 
     store     = BaselineStore(data_dir)
@@ -194,6 +195,7 @@ def train_baseline_from_video(
 
     features = config.get("features", {})
     gpu      = bool(features.get("gpu_enabled", False))
+    from ..agents.inference import _get_device
     device   = _get_device(gpu)
     seed     = config.get("runtime", {}).get("seed", 42)
     store    = BaselineStore(data_dir)
@@ -616,6 +618,7 @@ def _process_reference_still(
             return None
 
         # CLIP embedding
+        from ..agents.inference import _run_clip
         embedding, version = _run_clip(str(img_path), device)
         if embedding is None:
             return None
