@@ -165,6 +165,12 @@ def aggregate_shot(
     if len(frame_scores) > 1:
         temporal_variance = round(float(np.std(frame_scores)), 2)
 
+    # subjective proxy — seeded from narrative + temporal consistency only.
+    # Uses no technical category scores to avoid circular dependency.
+    # Neutral midpoint is 50 — missing data neither rewards nor penalises.
+    # Real calibration comes from the baseline corpus over time.
+    subjective_total = _compute_subjective_proxy(frames, narrative, temporal_variance)
+
     return ShotScore(
         shot_id=shot_id,
         scene_id=scene_id,
@@ -176,10 +182,59 @@ def aggregate_shot(
         quality=quality,
         narrative=narrative,
         technical_total=technical_total,
+        subjective_total=subjective_total,
         total_score=technical_total,
         temporal_variance=temporal_variance,
         frame_count=len(frames),
     )
+
+
+# ---------------------------------------------------------------------------
+# Subjective proxy
+# ---------------------------------------------------------------------------
+
+def _compute_subjective_proxy(
+    frames:            list,
+    narrative_score:   Any,
+    temporal_variance: Optional[float],
+) -> float:
+    """
+    Compute a subjective pillar proxy score from narrative metrics and
+    temporal consistency only — deliberately avoiding technical category
+    scores to prevent circular dependency with the Technical pillar.
+
+    Components:
+      - Saliency consistency (40%) — how well the frame draws attention
+      - Compelling MOS (40%)      — aesthetic appeal proxy
+      - Temporal stability (20%)  — consistent shots feel more intentional
+
+    Neutral midpoint is 50. Missing data returns 50 (unknown, not penalised).
+    Real calibration improves as the baseline corpus grows.
+    """
+    NEUTRAL = 50.0
+    parts:   list = []
+    weights: list = []
+
+    # saliency consistency from narrative category
+    sal = narrative_score.saliency_consistency if narrative_score is not None else None
+    parts.append(float(sal) if sal is not None else NEUTRAL)
+    weights.append(0.40)
+
+    # compelling MOS from narrative category
+    mos = narrative_score.compelling_mos if narrative_score is not None else None
+    parts.append(float(mos) if mos is not None else NEUTRAL)
+    weights.append(0.40)
+
+    # temporal stability — low variance = intentional, consistent shot
+    if temporal_variance is not None:
+        stability = max(0.0, 100.0 - min(temporal_variance * 2.0, 50.0))
+        parts.append(stability)
+    else:
+        parts.append(NEUTRAL)
+    weights.append(0.20)
+
+    proxy = sum(p * w for p, w in zip(parts, weights)) / sum(weights)
+    return round(min(100.0, max(0.0, proxy)), 2)
 
 
 # ---------------------------------------------------------------------------

@@ -225,24 +225,25 @@ def _intent_adjusted_technical(
     intent_key = shot_intent if shot_intent in INTENT_CATEGORY_WEIGHTS else "unknown"
     iw         = INTENT_CATEGORY_WEIGHTS[intent_key]
 
+    # use _or_neutral to get 50 for missing metrics rather than 0
+    # so missing data never penalises — it just contributes nothing extra
     category_scores = {
-        "exposure":    score.exposure.technical,
-        "lighting":    score.lighting.technical,
-        "composition": score.composition.technical,
-        "movement":    score.movement.technical,
-        "color":       score.color.technical,
-        "quality":     score.quality.technical,
-        "narrative":   score.narrative.technical,
+        "exposure":    score.exposure.technical_or_neutral,
+        "lighting":    score.lighting.technical_or_neutral,
+        "composition": score.composition.technical_or_neutral,
+        "movement":    score.movement.technical_or_neutral,
+        "color":       score.color.technical_or_neutral,
+        "quality":     score.quality.technical_or_neutral,
+        "narrative":   score.narrative.technical_or_neutral,
     }
 
     weighted_sum = 0.0
     weight_sum   = 0.0
 
     for cat, val in category_scores.items():
-        if val is not None:
-            w = iw.get(cat, 1.0)
-            weighted_sum += val * w
-            weight_sum   += w
+        w = iw.get(cat, 1.0)
+        weighted_sum += val * w
+        weight_sum   += w
 
     if weight_sum == 0:
         return score.technical_total

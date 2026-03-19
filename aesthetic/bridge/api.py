@@ -705,25 +705,78 @@ class AestheticAPI:
             candidates = sample_candidates(video_meta, scenes, job_dir, per_scene_candidates=per_scene, seed=seed)
             self._push_progress(job_id, f"Extracted {len(candidates)} candidate frames", 40)
 
-            # --- stage 4: metrics ---
+            # --- stage 4: metrics (parallel, CPU-capped) ---
             self._push_progress(job_id, "Computing frame metrics…", 42)
             from ..agents.metrics import compute_frame_metrics
+            from ..agents.baseline_trainer import _compute_frame_metrics_worker
             from collections import defaultdict as _dd
+            import concurrent.futures as _cf
+            import psutil as _psutil
+            import os as _os
+
             by_scene: Dict[int, List] = _dd(list)
             for c in candidates:
                 by_scene[c.scene_id].append(c)
 
+            total_frames  = len(candidates)
+            cpu_cap_pct   = float(cfg.get("runtime", {}).get("cpu_cap_pct", 60.0))
+            phys_cores    = _psutil.cpu_count(logical=False) or _psutil.cpu_count() or 4
+            max_workers   = max(1, min(phys_cores - 1, int(phys_cores * cpu_cap_pct / 100.0)))
+
+            # detect repo root for subprocess sys.path injection
+            import sys as _sys
+            repo_root = str(Path(__file__).resolve().parents[3])
+            if not _os.path.isfile(_os.path.join(repo_root, 'aesthetic', '__init__.py')):
+                p = Path(__file__).resolve()
+                for _ in range(6):
+                    p = p.parent
+                    if (p / 'aesthetic' / '__init__.py').exists():
+                        repo_root = str(p)
+                        break
+
+            # build args — include prev_path for temporal metrics
+            frame_args = []
+            for fi, c in enumerate(candidates):
+                prev_path = (candidates[fi-1].path
+                             if fi > 0 and candidates[fi-1].scene_id == c.scene_id
+                             else None)
+                frame_args.append((c.path, c.scene_id, c.timestamp,
+                                   str(job_dir), cfg, prev_path, repo_root))
+
+            # parallel metrics
+            metrics_by_path: Dict[str, Any] = {}
+            completed = 0
+            with _cf.ProcessPoolExecutor(max_workers=max_workers) as executor:
+                future_map = {
+                    executor.submit(_compute_frame_metrics_worker, args): args[0]
+                    for args in frame_args
+                }
+                for future in _cf.as_completed(future_map):
+                    frame_path = future_map[future]
+                    completed += 1
+                    try:
+                        fm = future.result()
+                        if fm is not None:
+                            metrics_by_path[frame_path] = fm
+                    except Exception as exc:
+                        print(f"[bridge] metrics failed for {frame_path}: {exc}")
+                    if completed % 5 == 0:
+                        pct = 42 + int((completed / total_frames) * 18)
+                        self._push_progress(job_id, f"Metrics: {completed}/{total_frames} frames", pct)
+
+            # reassemble in candidate order, preserving scene grouping
             all_frame_metrics = []
             scene_candidate_map: Dict[int, List] = _dd(list)
-            total_frames = len(candidates)
-            for fi, c in enumerate(candidates):
-                prev_path = candidates[fi-1].path if fi > 0 and candidates[fi-1].scene_id == c.scene_id else None
-                fm = compute_frame_metrics(c.path, c.scene_id, c.timestamp, job_dir, cfg, prev_frame_path=prev_path)
+            for c in candidates:
+                fm = metrics_by_path.get(c.path)
+                if fm is None:
+                    from ..models.scores import FrameMetrics
+                    fm = FrameMetrics(frame_id=Path(c.path).stem,
+                                      scene_id=c.scene_id,
+                                      timestamp=c.timestamp,
+                                      frame_path=c.path)
                 all_frame_metrics.append(fm)
                 scene_candidate_map[c.scene_id].append(fm)
-                if fi % 10 == 0:
-                    pct = 42 + int((fi / total_frames) * 18)
-                    self._push_progress(job_id, f"Metrics: {fi+1}/{total_frames} frames", pct)
 
             # --- stage 5: AI inference ---
             features = cfg.get("features", {})
@@ -756,16 +809,34 @@ class AestheticAPI:
                 except Exception:
                     pass
 
-            # classify per frame, then aggregate to shot level
-            frame_classifications: Dict[int, List[Dict]] = defaultdict(list)
+            # classify per frame with adaptive subsampling for long scenes.
+            # Shot intent rarely changes within a scene — classifying every
+            # frame of a 60-frame scene wastes GPU. Sample up to MAX_CLS_PER_SCENE
+            # frames per scene, spread evenly, then propagate the result.
+            MAX_CLS_PER_SCENE = 4
+            from collections import defaultdict as _dd2
+            frames_by_scene: Dict[int, List] = _dd2(list)
             for fm in all_frame_metrics:
-                cls = classify_shot(
-                    fm, fm.frame_path, cfg,
-                    clip_model=_clip_model,
-                    clip_preprocess=_clip_pre,
-                    clip_device=_clip_dev,
-                )
-                frame_classifications[fm.scene_id].append(cls)
+                frames_by_scene[fm.scene_id].append(fm)
+
+            frame_classifications: Dict[int, List[Dict]] = defaultdict(list)
+            for scene_id, scene_fms in frames_by_scene.items():
+                n = len(scene_fms)
+                if n <= MAX_CLS_PER_SCENE:
+                    sample = scene_fms
+                else:
+                    # evenly spaced sample
+                    step   = n / MAX_CLS_PER_SCENE
+                    sample = [scene_fms[int(i * step)] for i in range(MAX_CLS_PER_SCENE)]
+
+                for fm in sample:
+                    cls = classify_shot(
+                        fm, fm.frame_path, cfg,
+                        clip_model=_clip_model,
+                        clip_preprocess=_clip_pre,
+                        clip_device=_clip_dev,
+                    )
+                    frame_classifications[scene_id].append(cls)
 
             # aggregate to shot-level classification
             shot_classifications: Dict[int, Dict] = {}

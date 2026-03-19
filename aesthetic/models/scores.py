@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -209,20 +209,34 @@ class CategoryScore(BaseModel):
     subjective: Optional[float] = Field(None, ge=0.0, le=100.0)
     total:      Optional[float] = Field(None, ge=0.0, le=100.0)
 
+    NEUTRAL: ClassVar[float] = 50.0   # unknown = neutral, not penalised
+
+    @property
+    def technical_or_neutral(self) -> float:
+        """Return technical score, or 50 if not yet computed. Never penalises."""
+        return self.technical if self.technical is not None else self.NEUTRAL
+
+    @property
+    def creative_or_neutral(self) -> float:
+        return self.creative if self.creative is not None else self.NEUTRAL
+
+    @property
+    def subjective_or_neutral(self) -> float:
+        return self.subjective if self.subjective is not None else self.NEUTRAL
+
     def compute_total(
         self,
         w_technical:  float = 0.50,
         w_creative:   float = 0.30,
         w_subjective: float = 0.20,
     ) -> float:
-        """Compute weighted total from available pillar scores."""
-        parts, weights = [], []
-        if self.technical  is not None: parts.append(self.technical  * w_technical);  weights.append(w_technical)
-        if self.creative   is not None: parts.append(self.creative   * w_creative);   weights.append(w_creative)
-        if self.subjective is not None: parts.append(self.subjective * w_subjective); weights.append(w_subjective)
-        if not weights:
-            return 0.0
-        total = sum(parts) / sum(weights)
+        """Compute weighted total from available pillar scores.
+        Missing scores use neutral midpoint (50) rather than being
+        excluded, so all pillar weights are always active."""
+        tech = self.technical  if self.technical  is not None else self.NEUTRAL
+        creat= self.creative   if self.creative   is not None else self.NEUTRAL
+        subj = self.subjective if self.subjective is not None else self.NEUTRAL
+        total = tech * w_technical + creat * w_creative + subj * w_subjective
         return round(total, 2)
 
 

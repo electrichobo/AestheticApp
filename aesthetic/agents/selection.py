@@ -271,6 +271,7 @@ def _deduplicate(
 
     kept: List[Tuple[Shot, ShotScore]] = []
     kept_hashes: List[np.ndarray] = []
+    hash_buckets: Dict[int, List] = {}
 
     for shot, score in sorted_pool:
         # get hero frame path for hashing
@@ -286,18 +287,22 @@ def _deduplicate(
             kept_hashes.append(None)
             continue
 
-        # check against all kept hashes
+        # bucketed lookup — only compare against hashes in nearby buckets
+        # bucket key = first 16 bits of hash as integer, search ±1 bucket
         is_duplicate = False
-        for kept_hash in kept_hashes:
-            if kept_hash is not None:
-                distance = _hamming_distance(phash, kept_hash)
-                if distance <= hash_threshold:
+        bucket_key = int(phash[:4].dot(2**np.arange(4, dtype=np.uint64)))
+        for bk in (bucket_key - 1, bucket_key, bucket_key + 1):
+            for kept_hash in hash_buckets.get(bk, []):
+                if _hamming_distance(phash, kept_hash) <= hash_threshold:
                     is_duplicate = True
                     break
+            if is_duplicate:
+                break
 
         if not is_duplicate:
             kept.append((shot, score))
             kept_hashes.append(phash)
+            hash_buckets.setdefault(bucket_key, []).append(phash)
 
     return kept
 
@@ -352,8 +357,8 @@ def _facility_location(
     if len(pool) <= top_k:
         return pool
 
-    # build metric vectors for all shots
-    vectors = np.array([_metric_vector(score) for _, score in pool], dtype=np.float32)
+    # build metric vectors — pass shot for classification dimensions
+    vectors = np.array([_metric_vector(score, shot) for shot, score in pool], dtype=np.float32)
 
     # normalise vectors
     norms = np.linalg.norm(vectors, axis=1, keepdims=True) + 1e-8
@@ -402,22 +407,76 @@ def _update_distances(
     np.minimum(min_distances, distances, out=min_distances)
 
 
-def _metric_vector(score: ShotScore) -> np.ndarray:
+def _metric_vector(score: ShotScore, shot: Optional[Any] = None) -> np.ndarray:
     """
-    Build a fixed-length feature vector from a ShotScore for distance computation.
-    Uses the technical category scores as the basis.
+    Build a fixed-length feature vector from a ShotScore for distance computation
+    in the facility location algorithm.
+
+    Uses neutral fallback (50) for missing values so gaps don't collapse
+    distance — a shot with missing movement data is not treated as identical
+    to every other shot with missing movement data.
+
+    Includes shot classification dimensions so stylistically different shots
+    (wide vs close, static vs moving, interior vs exterior) are seen as
+    genuinely diverse in the selection objective.
     """
-    return np.array([
-        score.exposure.technical    or 0.0,
-        score.lighting.technical    or 0.0,
-        score.composition.technical or 0.0,
-        score.movement.technical    or 0.0,
-        score.color.technical       or 0.0,
-        score.quality.technical     or 0.0,
-        score.narrative.technical   or 0.0,
-        score.technical_total       or 0.0,
-        score.baseline_similarity_score or 0.0,
-    ], dtype=np.float32)
+    NEUTRAL = 50.0
+
+    # --- technical category scores (7 dims) ---
+    tech = [
+        score.exposure.technical_or_neutral,
+        score.lighting.technical_or_neutral,
+        score.composition.technical_or_neutral,
+        score.movement.technical_or_neutral,
+        score.color.technical_or_neutral,
+        score.quality.technical_or_neutral,
+        score.narrative.technical_or_neutral,
+    ]
+
+    # --- pillar totals (3 dims) ---
+    pillars = [
+        score.technical_total   if score.technical_total   is not None else NEUTRAL,
+        score.creative_total    if score.creative_total    is not None else NEUTRAL,
+        score.subjective_total  if score.subjective_total  is not None else NEUTRAL,
+    ]
+
+    # --- temporal signal (1 dim) ---
+    temporal = [
+        score.temporal_variance if score.temporal_variance is not None else NEUTRAL,
+    ]
+
+    # --- shot classification (4 dims, ordinal-encoded) ---
+    # scale values to 0-100 range for consistent distance contribution
+    scale_map = {
+        "extreme_close": 0, "close": 17, "medium_close": 33,
+        "medium": 50, "medium_wide": 67, "wide": 83, "extreme_wide": 100,
+        "unknown": 50,
+    }
+    movement_map = {
+        "static": 0, "pan": 20, "tilt": 40, "dolly": 60,
+        "handheld": 80, "drone": 100, "unknown": 50,
+    }
+    scene_map = {
+        "interior_day": 0, "interior_night": 33,
+        "exterior_day": 67, "exterior_night": 100, "unknown": 50,
+    }
+    intent_map = {
+        "intimate": 0, "dialogue": 25, "action": 50,
+        "transitional": 75, "establishing": 100, "unknown": 50,
+    }
+
+    if shot is not None:
+        scale_val    = scale_map.get(shot.shot_scale.value    if shot.shot_scale    else "unknown", 50)
+        movement_val = movement_map.get(shot.movement_type.value if shot.movement_type else "unknown", 50)
+        scene_val    = scene_map.get(shot.scene_type.value    if shot.scene_type    else "unknown", 50)
+        intent_val   = intent_map.get(getattr(shot, "shot_intent", "unknown") or "unknown", 50)
+    else:
+        scale_val = movement_val = scene_val = intent_val = 50
+
+    classification = [float(scale_val), float(movement_val),
+                      float(scene_val), float(intent_val)]
+
+    return np.array(tech + pillars + temporal + classification, dtype=np.float32)
 
 
 # ---------------------------------------------------------------------------

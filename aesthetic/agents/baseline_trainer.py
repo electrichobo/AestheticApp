@@ -279,13 +279,25 @@ def train_baseline_from_video(
                     f"Processing {total_remaining} frames on {max_workers} cores "
                     f"({cpu_cap_pct:.0f}% CPU cap)…")
 
+            # --- detect repo root for subprocess sys.path injection ---
+            import os as _os
+            repo_root = str(Path(__file__).resolve().parents[3])
+            if not _os.path.isfile(_os.path.join(repo_root, 'aesthetic', '__init__.py')):
+                # fallback: walk up until we find the aesthetic package
+                p = Path(__file__).resolve()
+                for _ in range(6):
+                    p = p.parent
+                    if (p / 'aesthetic' / '__init__.py').exists():
+                        repo_root = str(p)
+                        break
+
             # --- build per-frame args list ---
             frame_args = []
             for c in remaining:
                 scene_cands  = by_scene[c.scene_id]
                 idx_in_scene = scene_cands.index(c)
                 prev_path    = scene_cands[idx_in_scene - 1].path if idx_in_scene > 0 else None
-                frame_args.append((c.path, c.scene_id, c.timestamp, str(work_dir), config, prev_path))
+                frame_args.append((c.path, c.scene_id, c.timestamp, str(work_dir), config, prev_path, repo_root))
 
             # --- parallel metrics (CPU-bound, process pool) ---
             metrics_results = {}   # path -> FrameMetrics
@@ -441,14 +453,20 @@ def _fmt_eta(seconds: float) -> str:
 def _compute_frame_metrics_worker(args: tuple):
     """
     Worker function for ProcessPoolExecutor.
-    Runs in a separate process — must be a module-level function (not a lambda or closure).
-    Returns FrameMetrics or None on failure.
-    Each worker process imports the metrics module independently.
+    Runs in a separate process — must be a module-level function.
+    Injects the repo root into sys.path so aesthetic is importable
+    regardless of how the subprocess was spawned (pywebview, IDE, CLI).
     """
-    frame_path, scene_id, timestamp, work_dir_str, config, prev_frame_path = args
+    frame_path, scene_id, timestamp, work_dir_str, config, prev_frame_path, repo_root = args
+    import sys
+    from pathlib import Path
+
+    # ensure the repo root is on the path in this subprocess
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+
     try:
         from aesthetic.agents.metrics import compute_frame_metrics
-        from pathlib import Path
         fm = compute_frame_metrics(
             frame_path, scene_id, timestamp,
             Path(work_dir_str), config,
