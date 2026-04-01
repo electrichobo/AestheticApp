@@ -129,9 +129,27 @@ class BaselineStore:
 
     def load_active_golden(self) -> Dict[str, Any]:
         active = self._load_json(self.active_path, {"version": 0})
-        if int(active.get("version", 0)) == 0 or "path" not in active:
+        version = int(active.get("version", 0))
+        if version == 0:
             return {}
-        return self._load_json(Path(str(active["path"])), {})
+
+        # if path is present and valid, use it directly
+        stored_path = active.get("path")
+        if stored_path and Path(str(stored_path)).exists():
+            return self._load_json(Path(str(stored_path)), {})
+
+        # path missing or invalid (e.g. bundled app with rewritten active.json)
+        # scan the golden directory for the matching version file
+        candidate = self.golden_dir / f"v{version:04d}.json"
+        if candidate.exists():
+            return self._load_json(candidate, {})
+
+        # fallback: find highest version file present
+        version_files = sorted(self.golden_dir.glob("v*.json"))
+        if version_files:
+            return self._load_json(version_files[-1], {})
+
+        return {}
 
     # ---------- updating buffers ----------
 

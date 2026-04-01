@@ -46,9 +46,15 @@ def main() -> None:
     APP_NAME = "AESTHETIC"
 
     api    = AestheticAPI()
+
+    # In a frozen bundle, use http_server=True so pywebview serves the HTML
+    # via localhost rather than file:// URI — this ensures the JS bridge
+    # (window.pywebview.api) initialises correctly in the WebView2 context.
+    use_http = getattr(sys, "frozen", False)
+
     window = webview.create_window(
         APP_NAME,
-        (WEB_DIR / "index.html").as_uri(),
+        str(WEB_DIR / "index.html") if use_http else (WEB_DIR / "index.html").as_uri(),
         width=1280,
         height=860,
         resizable=True,
@@ -56,7 +62,7 @@ def main() -> None:
     )
     # store window reference so open_file_dialog can access it
     api._window = window
-    webview.start(http_server=False)
+    webview.start(http_server=use_http)
 
 
 if __name__ == "__main__":

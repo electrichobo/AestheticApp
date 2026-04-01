@@ -68,6 +68,52 @@ for d in (DATA_DIR, OUTPUTS_DIR, BASELINE_DIR,
     d.mkdir(parents=True, exist_ok=True)
 
 
+def _seed_baseline_from_bundle() -> None:
+    """
+    On first launch of a frozen (installed) build, copy the Golden Baseline
+    that was bundled with the installer into the user's writable data directory.
+    Only runs if the user's baseline is empty and the bundle contains one.
+    Skips silently if already seeded or no bundle baseline exists.
+    """
+    if not getattr(sys, "frozen", False):
+        return  # development — nothing to seed
+
+    user_golden = BASELINE_DIR / "golden"
+    # already seeded if golden directory has version files
+    if any(user_golden.glob("v*.json")):
+        return
+
+    # bundle baseline lives alongside the exe, outside _internal
+    exe_dir = Path(sys.executable).parent
+    bundle_baseline = exe_dir / "aesthetic" / "data" / "baseline"
+    if not bundle_baseline.exists():
+        return
+
+    import shutil
+    try:
+        for sub in ("embeddings", "golden"):
+            src = bundle_baseline / sub
+            dst = BASELINE_DIR / sub
+            if src.exists():
+                dst.mkdir(parents=True, exist_ok=True)
+                for item in src.iterdir():
+                    dest_item = dst / item.name
+                    if not dest_item.exists():
+                        shutil.copy2(str(item), str(dest_item))
+        # copy active.json
+        src_active = bundle_baseline / "golden" / "active.json"
+        dst_active = BASELINE_DIR / "golden" / "active.json"
+        if src_active.exists() and not dst_active.exists():
+            shutil.copy2(str(src_active), str(dst_active))
+        print("[config] Golden Baseline seeded from bundle into user data directory.")
+    except Exception as exc:
+        print(f"[config] Baseline seed warning (non-fatal): {exc}")
+
+
+# seed baseline on first launch
+_seed_baseline_from_bundle()
+
+
 def load_config() -> Dict[str, Any]:
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:

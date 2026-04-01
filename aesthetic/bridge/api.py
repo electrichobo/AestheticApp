@@ -316,7 +316,8 @@ class AestheticAPI:
             return {"ok": False, "error": "no file selected"}
 
         except Exception as exc:
-            # fallback to PowerShell dialog
+            # log the ctypes failure then try PowerShell fallback
+            print(f"[bridge] ctypes dialog failed: {exc} — trying PowerShell fallback")
             return self._open_file_dialog_powershell()
 
     def _open_file_dialog_powershell(self) -> Dict[str, Any]:
