@@ -215,13 +215,20 @@ def _compute_subjective_proxy(
     parts:   list = []
     weights: list = []
 
-    # saliency consistency from narrative category
-    sal = narrative_score.saliency_consistency if narrative_score is not None else None
+    # pull raw narrative signals directly from FrameMetrics — NOT from
+    # narrative_score which is a CategoryScore (collapsed scalar) and has
+    # no saliency_consistency or compelling_mos attributes
+    sal_vals = _collect(frames, lambda f: f.narrative.saliency_consistency
+                        if f.narrative is not None else None)
+    mos_vals = _collect(frames, lambda f: f.narrative.compelling_mos
+                        if f.narrative is not None else None)
+
+    sal = float(np.mean(sal_vals)) if sal_vals else None
+    mos = float(np.mean(mos_vals)) if mos_vals else None
+
     parts.append(float(sal) if sal is not None else NEUTRAL)
     weights.append(0.40)
 
-    # compelling MOS from narrative category
-    mos = narrative_score.compelling_mos if narrative_score is not None else None
     parts.append(float(mos) if mos is not None else NEUTRAL)
     weights.append(0.40)
 
