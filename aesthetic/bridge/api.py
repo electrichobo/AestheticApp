@@ -324,6 +324,7 @@ class AestheticAPI:
         """PowerShell fallback file dialog for Windows."""
         try:
             import subprocess
+            import sys
             script = (
                 "Add-Type -AssemblyName System.Windows.Forms; "
                 "$f = New-Object System.Windows.Forms.OpenFileDialog; "
