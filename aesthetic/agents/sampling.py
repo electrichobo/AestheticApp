@@ -18,6 +18,10 @@ from __future__ import annotations
 import json
 import random
 import subprocess
+import sys as _sys
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if _sys.platform == "win32" else 0
+import sys as _sys
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if _sys.platform == "win32" else 0
 import shutil
 from pathlib import Path
 from typing import List
@@ -250,6 +254,7 @@ def _extract_frame(video_path: str, timestamp: float, output_path: Path) -> None
             capture_output=True,
             text=True,
             timeout=30,
+            creationflags=_NO_WINDOW,
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"ffmpeg timed out extracting frame at {timestamp:.3f}s")

@@ -332,7 +332,8 @@ class AestheticAPI:
             )
             result = subprocess.run(
                 ["powershell", "-NoProfile", "-Command", script],
-                capture_output=True, text=True, timeout=300
+                capture_output=True, text=True, timeout=300,
+                creationflags=(subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0),
             )
             path = result.stdout.strip()
             if path and Path(path).exists():

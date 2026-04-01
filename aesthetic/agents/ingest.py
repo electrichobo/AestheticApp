@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys as _sys
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if _sys.platform == "win32" else 0
+import sys as _sys
+_NO_WINDOW = subprocess.CREATE_NO_WINDOW if _sys.platform == "win32" else 0
 import shutil
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -74,6 +78,7 @@ def _run_ffprobe(path: Path) -> Dict[str, Any]:
             capture_output=True,
             text=True,
             timeout=60,
+            creationflags=_NO_WINDOW,
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"ffprobe timed out on: {path}")
