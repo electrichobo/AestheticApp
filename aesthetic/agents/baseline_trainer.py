@@ -998,13 +998,17 @@ def _build_embeddings_index(data_dir: Path) -> List[List[float]]:
     if not embeddings_dir.exists():
         return []
 
+    EXPECTED_DIM = 512   # CLIP ViT-B-32 embedding dimension
+
     embeddings = []
     for p in embeddings_dir.glob("*.json"):
         try:
             record = json.loads(p.read_text(encoding="utf-8"))
             emb    = record.get("embedding")
-            if emb and len(emb) > 0:
+            if emb and len(emb) == EXPECTED_DIM:
                 embeddings.append(emb)
+            elif emb:
+                print(f"[baseline] skipping {p.name}: wrong dim {len(emb)} (expected {EXPECTED_DIM})")
         except Exception:
             continue
 
