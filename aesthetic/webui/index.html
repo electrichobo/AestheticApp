@@ -344,6 +344,24 @@ function setSrcMode(mode){
 }
 
 // ---------------------------------------------------------------------------
+// Local image loader — serves images via bridge in http_server mode
+// ---------------------------------------------------------------------------
+async function loadShotImages() {
+  if(!hasBridge) return;
+  const imgs = document.querySelectorAll('.shot-img[data-path]');
+  for(const img of imgs) {
+    const path = img.getAttribute('data-path');
+    if(!path || img.src.startsWith('data:')) continue;
+    try {
+      const r = await window.pywebview.api.get_local_file_url(path);
+      if(r.ok) { img.src = r.url; img.removeAttribute('data-path'); }
+    } catch(e) {
+      img.src = 'file:///' + path.replace(/\\/g, '/');
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Native file browser — pywebview dialog returns real absolute path
 // ---------------------------------------------------------------------------
 document.getElementById('browseBtn').addEventListener('click', async () => {
@@ -536,6 +554,7 @@ function renderResults(r){
   const results = document.getElementById('analysisResults');
   results.innerHTML = '';
   (r.shots || []).forEach(s => results.appendChild(makeShotCard(s)));
+  loadShotImages();
 }
 
 function makeShotCard(shot){
@@ -545,7 +564,7 @@ function makeShotCard(shot){
   const cats     = ['exposure','lighting','composition','movement','color','quality','narrative'];
 
   const heroHtml = shot.hero_frame
-    ? `<img src="file:///${shot.hero_frame.replace(/\\/g,'/')}" class="w-full h-36 object-cover" onerror="this.style.display='none'">`
+    ? `<img src="" class="w-full h-36 object-cover shot-img" data-path="${shot.hero_frame}" onerror="this.style.display='none'">`
     : '';
 
   const catHtml = cats.map(k => {

@@ -163,7 +163,21 @@ def _load_or_build_index(
         try:
             index = json.loads(index_path.read_text(encoding="utf-8"))
             if index.get("baseline_version") == baseline_version:
-                return index
+                clusters = index.get("clusters", [])
+                if clusters:
+                    centroid_dim = len(clusters[0].get("centroid", []))
+                    if centroid_dim != 512:
+                        print(f"[stratification] stale index: centroid dim "
+                              f"{centroid_dim} != 512 — rebuilding")
+                    else:
+                        emb_dir = data_dir / "baseline" / "embeddings"
+                        actual  = sum(1 for _ in emb_dir.glob("*.json")) if emb_dir.exists() else 0
+                        covered = sum(len(c.get("embeddings", [])) for c in clusters)
+                        if actual > 0 and covered < actual * 0.5:
+                            print(f"[stratification] stale index: {covered} members "
+                                  f"vs {actual} embeddings — rebuilding")
+                        else:
+                            return index
         except Exception:
             pass
 

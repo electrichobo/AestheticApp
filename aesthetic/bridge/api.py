@@ -382,20 +382,41 @@ class AestheticAPI:
             return {"ok": False, "error": str(exc)}
 
     def open_output_folder(self, folder_path: str) -> Dict[str, Any]:
-        """Open a folder in Windows Explorer / macOS Finder."""
+        """Open a folder in Windows Explorer / macOS Finder / Linux file manager."""
         try:
             import subprocess
             import sys
+            import os
             path = Path(folder_path)
             if not path.exists():
-                return {"ok": False, "error": f"path not found: {folder_path}"}
+                path.mkdir(parents=True, exist_ok=True)
             if sys.platform == "win32":
-                subprocess.Popen(["explorer", str(path)])
+                os.startfile(str(path))
             elif sys.platform == "darwin":
                 subprocess.Popen(["open", str(path)])
             else:
                 subprocess.Popen(["xdg-open", str(path)])
             return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def get_local_file_url(self, file_path: str) -> Dict[str, Any]:
+        """
+        Return a data: URL for local image files so they can be displayed
+        in http_server mode where file:/// URLs are blocked by same-origin policy.
+        For video files returns a file:// URL (handled by the video element).
+        """
+        try:
+            import base64
+            path = Path(file_path)
+            if not path.exists():
+                return {"ok": False, "error": "file not found"}
+            suffix = path.suffix.lower()
+            if suffix in (".jpg", ".jpeg", ".png", ".webp"):
+                data = base64.b64encode(path.read_bytes()).decode()
+                mime = "image/jpeg" if suffix in (".jpg", ".jpeg") else f"image/{suffix[1:]}"
+                return {"ok": True, "url": f"data:{mime};base64,{data}"}
+            return {"ok": True, "url": path.as_uri()}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
