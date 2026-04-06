@@ -280,6 +280,17 @@ class ShotScore(BaseModel):
     # frame count used for aggregation
     frame_count: int = 0
 
+    # per-metric detail — averaged raw metric values per category
+    # structure: {category: {metric_name: avg_value}}
+    metric_detail: Optional[Dict[str, Dict[str, float]]] = None
+
+    # colour analysis
+    delta_e_d65:        Optional[float] = None
+    delta_e_baseline:   Optional[float] = None
+    gamut_coverage:     Optional[Dict[str, float]] = None
+    dominant_colours:   Optional[List[List[float]]] = None
+    skin_tone_detected: bool = False
+
     def category_list(self) -> List[Dict[str, Any]]:
         """Return all category scores as a list for UI rendering."""
         return [

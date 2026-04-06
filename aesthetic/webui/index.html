@@ -641,70 +641,221 @@ function renderMatrix(shots){
 
   const cats    = ['exposure','lighting','composition','movement','color','quality','narrative'];
   const pillars = ['technical','creative','subjective'];
-  const pillarLabel = {technical:'T', creative:'C', subjective:'S'};
-  const pillarColor = {technical:'text-blue-400', creative:'text-purple-400', subjective:'text-amber-400'};
+  const pLabel  = {technical:'T', creative:'C', subjective:'S'};
+  const pColor  = {technical:'text-blue-400', creative:'text-purple-400', subjective:'text-amber-400'};
+  const cColor  = {exposure:'text-yellow-400',lighting:'text-orange-400',composition:'text-green-400',
+                   movement:'text-cyan-400',color:'text-pink-400',quality:'text-purple-400',narrative:'text-indigo-400'};
 
-  // row 1: shot | total | 3 pillars | category group headers (each spans 4 cols)
-  const catGroupHeaders = cats.map(c =>
-    `<th class="px-2 py-1 text-center border-l border-gray-600/60 uppercase tracking-wide" colspan="4">${c}</th>`
+  const catHdrs = cats.map(c =>
+    `<th class="px-2 py-1 text-center border-l border-gray-600/50 uppercase tracking-wide ${cColor[c]}" colspan="4">${c}</th>`
   ).join('');
 
-  // row 2: sub-columns per category — tot + T + C + S
-  const subHeaders = cats.map(() =>
-    `<th class="px-1 py-1 text-center text-gray-500 font-normal border-l border-gray-600/60">tot</th>` +
-    pillars.map(p =>
-      `<th class="px-1 py-1 text-center ${pillarColor[p]} font-normal">${pillarLabel[p]}</th>`
-    ).join('')
+  const subHdrs = cats.map(() =>
+    `<th class="px-1 py-1 text-center text-gray-500 border-l border-gray-600/30">tot</th>` +
+    pillars.map(p => `<th class="px-1 py-1 text-center ${pColor[p]}">${pLabel[p]}</th>`).join('')
   ).join('');
 
-  const rows = shots.map(s => {
-    const catCells = cats.map(k => {
-      const sc   = s.scores?.[k];
-      const tot  = sc?.total;
-      const tech = sc?.technical;
-      const creat= sc?.creative;
-      const subj = sc?.subjective;
-      return `<td class="px-1 py-1.5 text-center border-l border-gray-600/40 font-medium ${scoreColor(tot)}">${fmtScore(tot)}</td>` +
-             `<td class="px-1 py-1.5 text-center text-blue-300/70">${fmtScore(tech)}</td>` +
-             `<td class="px-1 py-1.5 text-center text-purple-300/70">${fmtScore(creat)}</td>` +
-             `<td class="px-1 py-1.5 text-center text-amber-300/70">${fmtScore(subj)}</td>`;
+  const rows = shots.map((s,i) => {
+    const cells = cats.map(k => {
+      const sc = s.scores?.[k];
+      return `<td class="px-1 py-1.5 text-center border-l border-gray-600/30 font-medium ${scoreColor(sc?.total)}">${fmtScore(sc?.total)}</td>` +
+             `<td class="px-1 py-1.5 text-center text-blue-300/70">${fmtScore(sc?.technical)}</td>` +
+             `<td class="px-1 py-1.5 text-center text-purple-300/70">${fmtScore(sc?.creative)}</td>` +
+             `<td class="px-1 py-1.5 text-center text-amber-300/70">${fmtScore(sc?.subjective)}</td>`;
     }).join('');
-
-    return `<tr class="border-b border-gray-700/30 hover:bg-gray-700/20">
-      <td class="px-2 py-1.5 text-xs text-gray-400 whitespace-nowrap font-medium">Shot ${s.id}</td>
+    return `<tr class="border-b border-gray-700/30 hover:bg-gray-700/20 cursor-pointer" onclick="toggleShotDetail(${i})" title="Click for full metric breakdown">
+      <td class="px-2 py-1.5 text-xs whitespace-nowrap font-medium text-indigo-400 hover:text-indigo-300 select-none">▶ Shot ${s.id}</td>
       <td class="px-2 py-1.5 text-center font-bold ${scoreColor(s.totalScore)}">${fmtScore(s.totalScore)}</td>
       <td class="px-2 py-1.5 text-center text-blue-300">${fmtScore(s.technicalTotal)}</td>
       <td class="px-2 py-1.5 text-center text-purple-300">${fmtScore(s.creativeTotal)}</td>
       <td class="px-2 py-1.5 text-center text-amber-300">${fmtScore(s.subjectiveTotal)}</td>
-      ${catCells}
-    </tr>`;
+      ${cells}
+    </tr>
+    <tr id="mxd-${i}" class="hidden"><td colspan="99" class="p-0 bg-gray-900/50 border-b border-gray-700">${buildDetailPanel(s)}</td></tr>`;
   }).join('');
 
   el.innerHTML = `<div class="overflow-x-auto text-xs">
     <table class="text-left bg-gray-800 rounded border border-gray-700" style="min-width:max-content">
       <thead>
-        <tr class="border-b border-gray-600 bg-gray-900/60 text-xs uppercase tracking-wide">
+        <tr class="border-b border-gray-600 bg-gray-900/70 text-xs uppercase tracking-wide">
           <th class="px-2 py-2 text-gray-400" rowspan="2">Shot</th>
           <th class="px-2 py-2 text-center text-gray-200" rowspan="2">Total</th>
           <th class="px-2 py-2 text-center text-blue-400" rowspan="2">Tech</th>
           <th class="px-2 py-2 text-center text-purple-400" rowspan="2">Creative</th>
           <th class="px-2 py-2 text-center text-amber-400" rowspan="2">Subj</th>
-          ${catGroupHeaders}
+          ${catHdrs}
         </tr>
-        <tr class="border-b border-gray-700 bg-gray-900/40 text-xs">
-          ${subHeaders}
-        </tr>
+        <tr class="border-b border-gray-700 bg-gray-900/40">${subHdrs}</tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
-    <div class="text-xs text-gray-600 mt-2 px-1 flex gap-4">
-      <span><span class="text-blue-400 font-medium">T</span> = Technical</span>
-      <span><span class="text-purple-400 font-medium">C</span> = Creative (baseline sim)</span>
-      <span><span class="text-amber-400 font-medium">S</span> = Subjective (narrative)</span>
+    <div class="text-xs text-gray-600 mt-2 px-1 flex gap-4 flex-wrap">
+      <span class="text-blue-400">T</span>=Technical &nbsp;
+      <span class="text-purple-400">C</span>=Creative (baseline sim) &nbsp;
+      <span class="text-amber-400">S</span>=Subjective &nbsp;·&nbsp;
+      <span>Click any shot row to expand raw metrics</span>
     </div>
   </div>`;
 }
 
+function toggleShotDetail(i){
+  const row = document.getElementById('mxd-'+i);
+  if(!row) return;
+  const hidden = row.classList.contains('hidden');
+  document.querySelectorAll('[id^="mxd-"]').forEach(r=>r.classList.add('hidden'));
+  if(hidden) row.classList.remove('hidden');
+}
+
+const ML = {
+  exposure:{
+    histogram_mean:       {l:'Exposure Mean',        d:'Average pixel brightness (0=black, 255=white). Cinematic sweet spot: 90–150 for daylight, lower for night.'},
+    histogram_std:        {l:'Tonal Range',           d:'Spread of tones across the histogram. Low (<30) = flat/low-contrast/foggy. High (>60) = punchy contrast.'},
+    histogram_skew:       {l:'Tonal Skew',            d:'Negative = image skews dark. Positive = image skews bright. Near 0 = balanced mid-tone distribution.'},
+    'highlight_clip_%':   {l:'Highlight Clipping',   d:'% of pixels blown to pure white. Under 1% = clean highlights. Over 3% = lost detail in bright areas.'},
+    'shadow_clip_%':      {l:'Shadow Clipping',      d:'% of pixels crushed to pure black. Some is intentional (rich blacks). Over 5% = lost shadow detail.'},
+    snr_luma:             {l:'Luma SNR (dB)',         d:'Signal-to-noise in brightness. >20dB = clean. 10–20dB = grain visible. <10dB = noisy/low-light.'},
+    snr_chroma:           {l:'Chroma SNR (dB)',       d:'Signal-to-noise in colour channels. Low = colour noise visible, especially in darks.'},
+    psnr:                 {l:'PSNR (dB)',             d:'Peak signal-to-noise vs a smoothed reference. High = sharp and clean. Low = noisy or soft.'},
+    ssim:                 {l:'SSIM',                  d:'Structural similarity (0–100). Measures whether edges and textures are well-preserved.'},
+    exposure_intent:      {l:'Exposure Intent',       d:'How deliberately the tonal range is used. High = intentional full-range exposure. Low = flat or clipped.'},
+    temporal_consistency: {l:'Temporal Consistency', d:'Exposure stability across frames. Low = flickering or inconsistent lighting between frames.'},
+  },
+  lighting:{
+    dynamic_range_stops:  {l:'Dynamic Range (stops)', d:'Log₂ ratio of brightest to darkest areas. Cinema cameras: 13–15 stops. Low = flat/compressed light.'},
+    key_fill_ratio:       {l:'Key/Fill Ratio',        d:'Ratio of bright to dark areas. >4:1 = dramatic (noir, thriller). 1–2:1 = flat/even (documentary).'},
+    color_temp_K:         {l:'Colour Temp (K)',       d:'Estimated colour temperature. 3200K=tungsten/warm, 5600K=daylight, 6500K=overcast/cool.'},
+    color_temp_deviation: {l:'Temp Deviation',        d:'How far from neutral daylight (5600K). High = strong warm or cool cast in the image.'},
+    shadow_detail:        {l:'Shadow Detail',         d:'Luminance preserved in shadow regions. Low = crushed blacks with no visible detail.'},
+    shadow_noise:         {l:'Shadow Noise',          d:'Noise level in shadows. High = visible grain or chroma noise in dark areas.'},
+    transition_hardness:  {l:'Light Hardness',        d:'Sharpness of light-to-shadow transitions. High = hard direct light. Low = soft, diffused light.'},
+    light_motivation:     {l:'Light Motivation',      d:'How directional the lighting appears. High = clear motivated source. Low = flat ambient fill.'},
+  },
+  composition:{
+    rule_of_thirds:       {l:'Rule of Thirds',       d:'Edge density at the ⅓ grid intersections. Higher = subject placed at compositional power points.'},
+    center_of_mass_x:     {l:'Visual Weight X',      d:'Horizontal gravity of the image (0=left, 0.5=centre, 1=right). Ideally near 0.33 or 0.67.'},
+    center_of_mass_y:     {l:'Visual Weight Y',      d:'Vertical gravity (0=top, 0.33=upper third, 1=bottom). Upper third often best for portraits.'},
+    symmetry_score:       {l:'Symmetry',             d:'Left-right mirror symmetry. High = deliberate symmetrical framing (faces, architecture, Kubrick).'},
+    depth_separation:     {l:'Depth Separation',     d:'Sharpness difference between near and far. High = strong depth-of-field separation (shallow focus).'},
+    'negative_space_%':   {l:'Negative Space',       d:'% of frame that is open/dark — breathing room around the subject. Essential for visual clarity.'},
+    'occupancy_%':        {l:'Frame Occupancy',      d:'How much of the frame is filled. Low = open, spacious. High = busy, filled frame.'},
+    headroom:             {l:'Headroom',             d:'Space above the visual centre. Too little = cramped. Too much = subject looks lost.'},
+    lead_room:            {l:'Lead Room',            d:'Space in the direction the subject faces or moves. Low = subject pushing against the frame edge.'},
+    frame_balance:        {l:'Frame Balance',        d:'How close the visual centre is to a rule-of-thirds power point. Higher = better compositional placement.'},
+    face_placement:       {l:'Face Placement',       d:'How well detected faces sit within compositional guidelines (rule of thirds, golden ratio).'},
+  },
+  movement:{
+    optical_flow_mean:    {l:'Motion Intensity',     d:'Average pixel displacement per frame. 0=locked off. Low=subtle move. High=fast action/handheld.'},
+    optical_flow_std:     {l:'Motion Variance',      d:'Consistency of movement. Low=smooth controlled move. High=erratic/unintentional shake.'},
+    smoothness:           {l:'Smoothness',           d:'Overall camera movement smoothness (0–100). High=fluid dolly/slider. Low=jittery handheld.'},
+    jerkiness:            {l:'Jerkiness',            d:'Sudden unintended acceleration. High=poor stabilisation or unintentional handheld shake.'},
+    stabilization:        {l:'Stabilisation',        d:'Estimated IS/OIS/electronic stabilisation effectiveness. High=well-stabilised shot.'},
+    motion_blur_amount:   {l:'Motion Blur',          d:'Amount of motion blur present. Some = cinematic shutter (180°). Excess = too slow a shutter.'},
+    focus_during_movement:{l:'Focus Tracking',       d:'How well focus is maintained during camera movement. Low = soft or missed focus pull.'},
+    trajectory_smoothness:{l:'Trajectory',           d:'Smoothness of the overall camera path. High = intentional, fluid arc. Low = wandering path.'},
+  },
+  color:{
+    wb_deviation:         {l:'White Balance Error',  d:'Distance of the average scene colour from neutral grey (Lab). 0=perfect WB. High=colour cast.'},
+    saturation_mean:      {l:'Saturation',           d:'Average colour richness (Lab chroma). Low=desaturated/bleach-bypass look. High=vivid/stylised.'},
+    saturation_uniformity:{l:'Sat. Uniformity',      d:'How evenly saturation is distributed. Low=big variation (coloured subject on grey background).'},
+    palette_entropy:      {l:'Colour Complexity',    d:'Variety of hues in the frame. Low=near-monochromatic/teal-orange. High=many distinct colours.'},
+    chroma_noise:         {l:'Colour Noise',         d:'Noise in the a*/b* colour channels. High=visible colour speckle, especially in shadows.'},
+    banding_score:        {l:'Banding',              d:'Colour/luminance banding artifact. High=visible staircase steps instead of smooth gradients.'},
+    delta_e_d65:          {l:'ΔE vs Neutral',        d:'Perceptual colour difference from D65 neutral grey. <2=negligible cast. 2–5=subtle. >5=visible.'},
+  },
+  quality:{
+    sharpness_laplacian:  {l:'Sharpness',            d:'Edge sharpness via Laplacian variance. <100=soft/out-of-focus. 200–500=normal. >1000=very sharp.'},
+    sharpness_edge_density:{l:'Edge Density',        d:'% of pixels that are edges. Low=simple/clean frame. High=busy/detailed frame.'},
+    mtf_proxy:            {l:'Fine Detail (MTF)',    d:'High vs low frequency content ratio. High=lens resolving fine detail well. Low=soft lens/focus.'},
+    vignetting_stops:     {l:'Vignetting',           d:'Light falloff to corners in stops. >1.5=visible vignette. Can be intentional (anamorphic look).'},
+    ca_width_px:          {l:'Chromatic Aberration', d:'Colour fringing at high-contrast edges. <1px=negligible. 2–3px=mild. >5px=distracting/cheap lens.'},
+    flare_contrast_loss:  {l:'Flare',                d:'Veiling flare reducing local contrast. High=strong flare. Can be intentional for atmosphere.'},
+    compression_blocking: {l:'Blocking Artifact',   d:'DCT blocking severity. >5=noticeable codec artifacts. Indicates heavy compression or low bitrate.'},
+    compression_ringing:  {l:'Ringing',             d:'Edge ringing from compression. High=halos around sharp edges (common in streaming encodes).'},
+    texture_retention:    {l:'Texture Retention',   d:'Fine texture detail preserved. High=clean, natural texture. Low=mushy/over-processed/NR applied.'},
+  },
+  narrative:{
+    saliency_consistency: {l:'Visual Saliency',     d:'Strength of the focal point — how clearly the frame directs the eye to a subject. High=strong pull.'},
+    compelling_mos:       {l:'Compelling Score',    d:'Composite aesthetic appeal proxy combining sharpness, tonal balance, and contrast. Higher=more cinematic.'},
+  },
+};
+
+const CAT_COLORS = {
+  exposure:'text-yellow-400', lighting:'text-orange-400', composition:'text-green-400',
+  movement:'text-cyan-400', color:'text-pink-400', quality:'text-purple-400', narrative:'text-indigo-400'
+};
+
+function buildDetailPanel(s){
+  const cats   = ['exposure','lighting','composition','movement','color','quality','narrative'];
+  const detail = s.metricDetail || {};
+  const g      = s.gamutCoverage || {};
+  const deD    = s.deltaED65      != null ? Number(s.deltaED65).toFixed(2)      : '—';
+  const deB    = s.deltaEBaseline != null ? Number(s.deltaEBaseline).toFixed(2) : '—';
+  const skin   = s.skinToneDetected ? '<span class="text-pink-400 ml-2 text-xs">● face detected</span>' : '';
+
+  const colourSection = `<div class="mb-3 p-3 bg-gray-800/60 rounded border border-gray-700/50">
+    <div class="text-xs font-semibold text-pink-400 uppercase tracking-wide mb-2">Colour Analysis${skin}</div>
+    <div class="grid grid-cols-2 gap-4 text-xs">
+      <div>
+        <div class="text-gray-500 mb-1">ΔE2000 Colour Accuracy</div>
+        <div class="mb-1">vs D65 neutral: <span class="${deC(deD)}">${deD}</span>
+          &nbsp; vs Baseline: <span class="${deC(deB)}">${deB}</span></div>
+        <div class="text-gray-600 leading-relaxed">ΔE &lt;2 = imperceptible &nbsp; 2–5 = subtle cast &nbsp; 5–10 = visible &nbsp; &gt;10 = strong</div>
+      </div>
+      <div>
+        <div class="text-gray-500 mb-1.5">Colour Gamut Saturation</div>
+        ${['srgb','p3','rec2020'].map(k => g[k]!=null
+          ? `<div class="flex items-center gap-2 mb-1">
+               <span class="w-16 text-gray-400">${k==='srgb'?'sRGB':k==='p3'?'DCI-P3':'Rec.2020'}</span>
+               <div class="flex-1 bg-gray-700 rounded h-1.5"><div class="${k==='srgb'?'bg-red-400/70':k==='p3'?'bg-green-400/70':'bg-blue-400/70'} h-1.5 rounded" style="width:${g[k]}%"></div></div>
+               <span class="w-8 text-right text-gray-400">${g[k]}%</span>
+             </div>` : '').join('')}
+      </div>
+    </div>
+  </div>`;
+
+  const catSections = cats.map(cat => {
+    const ms = detail[cat] || {};
+    const lb = ML[cat] || {};
+    const entries = Object.entries(ms);
+    if(!entries.length) return '';
+    const sc = s.scores?.[cat]?.total;
+
+    const rows = entries.map(([k,v]) => {
+      const info = lb[k] || {l: k.replace(/_/g,' '), d:''};
+      const n    = typeof v==='number' ? v : null;
+      const bar  = n!=null ? Math.min(100,Math.max(0,n)) : 0;
+      const clr  = n!=null ? scoreColor(bar) : 'text-gray-500';
+      const fmt  = n!=null ? (Math.abs(n)>=1000?n.toFixed(0):Math.abs(n)>=10?n.toFixed(1):Math.abs(n)>=1?n.toFixed(2):n.toFixed(4)) : '—';
+      return `<div class="group relative flex items-center gap-1.5 py-0.5 hover:bg-gray-700/30 rounded px-1">
+        <span class="text-gray-400 w-40 truncate text-xs" title="${info.d}">${info.l}</span>
+        <div class="flex-1 bg-gray-700/40 rounded h-1 min-w-12">
+          <div class="h-1 rounded bg-gray-500/40" style="width:${bar}%"></div>
+        </div>
+        <span class="w-12 text-right tabular-nums text-xs ${clr}">${fmt}</span>
+        ${info.d ? `<div class="hidden group-hover:flex absolute left-0 top-5 z-50 bg-gray-950 border border-gray-600 rounded p-2 text-xs text-gray-200 w-72 shadow-xl pointer-events-none leading-relaxed">${info.d}</div>` : ''}
+      </div>`;
+    }).join('');
+
+    return `<div class="min-w-56 flex-1">
+      <div class="flex items-center justify-between px-1 mb-1">
+        <span class="text-xs font-semibold uppercase tracking-wide ${CAT_COLORS[cat]}">${cat}</span>
+        <span class="text-xs font-bold ${scoreColor(sc)}">${fmtScore(sc)}</span>
+      </div>
+      ${rows}
+    </div>`;
+  }).filter(Boolean).join('');
+
+  return `<div class="p-4">
+    ${colourSection}
+    <div class="flex items-baseline gap-3 mb-2">
+      <span class="text-xs font-semibold text-gray-300 uppercase tracking-wide">Raw Metric Averages</span>
+      <span class="text-xs text-gray-600">Hover a metric name for plain-language explanation</span>
+    </div>
+    <div class="flex flex-wrap gap-4">${catSections}</div>
+  </div>`;
+}
+
+function deC(v){ const n=parseFloat(v); return isNaN(n)?'text-gray-500':n<2?'text-green-400':n<5?'text-yellow-400':n<10?'text-orange-400':'text-red-400'; }
 // ---------------------------------------------------------------------------
 // Downloads
 // ---------------------------------------------------------------------------

@@ -891,6 +891,18 @@ class AestheticAPI:
                 shot_id = f"shot_{scene.scene_id:04d}"
                 score   = aggregate_shot(shot_id, scene.scene_id, scene_frames, cfg)
 
+                # Colour aggregation — ΔE averaged from frames
+                de_vals = [fm.color.color_accuracy_de2000 for fm in scene_frames
+                           if fm.color and fm.color.color_accuracy_de2000 is not None]
+                if de_vals:
+                    score.delta_e_d65 = round(float(np.mean(de_vals)), 3)
+
+                # Skin tone — true if any frame had YOLO detections
+                score.skin_tone_detected = any(
+                    bool(fm.inference and fm.inference.detections)
+                    for fm in scene_frames
+                )
+
                 # Creative pillar — stratified baseline similarity
                 scene_candidates_list = by_scene[scene.scene_id]
                 for fm in scene_frames:
@@ -1106,5 +1118,10 @@ def _build_ui_shots(selected: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "quality":     _cat("quality"),
                 "narrative":   _cat("narrative"),
             },
+            "metricDetail":     s.get("metric_detail", {}),
+            "deltaED65":        s.get("delta_e_d65"),
+            "deltaEBaseline":   s.get("delta_e_baseline"),
+            "gamutCoverage":    s.get("gamut_coverage"),
+            "skinToneDetected": s.get("skin_tone_detected", False),
         })
     return ui_shots

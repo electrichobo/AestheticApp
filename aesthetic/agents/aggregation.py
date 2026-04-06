@@ -170,6 +170,7 @@ def aggregate_shot(
     # Neutral midpoint is 50 — missing data neither rewards nor penalises.
     # Real calibration comes from the baseline corpus over time.
     subjective_total = _compute_subjective_proxy(frames, narrative, temporal_variance)
+    metric_detail    = _collect_metric_detail(frames)
 
     return ShotScore(
         shot_id=shot_id,
@@ -186,7 +187,110 @@ def aggregate_shot(
         total_score=technical_total,
         temporal_variance=temporal_variance,
         frame_count=len(frames),
+        metric_detail=metric_detail,
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-metric detail collector
+# ---------------------------------------------------------------------------
+
+def _collect_metric_detail(frames: List[FrameMetrics]) -> Dict[str, Dict[str, float]]:
+    """Average every raw metric across frames for the matrix drill-down panel."""
+    if not frames:
+        return {}
+
+    def _avg(vals):
+        v = [x for x in vals if x is not None]
+        return round(float(np.mean(v)), 3) if v else None
+
+    detail: Dict[str, Dict[str, float]] = {}
+
+    exp = {
+        "histogram_mean":       _avg([f.exposure.histogram_mean       for f in frames]),
+        "histogram_std":        _avg([f.exposure.histogram_std        for f in frames]),
+        "histogram_skew":       _avg([f.exposure.histogram_skew       for f in frames]),
+        "highlight_clip_%":     _avg([f.exposure.highlight_clip_pct   for f in frames]),
+        "shadow_clip_%":        _avg([f.exposure.shadow_clip_pct      for f in frames]),
+        "snr_luma":             _avg([f.exposure.snr_luma             for f in frames]),
+        "snr_chroma":           _avg([f.exposure.snr_chroma           for f in frames]),
+        "psnr":                 _avg([f.exposure.psnr                 for f in frames]),
+        "ssim":                 _avg([f.exposure.ssim                 for f in frames]),
+        "exposure_intent":      _avg([f.exposure.exposure_intent      for f in frames]),
+        "temporal_consistency": _avg([f.exposure.temporal_consistency for f in frames]),
+    }
+    detail["exposure"] = {k: v for k, v in exp.items() if v is not None}
+
+    lit = {
+        "dynamic_range_stops":  _avg([f.lighting.dynamic_range_stops  for f in frames]),
+        "key_fill_ratio":       _avg([f.lighting.key_fill_ratio        for f in frames]),
+        "color_temp_K":         _avg([f.lighting.color_temp_kelvin     for f in frames]),
+        "color_temp_deviation": _avg([f.lighting.color_temp_deviation  for f in frames]),
+        "shadow_detail":        _avg([f.lighting.shadow_detail         for f in frames]),
+        "shadow_noise":         _avg([f.lighting.shadow_noise          for f in frames]),
+        "transition_hardness":  _avg([f.lighting.transition_hardness   for f in frames]),
+        "light_motivation":     _avg([f.lighting.light_motivation      for f in frames]),
+    }
+    detail["lighting"] = {k: v for k, v in lit.items() if v is not None}
+
+    comp = {
+        "rule_of_thirds":       _avg([f.composition.rule_of_thirds       for f in frames]),
+        "center_of_mass_x":     _avg([f.composition.center_of_mass_x     for f in frames]),
+        "center_of_mass_y":     _avg([f.composition.center_of_mass_y     for f in frames]),
+        "symmetry_score":       _avg([f.composition.symmetry_score       for f in frames]),
+        "depth_separation":     _avg([f.composition.depth_separation     for f in frames]),
+        "negative_space_%":     _avg([f.composition.negative_space_ratio for f in frames]),
+        "occupancy_%":          _avg([f.composition.occupancy_map_score  for f in frames]),
+        "headroom":             _avg([f.composition.headroom             for f in frames]),
+        "lead_room":            _avg([f.composition.lead_room            for f in frames]),
+        "frame_balance":        _avg([f.composition.frame_balance        for f in frames]),
+        "face_placement":       _avg([f.composition.face_placement       for f in frames]),
+    }
+    detail["composition"] = {k: v for k, v in comp.items() if v is not None}
+
+    mov = {
+        "optical_flow_mean":     _avg([f.movement.optical_flow_mean     for f in frames]),
+        "optical_flow_std":      _avg([f.movement.optical_flow_std      for f in frames]),
+        "smoothness":            _avg([f.movement.smoothness            for f in frames]),
+        "jerkiness":             _avg([f.movement.jerkiness             for f in frames]),
+        "stabilization":         _avg([f.movement.stabilization         for f in frames]),
+        "motion_blur_amount":    _avg([f.movement.motion_blur_amount    for f in frames]),
+        "focus_during_movement": _avg([f.movement.focus_during_movement for f in frames]),
+        "trajectory_smoothness": _avg([f.movement.trajectory_smoothness for f in frames]),
+    }
+    detail["movement"] = {k: v for k, v in mov.items() if v is not None}
+
+    col = {
+        "wb_deviation":          _avg([f.color.wb_deviation          for f in frames]),
+        "saturation_mean":       _avg([f.color.saturation_mean       for f in frames]),
+        "saturation_uniformity": _avg([f.color.saturation_uniformity for f in frames]),
+        "palette_entropy":       _avg([f.color.palette_entropy       for f in frames]),
+        "chroma_noise":          _avg([f.color.chroma_noise          for f in frames]),
+        "banding_score":         _avg([f.color.banding_score         for f in frames]),
+        "delta_e_d65":           _avg([f.color.color_accuracy_de2000 for f in frames]),
+    }
+    detail["color"] = {k: v for k, v in col.items() if v is not None}
+
+    qual = {
+        "sharpness_laplacian":   _avg([f.quality.sharpness_laplacian    for f in frames]),
+        "sharpness_edge_density":_avg([f.quality.sharpness_edge_density for f in frames]),
+        "mtf_proxy":             _avg([f.quality.mtf_proxy              for f in frames]),
+        "vignetting_stops":      _avg([f.quality.vignetting_stops       for f in frames]),
+        "ca_width_px":           _avg([f.quality.ca_width_px            for f in frames]),
+        "flare_contrast_loss":   _avg([f.quality.flare_contrast_loss    for f in frames]),
+        "compression_blocking":  _avg([f.quality.compression_blocking   for f in frames]),
+        "compression_ringing":   _avg([f.quality.compression_ringing    for f in frames]),
+        "texture_retention":     _avg([f.quality.texture_retention      for f in frames]),
+    }
+    detail["quality"] = {k: v for k, v in qual.items() if v is not None}
+
+    nar = {
+        "saliency_consistency":  _avg([f.narrative.saliency_consistency for f in frames]),
+        "compelling_mos":        _avg([f.narrative.compelling_mos       for f in frames]),
+    }
+    detail["narrative"] = {k: v for k, v in nar.items() if v is not None}
+
+    return detail
 
 
 # ---------------------------------------------------------------------------

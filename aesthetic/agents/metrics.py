@@ -659,8 +659,9 @@ def _compute_color(bgr: np.ndarray) -> ColorMetrics:
     L_u8   = np.clip(L / 100.0 * 255.0, 0, 255).astype(np.uint8)
     banding = _detect_banding(L_u8)
 
-    # color temperature cross-scene variance placeholder (populated in aggregation)
-    # color accuracy and skin tone ΔE require reference — left as None
+    # ΔE2000 vs D65 neutral (a*=0, b*=0 in centred Lab = neutral grey)
+    L_mean  = float(np.mean(L))
+    delta_e = _compute_delta_e2000(L_mean, a_mean, b_mean, L_mean, 0.0, 0.0)
 
     return ColorMetrics(
         wb_deviation=wb_deviation,
@@ -670,7 +671,64 @@ def _compute_color(bgr: np.ndarray) -> ColorMetrics:
         palette_family=palette_family,
         chroma_noise=chroma_noise,
         banding_score=banding,
+        color_accuracy_de2000=delta_e,
     )
+
+
+def _compute_delta_e2000(
+    L1: float, a1: float, b1: float,
+    L2: float, a2: float, b2: float,
+) -> float:
+    """
+    ΔE2000 perceptual colour difference. a*/b* in centred form (neutral=0).
+    <1 imperceptible · 1-2 just noticeable · 2-10 clearly different · >10 strong
+    """
+    import math
+    kL = kC = kH = 1.0
+    C1ab = math.sqrt(a1**2 + b1**2)
+    C2ab = math.sqrt(a2**2 + b2**2)
+    Cab7 = ((C1ab + C2ab) / 2.0) ** 7
+    G    = 0.5 * (1.0 - math.sqrt(Cab7 / (Cab7 + 25.0**7)))
+    a1p, a2p = a1 * (1.0 + G), a2 * (1.0 + G)
+    C1p  = math.sqrt(a1p**2 + b1**2)
+    C2p  = math.sqrt(a2p**2 + b2**2)
+    h1p  = math.degrees(math.atan2(b1, a1p)) % 360.0
+    h2p  = math.degrees(math.atan2(b2, a2p)) % 360.0
+    dLp  = L2 - L1
+    dCp  = C2p - C1p
+    if C1p * C2p == 0:
+        dhp = 0.0
+    elif abs(h2p - h1p) <= 180:
+        dhp = h2p - h1p
+    elif h2p - h1p > 180:
+        dhp = h2p - h1p - 360.0
+    else:
+        dhp = h2p - h1p + 360.0
+    dHp  = 2.0 * math.sqrt(C1p * C2p) * math.sin(math.radians(dhp / 2.0))
+    Lpm  = (L1 + L2) / 2.0
+    Cpm  = (C1p + C2p) / 2.0
+    if C1p * C2p == 0:
+        hpm = h1p + h2p
+    elif abs(h1p - h2p) <= 180:
+        hpm = (h1p + h2p) / 2.0
+    elif h1p + h2p < 360:
+        hpm = (h1p + h2p + 360.0) / 2.0
+    else:
+        hpm = (h1p + h2p - 360.0) / 2.0
+    T    = (1.0 - 0.17 * math.cos(math.radians(hpm - 30))
+            + 0.24 * math.cos(math.radians(2 * hpm))
+            + 0.32 * math.cos(math.radians(3 * hpm + 6))
+            - 0.20 * math.cos(math.radians(4 * hpm - 63)))
+    SL   = 1.0 + 0.015 * (Lpm - 50)**2 / math.sqrt(20 + (Lpm - 50)**2)
+    SC   = 1.0 + 0.045 * Cpm
+    SH   = 1.0 + 0.015 * Cpm * T
+    Cpm7 = Cpm ** 7
+    RC   = 2.0 * math.sqrt(Cpm7 / (Cpm7 + 25.0**7))
+    dth  = 30.0 * math.exp(-((hpm - 275) / 25.0)**2)
+    RT   = -math.sin(math.radians(2 * dth)) * RC
+    dE   = math.sqrt((dLp/(kL*SL))**2 + (dCp/(kC*SC))**2 +
+                     (dHp/(kH*SH))**2 + RT*(dCp/(kC*SC))*(dHp/(kH*SH)))
+    return round(dE, 3)
 
 
 def _classify_palette(

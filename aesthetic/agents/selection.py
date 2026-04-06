@@ -779,6 +779,11 @@ def _build_output(
                 "quality":     score.quality.total,
                 "narrative":   score.narrative.total,
             },
+            "metric_detail":     score.metric_detail or {},
+            "delta_e_d65":        score.delta_e_d65,
+            "delta_e_baseline":   score.delta_e_baseline,
+            "gamut_coverage":     score.gamut_coverage,
+            "skin_tone_detected": score.skin_tone_detected,
             "dedupe_evidence": {
                 "kept_over_duplicates": True,
             },
@@ -792,4 +797,3 @@ def _write_shots_json(shots: List[Dict[str, Any]], job_dir: Path) -> None:
     job_dir.mkdir(parents=True, exist_ok=True)
     out_path = job_dir / "shots.json"
     out_path.write_text(json.dumps(shots, indent=2), encoding="utf-8")
-    
