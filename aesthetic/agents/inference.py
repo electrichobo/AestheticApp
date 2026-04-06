@@ -102,8 +102,13 @@ def run_frame_inference(
 
     # YOLO detection
     if features.get("yolo_enabled", True):
-        detections = _run_yolo(frame_path, device)
-        inference.detections = detections
+        try:
+            detections = _run_yolo(frame_path, device)
+            inference.detections = detections
+        except Exception as exc:
+            import traceback
+            print(f"[inference] YOLO failed for {frame_path}: {exc}")
+            traceback.print_exc()
 
     frame_metrics.inference = inference
     _write_sidecar(frame_metrics, job_dir)
@@ -221,6 +226,8 @@ def _run_clip(
         return embedding.squeeze().cpu().tolist(), _clip_version
 
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         _log_inference_error("CLIP", exc)
         return None, None
 

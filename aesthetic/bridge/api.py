@@ -1072,31 +1072,39 @@ def _build_ui_shots(selected: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     ui_shots = []
     for s in selected:
         scores = s.get("scores", {})
+        def _cat(key):
+            """Pass through full category score dict; wrap scalar if old format."""
+            v = scores.get(key)
+            if isinstance(v, dict):
+                return v
+            return {"total": v, "technical": None, "creative": None, "subjective": None}
+
         ui_shots.append({
-            "id":         s.get("rank"),
-            "shot_id":    s.get("shot_id"),
-            "scene_id":   s.get("scene_id"),
-            "start":      s.get("start_time", 0.0),
-            "end":        s.get("end_time",   0.0),
-            "duration":   s.get("duration_sec", 0.0),
-            "hero_frame": s.get("hero_frame"),
-            "totalScore": s.get("total_score"),
-            "technical":  s.get("technical_total"),
-            "creative":   s.get("creative_total"),
+            "id":              s.get("rank"),
+            "shot_id":         s.get("shot_id"),
+            "scene_id":        s.get("scene_id"),
+            "start":           s.get("start_time", 0.0),
+            "end":             s.get("end_time",   0.0),
+            "duration":        s.get("duration_sec", 0.0),
+            "hero_frame":      s.get("hero_frame"),
+            "totalScore":      s.get("total_score"),
+            "technicalTotal":  s.get("technical_total"),
+            "creativeTotal":   s.get("creative_total"),
+            "subjectiveTotal": s.get("subjective_total"),
             "baseline_similarity": s.get("baseline_similarity"),
-            "rationale":  s.get("rationale"),
-            "movement_type": s.get("movement_type"),
-            "shot_scale":    s.get("shot_scale"),
-            "scene_type":    s.get("scene_type"),
-            "shot_intent":   s.get("shot_intent"),
+            "rationale":       s.get("rationale"),
+            "movement_type":   s.get("movement_type"),
+            "shot_scale":      s.get("shot_scale"),
+            "scene_type":      s.get("scene_type"),
+            "shot_intent":     s.get("shot_intent"),
             "scores": {
-                "exposure":    {"total": scores.get("exposure")},
-                "lighting":    {"total": scores.get("lighting")},
-                "composition": {"total": scores.get("composition")},
-                "movement":    {"total": scores.get("movement")},
-                "color":       {"total": scores.get("color")},
-                "quality":     {"total": scores.get("quality")},
-                "narrative":   {"total": scores.get("narrative")},
+                "exposure":    _cat("exposure"),
+                "lighting":    _cat("lighting"),
+                "composition": _cat("composition"),
+                "movement":    _cat("movement"),
+                "color":       _cat("color"),
+                "quality":     _cat("quality"),
+                "narrative":   _cat("narrative"),
             },
         })
     return ui_shots

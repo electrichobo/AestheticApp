@@ -636,24 +636,73 @@ function makeShotCard(shot){
 // Matrix
 // ---------------------------------------------------------------------------
 function renderMatrix(shots){
-  const el   = document.getElementById('matrixContent');
+  const el = document.getElementById('matrixContent');
   if(!shots||!shots.length){ el.innerHTML='<p class="text-sm text-gray-400">No shots.</p>'; return; }
-  const cats = ['exposure','lighting','composition','movement','color','quality','narrative'];
-  const rows = shots.map(s => `
-    <tr class="border-b border-gray-700/40">
-      <td class="px-3 py-2 text-xs text-gray-400 whitespace-nowrap">Shot ${s.id}</td>
-      <td class="px-3 py-2 text-center text-xs font-semibold ${scoreColor(s.totalScore)}">${fmtScore(s.totalScore)}</td>
-      ${cats.map(k=>`<td class="px-3 py-2 text-center text-xs ${scoreColor(s.scores?.[k]?.total)}">${fmtScore(s.scores?.[k]?.total)}</td>`).join('')}
-    </tr>`).join('');
-  el.innerHTML = `<div class="overflow-x-auto">
-    <table class="w-full text-left bg-gray-800 rounded border border-gray-700 text-xs">
-      <thead><tr class="border-b border-gray-700 text-gray-400 uppercase">
-        <th class="px-3 py-2">Shot</th>
-        <th class="px-3 py-2 text-center">Total</th>
-        ${cats.map(c=>`<th class="px-3 py-2 text-center">${c}</th>`).join('')}
-      </tr></thead>
+
+  const cats    = ['exposure','lighting','composition','movement','color','quality','narrative'];
+  const pillars = ['technical','creative','subjective'];
+  const pillarLabel = {technical:'T', creative:'C', subjective:'S'};
+  const pillarColor = {technical:'text-blue-400', creative:'text-purple-400', subjective:'text-amber-400'};
+
+  // row 1: shot | total | 3 pillars | category group headers (each spans 4 cols)
+  const catGroupHeaders = cats.map(c =>
+    `<th class="px-2 py-1 text-center border-l border-gray-600/60 uppercase tracking-wide" colspan="4">${c}</th>`
+  ).join('');
+
+  // row 2: sub-columns per category — tot + T + C + S
+  const subHeaders = cats.map(() =>
+    `<th class="px-1 py-1 text-center text-gray-500 font-normal border-l border-gray-600/60">tot</th>` +
+    pillars.map(p =>
+      `<th class="px-1 py-1 text-center ${pillarColor[p]} font-normal">${pillarLabel[p]}</th>`
+    ).join('')
+  ).join('');
+
+  const rows = shots.map(s => {
+    const catCells = cats.map(k => {
+      const sc   = s.scores?.[k];
+      const tot  = sc?.total;
+      const tech = sc?.technical;
+      const creat= sc?.creative;
+      const subj = sc?.subjective;
+      return `<td class="px-1 py-1.5 text-center border-l border-gray-600/40 font-medium ${scoreColor(tot)}">${fmtScore(tot)}</td>` +
+             `<td class="px-1 py-1.5 text-center text-blue-300/70">${fmtScore(tech)}</td>` +
+             `<td class="px-1 py-1.5 text-center text-purple-300/70">${fmtScore(creat)}</td>` +
+             `<td class="px-1 py-1.5 text-center text-amber-300/70">${fmtScore(subj)}</td>`;
+    }).join('');
+
+    return `<tr class="border-b border-gray-700/30 hover:bg-gray-700/20">
+      <td class="px-2 py-1.5 text-xs text-gray-400 whitespace-nowrap font-medium">Shot ${s.id}</td>
+      <td class="px-2 py-1.5 text-center font-bold ${scoreColor(s.totalScore)}">${fmtScore(s.totalScore)}</td>
+      <td class="px-2 py-1.5 text-center text-blue-300">${fmtScore(s.technicalTotal)}</td>
+      <td class="px-2 py-1.5 text-center text-purple-300">${fmtScore(s.creativeTotal)}</td>
+      <td class="px-2 py-1.5 text-center text-amber-300">${fmtScore(s.subjectiveTotal)}</td>
+      ${catCells}
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `<div class="overflow-x-auto text-xs">
+    <table class="text-left bg-gray-800 rounded border border-gray-700" style="min-width:max-content">
+      <thead>
+        <tr class="border-b border-gray-600 bg-gray-900/60 text-xs uppercase tracking-wide">
+          <th class="px-2 py-2 text-gray-400" rowspan="2">Shot</th>
+          <th class="px-2 py-2 text-center text-gray-200" rowspan="2">Total</th>
+          <th class="px-2 py-2 text-center text-blue-400" rowspan="2">Tech</th>
+          <th class="px-2 py-2 text-center text-purple-400" rowspan="2">Creative</th>
+          <th class="px-2 py-2 text-center text-amber-400" rowspan="2">Subj</th>
+          ${catGroupHeaders}
+        </tr>
+        <tr class="border-b border-gray-700 bg-gray-900/40 text-xs">
+          ${subHeaders}
+        </tr>
+      </thead>
       <tbody>${rows}</tbody>
-    </table></div>`;
+    </table>
+    <div class="text-xs text-gray-600 mt-2 px-1 flex gap-4">
+      <span><span class="text-blue-400 font-medium">T</span> = Technical</span>
+      <span><span class="text-purple-400 font-medium">C</span> = Creative (baseline sim)</span>
+      <span><span class="text-amber-400 font-medium">S</span> = Subjective (narrative)</span>
+    </div>
+  </div>`;
 }
 
 // ---------------------------------------------------------------------------
