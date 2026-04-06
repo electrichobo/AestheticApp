@@ -4,8 +4,8 @@
 # All business logic lives in aesthetic/bridge/api.py.
 #
 # Works in three contexts:
-#   - Development: python -m aesthetic.app
-#   - PyInstaller bundle: AESTHETIC.exe
+#   - Development: python -m aesthetic.app  (file:// URI, video preview works)
+#   - PyInstaller bundle: AESTHETIC.exe     (http_server, bridge init reliable)
 #   - macOS/Linux packaged app
 
 import sys
@@ -14,18 +14,9 @@ from pathlib import Path
 
 
 def _setup_bundle_env() -> None:
-    """
-    When running from a PyInstaller bundle, ensure ffmpeg/ffprobe
-    (bundled in the same directory as the .exe) are on PATH.
-    Also set the multiprocessing start method to avoid spawning issues.
-    """
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).parent
-        # add bundle directory to PATH so ffmpeg subprocess calls work
         os.environ["PATH"] = str(exe_dir) + os.pathsep + os.environ.get("PATH", "")
-
-        # on Windows, multiprocessing spawn can conflict with PyInstaller
-        # freeze_support() must be called before any multiprocessing
         import multiprocessing
         multiprocessing.freeze_support()
 
@@ -35,7 +26,6 @@ def main() -> None:
 
     import webview
 
-    # use absolute imports when frozen (PyInstaller), relative when running as module
     if getattr(sys, "frozen", False):
         from aesthetic.bridge.api import AestheticAPI
         from aesthetic.config import WEB_DIR
@@ -44,23 +34,23 @@ def main() -> None:
         from .config import WEB_DIR
 
     APP_NAME = "AESTHETIC"
+    frozen   = getattr(sys, "frozen", False)
+
+    # Dev: file:// so local video preview works natively
+    # Bundle: string path + http_server=True for reliable WebView2 bridge init
+    html_url = str(WEB_DIR / "index.html") if frozen else (WEB_DIR / "index.html").as_uri()
 
     api    = AestheticAPI()
-
     window = webview.create_window(
         APP_NAME,
-        str(WEB_DIR / "index.html"),
+        html_url,
         width=1280,
         height=860,
         resizable=True,
         js_api=api,
     )
-    # store window reference so open_file_dialog can access it
     api._window = window
-    # http_server=True serves content via localhost — required for:
-    # 1. reliable JS bridge initialisation in WebView2 (frozen bundle)
-    # 2. consistent behaviour between dev and production
-    webview.start(http_server=True)
+    webview.start(http_server=frozen)
 
 
 if __name__ == "__main__":

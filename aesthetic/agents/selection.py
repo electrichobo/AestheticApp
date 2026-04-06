@@ -290,7 +290,7 @@ def _deduplicate(
         # bucketed lookup — only compare against hashes in nearby buckets
         # bucket key = first 16 bits of hash as integer, search ±1 bucket
         is_duplicate = False
-        bucket_key = int(phash[:4].dot(2**np.arange(4, dtype=np.uint64)))
+        bucket_key = int(phash.flatten()[:8].dot(2**np.arange(8, dtype=np.uint64)))
         for bk in (bucket_key - 1, bucket_key, bucket_key + 1):
             for kept_hash in hash_buckets.get(bk, []):
                 if _hamming_distance(phash, kept_hash) <= hash_threshold:
@@ -792,3 +792,4 @@ def _write_shots_json(shots: List[Dict[str, Any]], job_dir: Path) -> None:
     job_dir.mkdir(parents=True, exist_ok=True)
     out_path = job_dir / "shots.json"
     out_path.write_text(json.dumps(shots, indent=2), encoding="utf-8")
+    

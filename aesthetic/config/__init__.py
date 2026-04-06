@@ -13,32 +13,51 @@ import yaml
 
 
 def _get_bundle_dir() -> Path:
-    """Return the root of the PyInstaller bundle, or the package dir in dev."""
+    """Return the root of the PyInstaller bundle, or the repo root in dev."""
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        # running inside a PyInstaller bundle
         return Path(sys._MEIPASS)
-    # development — package is at aesthetic/config/../..
     return Path(__file__).resolve().parent.parent.parent
+
+
+def _get_user_data_dir() -> Path:
+    """Platform user data directory — always %LOCALAPPDATA%/AESTHETIC/data etc."""
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    return base / "AESTHETIC" / "data"
 
 
 def _get_data_dir() -> Path:
     """
-    Return the user-writable data directory.
-    In a bundle: %LOCALAPPDATA%/AESTHETIC/data  (Windows)
-                 ~/Library/Application Support/AESTHETIC/data  (macOS)
-                 ~/.local/share/AESTHETIC/data  (Linux)
-    In dev: aesthetic/data (relative to source root)
+    Return the writable data directory.
+
+    Frozen bundle: always uses platform user data dir (%LOCALAPPDATA%/AESTHETIC/data).
+
+    Dev mode: uses source tree aesthetic/data/ if it has baseline embeddings
+    (i.e. the developer has trained a baseline in the source tree).
+    Otherwise falls back to the platform user data dir so that running
+    'python -m aesthetic.app' uses the same trained baseline as the installed app.
+    This fixes the (4,8) shape error caused by having zero embeddings in dev mode.
     """
     if getattr(sys, "frozen", False):
-        if sys.platform == "win32":
-            base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-        elif sys.platform == "darwin":
-            base = Path.home() / "Library" / "Application Support"
-        else:
-            base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-        return base / "AESTHETIC" / "data"
-    # development
-    return Path(__file__).resolve().parent.parent / "data"
+        return _get_user_data_dir()
+
+    # development — check source tree first
+    source_data = Path(__file__).resolve().parent.parent / "data"
+    emb_dir = source_data / "baseline" / "embeddings"
+    if emb_dir.exists() and any(emb_dir.glob("*.json")):
+        return source_data
+
+    # no embeddings in source tree — use user data dir (has the trained baseline)
+    user_dir = _get_user_data_dir()
+    if user_dir.exists():
+        return user_dir
+
+    # last resort: source tree (will be empty, but at least won't crash)
+    return source_data
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +66,7 @@ def _get_data_dir() -> Path:
 BUNDLE_DIR   = _get_bundle_dir()
 PKG_DIR      = Path(__file__).resolve().parent        # aesthetic/config
 BASE_DIR     = PKG_DIR.parent                          # aesthetic/
-WEB_DIR      = BUNDLE_DIR / "aesthetic" / "webui"     # webui (from bundle or source)
+WEB_DIR      = BUNDLE_DIR / "aesthetic" / "webui"     # webui
 DATA_DIR     = _get_data_dir()                         # user-writable
 OUTPUTS_DIR  = DATA_DIR / "outputs"
 BASELINE_DIR = DATA_DIR / "baseline"
@@ -58,32 +77,27 @@ UPLOADS_DIR  = DATA_DIR / "uploads"
 # config.yaml is read-only — lives in the bundle or source
 CONFIG_PATH  = BUNDLE_DIR / "aesthetic" / "config" / "config.yaml"
 if not CONFIG_PATH.exists():
-    # fallback for dev layout
     CONFIG_PATH = PKG_DIR / "config.yaml"
 
 # ensure user-writable dirs exist
-for d in (DATA_DIR, OUTPUTS_DIR, BASELINE_DIR,
-          BASELINE_DIR / "embeddings", BASELINE_DIR / "golden",
-          JOBS_DIR, UPLOADS_DIR, DATA_DIR / "feedback"):
-    d.mkdir(parents=True, exist_ok=True)
+for _d in (DATA_DIR, OUTPUTS_DIR, BASELINE_DIR,
+           BASELINE_DIR / "embeddings", BASELINE_DIR / "golden",
+           JOBS_DIR, UPLOADS_DIR, DATA_DIR / "feedback"):
+    _d.mkdir(parents=True, exist_ok=True)
 
 
 def _seed_baseline_from_bundle() -> None:
     """
-    On first launch of a frozen (installed) build, copy the Golden Baseline
-    that was bundled with the installer into the user's writable data directory.
-    Only runs if the user's baseline is empty and the bundle contains one.
-    Skips silently if already seeded or no bundle baseline exists.
+    On first launch of a frozen build, copy the bundled Golden Baseline
+    into the user's writable data directory. Skips if already seeded.
     """
     if not getattr(sys, "frozen", False):
-        return  # development — nothing to seed
-
-    user_golden = BASELINE_DIR / "golden"
-    # already seeded if golden directory has version files
-    if any(user_golden.glob("v*.json")):
         return
 
-    # bundle baseline lives alongside the exe, outside _internal
+    user_golden = BASELINE_DIR / "golden"
+    if any(user_golden.glob("v*.json")):
+        return  # already seeded
+
     exe_dir = Path(sys.executable).parent
     bundle_baseline = exe_dir / "aesthetic" / "data" / "baseline"
     if not bundle_baseline.exists():
@@ -100,17 +114,11 @@ def _seed_baseline_from_bundle() -> None:
                     dest_item = dst / item.name
                     if not dest_item.exists():
                         shutil.copy2(str(item), str(dest_item))
-        # copy active.json
-        src_active = bundle_baseline / "golden" / "active.json"
-        dst_active = BASELINE_DIR / "golden" / "active.json"
-        if src_active.exists() and not dst_active.exists():
-            shutil.copy2(str(src_active), str(dst_active))
-        print("[config] Golden Baseline seeded from bundle into user data directory.")
+        print("[config] Golden Baseline seeded from bundle.")
     except Exception as exc:
         print(f"[config] Baseline seed warning (non-fatal): {exc}")
 
 
-# seed baseline on first launch
 _seed_baseline_from_bundle()
 
 
