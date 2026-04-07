@@ -895,7 +895,7 @@ class AestheticAPI:
                 de_vals = [fm.color.color_accuracy_de2000 for fm in scene_frames
                            if fm.color and fm.color.color_accuracy_de2000 is not None]
                 if de_vals:
-                    score.delta_e_d65 = round(float(np.mean(de_vals)), 3)
+                    score.delta_e_d65 = round(float(sum(de_vals) / len(de_vals)), 3)
 
                 # Skin tone — true if any frame had YOLO detections
                 score.skin_tone_detected = any(
