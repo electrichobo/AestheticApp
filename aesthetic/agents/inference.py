@@ -219,7 +219,7 @@ def _run_clip(
         import open_clip
 
         if _clip_model is None:
-            model_name = "ViT-B-32"
+            model_name = "ViT-L-14"
             pretrained = "openai"
             _clip_model, _, _clip_preprocess = open_clip.create_model_and_transforms(
                 model_name,

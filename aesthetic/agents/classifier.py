@@ -34,11 +34,36 @@ from ..models.scores import FrameMetrics
 # ---------------------------------------------------------------------------
 
 # Scene type prompts — CLIP scores the frame against each description
+# Multiple prompts per class — averaged similarity is more robust than single prompt
+SCENE_TYPE_PROMPTS_MULTI = {
+    SceneType.INTERIOR_DAY: [
+        "a photo taken indoors inside a building with ceiling visible",
+        "an interior room with walls, furniture or indoor environment",
+        "inside a house, office, studio or building with indoor lighting",
+    ],
+    SceneType.INTERIOR_NIGHT: [
+        "an indoor night scene with artificial lamps and dark windows",
+        "inside a building at night with interior practical lighting",
+        "a dark interior space at night with warm artificial light sources",
+    ],
+    SceneType.EXTERIOR_DAY: [
+        "an outdoor scene under open sky with natural sunlight",
+        "outside in the open air with sky horizon or outdoor environment",
+        "an exterior location outdoors with natural daylight",
+    ],
+    SceneType.EXTERIOR_NIGHT: [
+        "an outdoor night scene under dark sky with street lights or moonlight",
+        "outside at night in the open air with ambient city or natural light",
+        "an exterior night location outdoors with darkness and artificial light",
+    ],
+}
+
+# Flat prompts for tokenization (one per class, best single prompt)
 SCENE_TYPE_PROMPTS = {
-    SceneType.INTERIOR_DAY:   "a bright interior scene with natural or artificial daylight",
-    SceneType.INTERIOR_NIGHT: "a dark interior scene at night with artificial lighting",
-    SceneType.EXTERIOR_DAY:   "an outdoor exterior scene in daylight",
-    SceneType.EXTERIOR_NIGHT: "an outdoor exterior scene at night",
+    SceneType.INTERIOR_DAY:   "a photo taken indoors inside a building with ceiling visible",
+    SceneType.INTERIOR_NIGHT: "an indoor night scene with artificial lamps and dark windows",
+    SceneType.EXTERIOR_DAY:   "an outdoor scene under open sky with natural sunlight",
+    SceneType.EXTERIOR_NIGHT: "an outdoor night scene under dark sky with street lights",
 }
 
 # Shot intent prompts
@@ -286,7 +311,7 @@ def _scale_from_clip(
         prompts = list(SCALE_PROMPTS.values())
 
         import open_clip
-        tokenizer = open_clip.get_tokenizer("ViT-B-32")
+        tokenizer = open_clip.get_tokenizer("ViT-L-14")
         tokens    = tokenizer(prompts).to(device)
 
         img    = Image.open(frame_path).convert("RGB")
@@ -328,37 +353,50 @@ def _scale_from_rules(fm: FrameMetrics) -> ShotScale:
 
 def _classify_movement(fm: FrameMetrics) -> MovementType:
     """
-    Classify movement type from optical flow metrics already computed.
-    These are already in FrameMetrics.movement so no new computation needed.
+    Classify movement type. Priority order:
+    1. movement_type from metrics engine (computed on consecutive frames — most reliable)
+    2. smoothness/stabilization signals (available even on first frame)
+    3. optical flow stats
+    4. fallback
     """
     mv = fm.movement
 
-    flow_mean = mv.optical_flow_mean
-    if flow_mean is None:
-        # no previous frame — use motion blur as static indicator
-        blur = mv.motion_blur_amount or 0.0
-        return MovementType.STATIC if blur < 30 else MovementType.UNKNOWN
-
-    if flow_mean < 1.5:
-        return MovementType.STATIC
-
-    # use movement_type if already classified by metrics engine
-    if mv.movement_type and mv.movement_type != "unknown":
+    # Priority 1: metrics engine result (consecutive frames, most accurate)
+    if mv.movement_type and mv.movement_type not in ("unknown", ""):
         try:
             return MovementType(mv.movement_type)
         except ValueError:
             pass
 
-    # fallback classification from flow stats
-    flow_std = mv.optical_flow_std or 0.0
-    stab     = mv.stabilization or 100.0
+    # Priority 2: smoothness/stabilization (no prev frame needed)
+    smoothness = mv.smoothness
+    stab       = mv.stabilization
+    if smoothness is not None:
+        if smoothness > 85.0:
+            return MovementType.STATIC
+        if smoothness < 40.0 and (stab is None or stab < 60.0):
+            return MovementType.HANDHELD
 
-    if flow_std > 2.0 and stab < 60:
+    # Priority 3: optical flow
+    flow_mean = mv.optical_flow_mean
+    if flow_mean is None:
+        blur = mv.motion_blur_amount or 0.0
+        return MovementType.STATIC if blur < 20.0 else MovementType.UNKNOWN
+
+    if flow_mean < 1.5:
+        return MovementType.STATIC
+
+    flow_std = mv.optical_flow_std or 0.0
+    cr = flow_std / (flow_mean + 1e-6)  # consistency ratio
+
+    if cr > 0.85:
         return MovementType.HANDHELD
-    if flow_mean > 3.0:
+    if flow_mean > 2.0 and cr < 0.6:
         return MovementType.DOLLY
-    if flow_mean > 1.0:
+    if flow_mean > 1.5:
         return MovementType.PAN
+    if cr > 0.65:
+        return MovementType.HANDHELD
 
     return MovementType.UNKNOWN
 
@@ -373,33 +411,46 @@ def _classify_scene_clip(
     preprocess,
     device:      str,
 ) -> Tuple[SceneType, float]:
-    """CLIP zero-shot scene type classification."""
+    """
+    CLIP zero-shot scene type classification using multi-prompt averaging.
+    Each class uses multiple prompts; class score = mean similarity across prompts.
+    More robust than single-prompt classification.
+    """
     try:
         import torch
         from PIL import Image
         import open_clip
 
-        labels  = list(SCENE_TYPE_PROMPTS.keys())
-        prompts = list(SCENE_TYPE_PROMPTS.values())
-
-        tokenizer = open_clip.get_tokenizer("ViT-B-32")
-        tokens    = tokenizer(prompts).to(device)
+        tokenizer = open_clip.get_tokenizer("ViT-L-14")
 
         img    = Image.open(frame_path).convert("RGB")
         tensor = preprocess(img).unsqueeze(0).to(device)
 
         with torch.no_grad():
             img_feat = model.encode_image(tensor)
-            txt_feat = model.encode_text(tokens)
             img_feat = img_feat / img_feat.norm(dim=-1, keepdim=True)
-            txt_feat = txt_feat / txt_feat.norm(dim=-1, keepdim=True)
-            sims     = (img_feat @ txt_feat.T).squeeze(0)
-            probs    = sims.softmax(dim=-1).cpu().numpy()
 
-        best_idx = int(np.argmax(probs))
-        return labels[best_idx], float(probs[best_idx])
+            # score each class using mean similarity across its prompts
+            labels      = list(SCENE_TYPE_PROMPTS_MULTI.keys())
+            class_scores = []
+            for scene_type in labels:
+                prompts = SCENE_TYPE_PROMPTS_MULTI[scene_type]
+                tokens  = tokenizer(prompts).to(device)
+                txt_feat= model.encode_text(tokens)
+                txt_feat= txt_feat / txt_feat.norm(dim=-1, keepdim=True)
+                # mean similarity across all prompts for this class
+                sims    = (img_feat @ txt_feat.T).squeeze(0)
+                class_scores.append(float(sims.mean().item()))
 
-    except Exception:
+        scores = np.array(class_scores)
+        # softmax for calibrated probabilities
+        exp_s  = np.exp(scores - scores.max())
+        probs  = exp_s / exp_s.sum()
+        best   = int(np.argmax(probs))
+        return labels[best], float(probs[best])
+
+    except Exception as exc:
+        print(f"[classifier] scene CLIP failed: {exc}")
         return SceneType.UNKNOWN, 0.0
 
 
@@ -499,7 +550,7 @@ def _classify_intent_clip(
         labels  = list(INTENT_PROMPTS.keys())
         prompts = list(INTENT_PROMPTS.values())
 
-        tokenizer = open_clip.get_tokenizer("ViT-B-32")
+        tokenizer = open_clip.get_tokenizer("ViT-L-14")
         tokens    = tokenizer(prompts).to(device)
 
         img    = Image.open(frame_path).convert("RGB")

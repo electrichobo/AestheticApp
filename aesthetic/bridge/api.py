@@ -844,9 +844,27 @@ class AestheticAPI:
             if features.get("clip_enabled", True) or features.get("midas_enabled", True) or features.get("yolo_enabled", True):
                 self._push_progress(job_id, "Running AI model inference…", 60)
                 from ..agents.inference import run_frame_inference
+                from collections import defaultdict as _dd3
+                import copy as _copy
+
+                # MiDaS is expensive — only run on first frame per scene
+                # CLIP and YOLO run on all frames (needed for embeddings and detections)
+                _midas_done_scenes: set = set()
+
                 for fi, fm in enumerate(all_frame_metrics):
                     c = candidates[fi]
-                    all_frame_metrics[fi] = run_frame_inference(fm, c.path, job_dir, cfg)
+                    # create a per-frame config that disables MiDaS after first scene frame
+                    frame_cfg = cfg
+                    if features.get("midas_enabled", True):
+                        if fm.scene_id in _midas_done_scenes:
+                            # disable MiDaS for this frame — depth won't change much
+                            frame_cfg = dict(cfg)
+                            frame_cfg["features"] = dict(features)
+                            frame_cfg["features"]["midas_enabled"] = False
+                        else:
+                            _midas_done_scenes.add(fm.scene_id)
+
+                    all_frame_metrics[fi] = run_frame_inference(fm, c.path, job_dir, frame_cfg)
                     if fi % 5 == 0:
                         pct = 60 + int((fi / total_frames) * 15)
                         self._push_progress(job_id, f"Inference: {fi+1}/{total_frames} frames", pct)
@@ -864,7 +882,7 @@ class AestheticAPI:
                     import open_clip
                     _clip_dev = "cuda" if (features.get("gpu_enabled", False) and torch.cuda.is_available()) else "cpu"
                     _clip_model, _, _clip_pre = open_clip.create_model_and_transforms(
-                        "ViT-B-32", pretrained="openai", device=_clip_dev
+                        "ViT-L-14", pretrained="openai", device=_clip_dev
                     )
                     _clip_model.eval()
                 except Exception:
