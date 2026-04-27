@@ -363,13 +363,36 @@ def _aggregate_exposure(frames: List[FrameMetrics]) -> CategoryScore:
     for f in frames:
         e = f.exposure
         parts = []
+        # tonal spread — good exposure uses the full range
         if e.histogram_std is not None:
             parts.append(min(100.0, (e.histogram_std / 64.0) * 100.0))
+        # tonal balance — avoid extreme skew (very dark or very bright)
+        if e.histogram_skew is not None:
+            skew_penalty = min(50.0, abs(e.histogram_skew) * 10.0)
+            parts.append(max(0.0, 100.0 - skew_penalty))
+        # midtone placement — histogram_mean near 128 = balanced exposure
+        if e.histogram_mean is not None:
+            mean_score = 100.0 - min(100.0, abs(e.histogram_mean - 118.0) / 1.18)
+            parts.append(max(0.0, mean_score))
+        # clipping penalty
         if e.highlight_clip_pct is not None and e.shadow_clip_pct is not None:
             clip_penalty = (e.highlight_clip_pct * 2.0) + (e.shadow_clip_pct * 1.5)
             parts.append(max(0.0, 100.0 - clip_penalty))
+        # luma signal quality
         if e.snr_luma is not None:
             parts.append(min(100.0, max(0.0, (e.snr_luma + 10.0) / 60.0 * 100.0)))
+        # chroma signal quality
+        if e.snr_chroma is not None:
+            parts.append(min(100.0, max(0.0, (e.snr_chroma + 10.0) / 60.0 * 100.0)))
+        # structural integrity
+        if e.psnr is not None:
+            parts.append(min(100.0, max(0.0, (e.psnr - 20.0) / 40.0 * 100.0)))
+        if e.ssim is not None:
+            parts.append(e.ssim)
+        # temporal exposure consistency
+        if e.temporal_consistency is not None:
+            parts.append(e.temporal_consistency)
+        # deliberate exposure intent
         if e.exposure_intent is not None:
             parts.append(e.exposure_intent)
         if parts:
@@ -406,11 +429,55 @@ def _aggregate_composition(frames: List[FrameMetrics]) -> CategoryScore:
     for f in frames:
         co = f.composition
         parts = []
+
+        # compositional placement
         if co.rule_of_thirds    is not None: parts.append(co.rule_of_thirds)
         if co.frame_balance     is not None: parts.append(co.frame_balance)
+
+        # visual balance — penalise extreme centre-of-mass offset
+        if co.center_of_mass_x is not None:
+            # ideal: near 0.33 or 0.67 (thirds), penalise dead-centre or edge
+            x = co.center_of_mass_x
+            thirds_dist = min(abs(x - 0.33), abs(x - 0.5), abs(x - 0.67))
+            parts.append(max(0.0, 100.0 - thirds_dist * 200.0))
+        if co.center_of_mass_y is not None:
+            y = co.center_of_mass_y
+            # upper third (0.33) generally preferred for subjects
+            thirds_dist = min(abs(y - 0.33), abs(y - 0.67))
+            parts.append(max(0.0, 100.0 - thirds_dist * 200.0))
+
+        # negative space — enough breathing room is intentional
+        if co.negative_space_ratio is not None:
+            # 20-60% negative space = good range
+            ns = co.negative_space_ratio
+            ns_score = 100.0 if 20.0 <= ns <= 60.0 else max(0.0, 100.0 - abs(ns - 40.0) * 2.0)
+            parts.append(ns_score)
+
+        # symmetry — high symmetry is intentional (faces, architecture)
+        if co.symmetry_score    is not None: parts.append(co.symmetry_score)
+
+        # headroom and lead room — compositional breathing space
+        if co.headroom  is not None:
+            # 15-35% headroom is ideal
+            hr = co.headroom
+            hr_score = 100.0 if 15.0 <= hr <= 35.0 else max(0.0, 100.0 - abs(hr - 25.0) * 3.0)
+            parts.append(hr_score)
+        if co.lead_room is not None: parts.append(co.lead_room)
+
+        # frame occupancy
         if co.occupancy_map_score is not None: parts.append(co.occupancy_map_score)
+
+        # depth
         if co.depth_separation  is not None: parts.append(co.depth_separation)
-        if co.face_placement    is not None: parts.append(co.face_placement)
+
+        # face placement — weighted more heavily when faces are present
+        if co.face_placement is not None and co.face_placement > 0:
+            face_weight = 1 + min(2, getattr(co, 'face_count', 0) or 0)  # 1-3x weight
+            for _ in range(face_weight):
+                parts.append(co.face_placement)
+        elif co.face_placement is not None:
+            parts.append(co.face_placement)
+
         if parts:
             scores.append(float(np.mean(parts)))
     return CategoryScore(technical=_trimmed_mean(scores))
@@ -418,12 +485,34 @@ def _aggregate_composition(frames: List[FrameMetrics]) -> CategoryScore:
 
 def _aggregate_movement(frames: List[FrameMetrics]) -> CategoryScore:
     parts = []
+    # core smoothness signals
     smooth = _collect(frames, lambda f: f.movement.smoothness)
     stab   = _collect(frames, lambda f: f.movement.stabilization)
     focus  = _collect(frames, lambda f: f.movement.focus_during_movement)
+    traj   = _collect(frames, lambda f: f.movement.trajectory_smoothness)
     if smooth: parts.append(_trimmed_mean(smooth))
     if stab:   parts.append(_trimmed_mean(stab))
     if focus:  parts.append(_trimmed_mean(focus))
+    if traj:   parts.append(_trimmed_mean(traj))
+
+    # jerkiness — inverted: high jerkiness = low score
+    jerk = _collect(frames, lambda f: f.movement.jerkiness)
+    if jerk: parts.append(max(0.0, 100.0 - _trimmed_mean(jerk)))
+
+    # motion blur — some is intentional (cinematic 180° shutter)
+    # penalise extremes: too little (stroboscopic) or too much (uncontrolled)
+    blur = _collect(frames, lambda f: f.movement.motion_blur_amount)
+    if blur:
+        mean_blur = _trimmed_mean(blur)
+        # optimal range: 10-40 blur amount
+        blur_score = 100.0 if 10.0 <= mean_blur <= 40.0 else max(0.0, 100.0 - abs(mean_blur - 25.0) * 2.5)
+        parts.append(blur_score)
+
+    # optical flow consistency — high std = erratic movement
+    flow_std = _collect(frames, lambda f: f.movement.optical_flow_std)
+    if flow_std:
+        parts.append(max(0.0, 100.0 - min(100.0, _trimmed_mean(flow_std) * 2.0)))
+
     technical = round(float(np.mean(parts)), 2) if parts else None
     return CategoryScore(technical=technical)
 
@@ -433,10 +522,26 @@ def _aggregate_color(frames: List[FrameMetrics]) -> CategoryScore:
     for f in frames:
         cl = f.color
         parts = []
+        # white balance accuracy — lower deviation = better
         if cl.wb_deviation        is not None: parts.append(max(0.0, 100.0 - cl.wb_deviation * 3.0))
+        # saturation — mean and uniformity both matter
+        if cl.saturation_mean     is not None:
+            # moderate saturation is ideal (not flat, not oversaturated)
+            # optimal range ~20-60 Lab chroma
+            sat = cl.saturation_mean
+            sat_score = 100.0 if 20.0 <= sat <= 60.0 else max(0.0, 100.0 - abs(sat - 40.0) * 1.5)
+            parts.append(sat_score)
         if cl.saturation_uniformity is not None: parts.append(cl.saturation_uniformity)
+        # colour complexity — palette entropy (higher = more intentional use of colour)
+        if cl.palette_entropy     is not None:
+            parts.append(min(100.0, cl.palette_entropy / 4.0 * 100.0))
+        # noise and artifact penalties
         if cl.chroma_noise        is not None: parts.append(max(0.0, 100.0 - cl.chroma_noise))
         if cl.banding_score       is not None: parts.append(max(0.0, 100.0 - cl.banding_score))
+        # colour accuracy vs D65 neutral — lower ΔE = more neutral/accurate WB
+        if cl.color_accuracy_de2000 is not None:
+            de_score = max(0.0, 100.0 - cl.color_accuracy_de2000 * 5.0)
+            parts.append(de_score)
         if parts:
             scores.append(float(np.mean(parts)))
     return CategoryScore(technical=_trimmed_mean(scores))
@@ -447,12 +552,22 @@ def _aggregate_quality(frames: List[FrameMetrics]) -> CategoryScore:
     for f in frames:
         qu = f.quality
         parts = []
+        # sharpness
         if qu.sharpness_laplacian   is not None: parts.append(min(100.0, qu.sharpness_laplacian / 500.0 * 100.0))
+        if qu.sharpness_edge_density is not None: parts.append(qu.sharpness_edge_density)
         if qu.mtf_proxy             is not None: parts.append(qu.mtf_proxy)
+        if qu.texture_retention     is not None: parts.append(qu.texture_retention)
+        # all compression artifacts — all inverted (higher artifact = lower score)
         if qu.compression_blocking  is not None: parts.append(max(0.0, 100.0 - qu.compression_blocking))
+        if qu.compression_banding   is not None: parts.append(max(0.0, 100.0 - qu.compression_banding))
         if qu.compression_mosquito  is not None: parts.append(max(0.0, 100.0 - qu.compression_mosquito))
         if qu.compression_ringing   is not None: parts.append(max(0.0, 100.0 - qu.compression_ringing))
+        # optical imperfections — inverted
         if qu.vignetting_stops      is not None: parts.append(max(0.0, 100.0 - qu.vignetting_stops * 25.0))
+        if qu.ca_width_px           is not None: parts.append(max(0.0, 100.0 - qu.ca_width_px * 10.0))
+        if qu.flare_contrast_loss   is not None: parts.append(max(0.0, 100.0 - qu.flare_contrast_loss * 5.0))
+        # lens distortion — higher score = more distortion = worse
+        if qu.lens_distortion       is not None: parts.append(max(0.0, 100.0 - qu.lens_distortion))
         if parts:
             scores.append(float(np.mean(parts)))
     return CategoryScore(technical=_trimmed_mean(scores))
