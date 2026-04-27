@@ -163,6 +163,7 @@ class InferenceOutputs(BaseModel):
     clip_embedding:       Optional[List[float]] = None   # CLIP embedding vector
     clip_model_version:   Optional[str]         = None
     depth_map_path:       Optional[str]         = None   # MiDaS depth map on disk
+    midas_depth_separation: Optional[float]     = None   # depth separation score from MiDaS (0-100)
     detections:           Optional[List[Dict[str, Any]]] = None  # YOLO results
     nima_score:           Optional[float]       = None   # aesthetic predictor score
     laion_score:          Optional[float]       = None   # LAION aesthetic score

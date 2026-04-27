@@ -238,7 +238,13 @@ def _collect_metric_detail(frames: List[FrameMetrics]) -> Dict[str, Dict[str, fl
         "center_of_mass_x":     _avg([f.composition.center_of_mass_x     for f in frames]),
         "center_of_mass_y":     _avg([f.composition.center_of_mass_y     for f in frames]),
         "symmetry_score":       _avg([f.composition.symmetry_score       for f in frames]),
-        "depth_separation":     _avg([f.composition.depth_separation     for f in frames]),
+        # depth_separation: MiDaS when available, Laplacian proxy otherwise
+        "depth_separation":     _avg([
+            f.inference.midas_depth_separation
+            if (f.inference and f.inference.midas_depth_separation is not None)
+            else f.composition.depth_separation
+            for f in frames
+        ]),
         "negative_space_%":     _avg([f.composition.negative_space_ratio for f in frames]),
         "occupancy_%":          _avg([f.composition.occupancy_map_score  for f in frames]),
         "headroom":             _avg([f.composition.headroom             for f in frames]),

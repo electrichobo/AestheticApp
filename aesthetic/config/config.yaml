@@ -61,5 +61,5 @@ features:
   clip_enabled:           true    # CLIP embeddings for Creative pillar
   vlm_rationale_enabled:  false   # VLM API call for shot rationale text
   gpu_enabled:            true    # GPU acceleration for model inference
-  midas_enabled:          true    # MiDaS depth estimation
+  midas_enabled:          true    # MiDaS DPT_Hybrid depth estimation (primary depth_separation source)
   yolo_enabled:           true    # YOLO subject and face detection

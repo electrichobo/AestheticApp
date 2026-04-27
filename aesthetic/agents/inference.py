@@ -99,6 +99,15 @@ def run_frame_inference(
     if features.get("midas_enabled", True):
         depth_path = _run_midas(frame_path, job_dir, frame_metrics.frame_id, device)
         inference.depth_map_path = depth_path
+        # compute depth separation score from the depth map
+        # and promote it into CompositionMetrics — replaces the Laplacian proxy
+        if depth_path:
+            ds = _compute_depth_separation_from_map(depth_path)
+            if ds is not None:
+                inference.midas_depth_separation = ds
+                # overwrite the Laplacian-based depth_separation with MiDaS result
+                if frame_metrics.composition is not None:
+                    frame_metrics.composition.depth_separation = ds
 
     # YOLO detection
     if features.get("yolo_enabled", True):
@@ -243,25 +252,51 @@ def _run_midas(
     device:     str,
 ) -> Optional[str]:
     """
-    Run MiDaS depth estimation on the frame.
-    Saves the depth map as a greyscale PNG and returns the path.
+    Run MiDaS DPT_Hybrid depth estimation on the frame.
+
+    Uses DPT_Hybrid (transformer+CNN) which provides substantially better
+    depth understanding than MiDaS_small — it understands perspective,
+    occlusion, and semantic scale rather than just sharpness gradients.
+
+    The model is loaded once per app session (cached in _midas_model global).
+    Weights are cached by torch.hub in ~/.cache/torch/hub/ after first download.
+
+    Returns the depth map path for storage, AND computes depth_separation
+    score which is written back into the FrameMetrics composition data via
+    the inference result stored in InferenceOutputs.
+
+    Falls back gracefully to None on any error — the Laplacian method in
+    metrics.py provides a fallback depth_separation in that case.
     """
     global _midas_model, _midas_transform, _midas_version
 
     try:
+        import warnings
         import torch
 
         if _midas_model is None:
-            model_type = "MiDaS_small"
-            _midas_model = torch.hub.load("intel-isl/MiDaS", model_type, trust_repo=True)
-            _midas_model.to(device)
-            _midas_model.eval()
+            # DPT_Hybrid: best quality/speed tradeoff on GPU
+            # suppress timm deprecation warnings during model load
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                model_type = "DPT_Hybrid"
+                _midas_model = torch.hub.load(
+                    "intel-isl/MiDaS", model_type,
+                    trust_repo=True, verbose=False
+                )
+                _midas_model.to(device)
+                _midas_model.eval()
 
-            midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms", trust_repo=True)
-            _midas_transform = midas_transforms.small_transform
-            _midas_version = model_type
+                midas_transforms = torch.hub.load(
+                    "intel-isl/MiDaS", "transforms",
+                    trust_repo=True, verbose=False
+                )
+                _midas_transform = midas_transforms.dpt_transform
+                _midas_version   = model_type
 
         img = cv2.imread(frame_path)
+        if img is None:
+            return None
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         input_batch = _midas_transform(img_rgb).to(device)
@@ -275,9 +310,9 @@ def _run_midas(
                 align_corners=False,
             ).squeeze()
 
-        depth = prediction.cpu().numpy()
+        depth = prediction.cpu().numpy().astype(float)
 
-        # normalise to 0-255 and save
+        # normalise depth map to 0-255 and save for optional inspection
         depth_norm = cv2.normalize(depth, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
         depth_dir  = job_dir / "depth"
         depth_dir.mkdir(parents=True, exist_ok=True)
@@ -288,6 +323,77 @@ def _run_midas(
 
     except Exception as exc:
         _log_inference_error("MiDaS", exc)
+        return None
+
+
+def _compute_depth_separation_from_map(depth_map_path: str) -> Optional[float]:
+    """
+    Compute a depth_separation score (0-100) from a MiDaS depth map PNG.
+
+    Replaces the Laplacian proxy with real monocular depth understanding.
+
+    The score measures how much depth *separation* exists between different
+    regions of the frame — the cinematic quality of having distinct foreground,
+    midground, and background layers.
+
+    Method:
+      1. Load the normalised depth map (0-255, brighter = closer)
+      2. Divide into spatial regions (foreground centre, background edges)
+      3. Measure the standard deviation of depth values — high std = many
+         distinct depth planes = rich depth composition
+      4. Also measure the foreground/background contrast — the ratio of
+         near-region depth to far-region depth
+      5. Combine into a 0-100 score
+
+    A locked-off wide shot of a flat wall scores ~5.
+    A portrait with shallow DOF and bokeh background scores ~70-85.
+    A wide with clear fore/mid/back separation scores ~50-65.
+    """
+    try:
+        depth = cv2.imread(depth_map_path, cv2.IMREAD_GRAYSCALE)
+        if depth is None:
+            return None
+
+        depth_f = depth.astype(np.float32)
+        h, w    = depth_f.shape
+
+        # std of depth values — measures spread of depth planes
+        depth_std = float(np.std(depth_f))
+
+        # foreground/background separation:
+        # foreground = centre region (likely subject), background = periphery
+        cy, cx   = h // 2, w // 2
+        margin_y = max(1, h // 6)
+        margin_x = max(1, w // 6)
+        fg_region = depth_f[cy-margin_y:cy+margin_y, cx-margin_x:cx+margin_x]
+        # background = outer 25% of frame
+        bg_mask = np.ones_like(depth_f, dtype=bool)
+        bg_mask[h//4:3*h//4, w//4:3*w//4] = False
+        bg_region = depth_f[bg_mask]
+
+        fg_mean = float(np.mean(fg_region)) if fg_region.size > 0 else 128.0
+        bg_mean = float(np.mean(bg_region)) if bg_region.size > 0 else 128.0
+
+        # fg/bg contrast: difference normalised to 0-1
+        fg_bg_contrast = abs(fg_mean - bg_mean) / 255.0
+
+        # number of distinct depth layers (histogram entropy)
+        hist, _ = np.histogram(depth_f, bins=16, range=(0, 256))
+        hist    = hist.astype(np.float32) + 1e-6
+        hist   /= hist.sum()
+        entropy = float(-np.sum(hist * np.log2(hist)))
+        # max entropy with 16 bins = log2(16) = 4.0
+        entropy_norm = entropy / 4.0   # 0-1
+
+        # combine: 50% std, 30% fg/bg contrast, 20% layer entropy
+        score = (
+            (depth_std / 128.0)     * 50.0 +   # std contribution (max ~50)
+            fg_bg_contrast          * 30.0 +   # fg/bg contrast (max 30)
+            entropy_norm            * 20.0     # layer richness (max 20)
+        )
+        return round(min(100.0, max(0.0, score)), 2)
+
+    except Exception:
         return None
 
 
