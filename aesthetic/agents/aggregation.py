@@ -19,6 +19,8 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
+from pathlib import Path
+import cv2
 
 from ..models.scores import (
     CategoryScore,
@@ -171,6 +173,7 @@ def aggregate_shot(
     # Real calibration comes from the baseline corpus over time.
     subjective_total = _compute_subjective_proxy(frames, narrative, temporal_variance)
     metric_detail    = _collect_metric_detail(frames)
+    gamut_data       = _collect_gamut_data(frames)
 
     return ShotScore(
         shot_id=shot_id,
@@ -188,6 +191,8 @@ def aggregate_shot(
         temporal_variance=temporal_variance,
         frame_count=len(frames),
         metric_detail=metric_detail,
+        gamut_coverage=gamut_data.get("gamut_coverage"),
+        dominant_colours=gamut_data.get("dominant_colours"),
     )
 
 
@@ -274,6 +279,7 @@ def _collect_metric_detail(frames: List[FrameMetrics]) -> Dict[str, Dict[str, fl
         "chroma_noise":          _avg([f.color.chroma_noise          for f in frames]),
         "banding_score":         _avg([f.color.banding_score         for f in frames]),
         "delta_e_d65":           _avg([f.color.color_accuracy_de2000 for f in frames]),
+        "skin_tone_de":          _avg([f.color.skin_tone_de           for f in frames]),
     }
     detail["color"] = {k: v for k, v in col.items() if v is not None}
 
@@ -352,6 +358,129 @@ def _compute_subjective_proxy(
 
     proxy = sum(p * w for p, w in zip(parts, weights)) / sum(weights)
     return round(min(100.0, max(0.0, proxy)), 2)
+
+
+# ---------------------------------------------------------------------------
+# Gamut data collection
+# ---------------------------------------------------------------------------
+
+# sRGB to XYZ D65 matrix (IEC 61966-2-1)
+_SRGB_TO_XYZ = np.array([
+    [0.4124564, 0.3575761, 0.1804375],
+    [0.2126729, 0.7151522, 0.0721750],
+    [0.0193339, 0.1191920, 0.9503041],
+], dtype=np.float32)
+
+# Gamut primary xy chromaticities (CIE 1931)
+_GAMUT_PRIMARIES = {
+    "srgb":    {"r": (0.6400, 0.3300), "g": (0.3000, 0.6000), "b": (0.1500, 0.0600), "w": (0.3127, 0.3290)},
+    "p3":      {"r": (0.6800, 0.3200), "g": (0.2650, 0.6900), "b": (0.1500, 0.0600), "w": (0.3127, 0.3290)},
+    "rec2020": {"r": (0.7080, 0.2920), "g": (0.1700, 0.7970), "b": (0.1310, 0.0460), "w": (0.3127, 0.3290)},
+}
+
+
+def _point_in_triangle(px, py, ax, ay, bx, by, cx, cy) -> bool:
+    """Test if point (px,py) is inside triangle (ax,ay)-(bx,by)-(cx,cy)."""
+    def sign(p1x, p1y, p2x, p2y, p3x, p3y):
+        return (p1x - p3x) * (p2y - p3y) - (p2x - p3x) * (p1y - p3y)
+    d1 = sign(px, py, ax, ay, bx, by)
+    d2 = sign(px, py, bx, by, cx, cy)
+    d3 = sign(px, py, cx, cy, ax, ay)
+    has_neg = (d1 < 0) or (d2 < 0) or (d3 < 0)
+    has_pos = (d1 > 0) or (d2 > 0) or (d3 > 0)
+    return not (has_neg and has_pos)
+
+
+def _collect_gamut_data(frames: List[FrameMetrics]) -> Dict[str, Any]:
+    """
+    Collect xy chromaticity data from frame image files for the gamut chart.
+
+    Converts sampled pixels BGR → linear RGB → XYZ D65 → xy chromaticity.
+    Returns dominant colour clusters in xy space plus gamut coverage percentages.
+    """
+    all_xy: List[np.ndarray] = []
+
+    for f in frames:
+        if not f.frame_path or not Path(f.frame_path).exists():
+            continue
+        try:
+            img = cv2.imread(f.frame_path)
+            if img is None:
+                continue
+
+            # downsample aggressively for speed — 32×32 is enough for colour stats
+            small = cv2.resize(img, (32, 32), interpolation=cv2.INTER_AREA)
+            pixels = small.reshape(-1, 3).astype(np.float32) / 255.0
+
+            # sRGB gamma removal → linear RGB
+            linear = np.where(pixels <= 0.04045,
+                              pixels / 12.92,
+                              ((pixels + 0.055) / 1.055) ** 2.4)
+
+            # BGR → RGB
+            linear = linear[:, ::-1]
+
+            # linear RGB → XYZ D65
+            xyz = linear @ _SRGB_TO_XYZ.T
+
+            # XYZ → xy chromaticity (avoid division by zero)
+            xyz_sum = xyz.sum(axis=1, keepdims=True) + 1e-8
+            xy = xyz[:, :2] / xyz_sum
+
+            # filter out near-zero luminance (very dark pixels)
+            Y = xyz[:, 1]
+            mask = Y > 0.005
+            if mask.any():
+                all_xy.append(xy[mask])
+
+        except Exception:
+            continue
+
+    if not all_xy:
+        return {}
+
+    xy_all = np.vstack(all_xy)
+
+    # k-means clustering in xy space (k=8 colour clusters)
+    k = min(8, len(xy_all))
+    rng = np.random.default_rng(42)
+    idx = rng.choice(len(xy_all), k, replace=False)
+    centres = xy_all[idx].copy()
+
+    for _ in range(20):
+        diffs  = xy_all[:, None, :] - centres[None, :, :]
+        dists  = np.sum(diffs**2, axis=2)
+        labels = np.argmin(dists, axis=1)
+        new_c  = np.array([
+            xy_all[labels == i].mean(axis=0) if np.any(labels == i) else centres[i]
+            for i in range(k)
+        ])
+        if np.allclose(centres, new_c, atol=0.001):
+            break
+        centres = new_c
+
+    # cluster sizes (for point sizing in chart)
+    sizes = [int(np.sum(labels == i)) for i in range(k)]
+    total = max(1, sum(sizes))
+    weights = [round(s / total, 3) for s in sizes]
+
+    # gamut coverage — what % of pixels fall inside each gamut triangle
+    gamut_coverage = {}
+    for gamut_name, primaries in _GAMUT_PRIMARIES.items():
+        rx, ry = primaries["r"]
+        gx, gy = primaries["g"]
+        bx, by = primaries["b"]
+        inside = sum(
+            1 for x, y in xy_all
+            if _point_in_triangle(x, y, rx, ry, gx, gy, bx, by)
+        )
+        gamut_coverage[gamut_name] = round(inside / len(xy_all) * 100.0, 1)
+
+    return {
+        "dominant_colours": [[round(float(c[0]), 4), round(float(c[1]), 4), w]
+                              for c, w in zip(centres, weights)],
+        "gamut_coverage":   gamut_coverage,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -542,6 +671,10 @@ def _aggregate_color(frames: List[FrameMetrics]) -> CategoryScore:
         if cl.color_accuracy_de2000 is not None:
             de_score = max(0.0, 100.0 - cl.color_accuracy_de2000 * 5.0)
             parts.append(de_score)
+        # skin tone accuracy — lower ΔE = skin renders close to reference
+        if cl.skin_tone_de is not None:
+            skin_score = max(0.0, 100.0 - cl.skin_tone_de * 4.0)
+            parts.append(skin_score)
         if parts:
             scores.append(float(np.mean(parts)))
     return CategoryScore(technical=_trimmed_mean(scores))

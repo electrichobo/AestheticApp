@@ -335,13 +335,11 @@ def _classify_movement(fm: FrameMetrics) -> MovementType:
 
     flow_mean = mv.optical_flow_mean
     if flow_mean is None:
-        # no previous frame — can still check motion blur as static indicator
+        # no previous frame — use motion blur as static indicator
         blur = mv.motion_blur_amount or 0.0
-        if blur < 30:
-            return MovementType.STATIC
-        return MovementType.UNKNOWN
+        return MovementType.STATIC if blur < 30 else MovementType.UNKNOWN
 
-    if flow_mean < 0.5:
+    if flow_mean < 1.5:
         return MovementType.STATIC
 
     # use movement_type if already classified by metrics engine
@@ -408,20 +406,69 @@ def _classify_scene_clip(
 def _classify_scene_rules(fm: FrameMetrics) -> SceneType:
     """
     Rule-based scene type classification from existing metrics.
-    Uses color temperature and luminance as proxies.
+
+    Key fixes:
+    - Don't use default values for classification — return UNKNOWN if
+      insufficient data rather than defaulting to exterior
+    - Raise the colour temperature threshold: LEDs and HMIs are often
+      5600K daylight balanced but used indoors
+    - Use MULTIPLE signals with a voting approach instead of single threshold
+    - Dynamic range alone shouldn't classify as exterior — DR is also high
+      in high-contrast interior scenes (windows, practical lamps)
     """
-    temp  = fm.lighting.color_temp_kelvin or 5600.0
-    mean  = fm.exposure.histogram_mean    or 128.0
-    dr    = fm.lighting.dynamic_range_stops or 6.0
+    temp = fm.lighting.color_temp_kelvin
+    mean = fm.exposure.histogram_mean
+    dr   = fm.lighting.dynamic_range_stops
+    sat  = fm.color.saturation_mean        if fm.color else None
+    tdev = fm.lighting.color_temp_deviation if fm.lighting else None
 
-    # day vs night: night scenes tend to have lower mean luminance
-    is_night = mean < 60.0
+    # Require at least some data
+    if temp is None and mean is None:
+        return SceneType.EXTERIOR_DAY  # last resort default
 
-    # interior vs exterior:
-    # - cool color temp (>6000K) suggests daylight / exterior
-    # - warm color temp (<3500K) suggests tungsten / interior
-    # - high dynamic range suggests exterior sunlight
-    is_exterior = temp > 5500.0 or dr > 9.0
+    temp = temp or 5600.0
+    mean = mean or 128.0
+    dr   = dr   or 6.0
+
+    # day vs night: night is low overall luminance
+    is_night = mean < 55.0
+
+    # interior/exterior voting — multiple signals
+    exterior_votes = 0
+    interior_votes = 0
+
+    # colour temperature signal
+    # >6500K: very cool = likely daylight/exterior (blue sky, overcast)
+    # 5600-6500K: neutral daylight = ambiguous (could be LED interior)
+    # 4000-5600K: warm daylight or tungsten HMI = ambiguous
+    # <4000K: warm = almost certainly tungsten/interior
+    if temp > 6500.0:
+        exterior_votes += 2
+    elif temp > 6000.0:
+        exterior_votes += 1
+    elif temp < 3800.0:
+        interior_votes += 2
+    elif temp < 4500.0:
+        interior_votes += 1
+
+    # dynamic range signal — exterior sunlight creates extreme DR (>10 stops)
+    # but only a strong signal, not DR > 9 which is common indoors
+    if dr > 11.0:
+        exterior_votes += 2
+    elif dr > 9.5:
+        exterior_votes += 1
+    elif dr < 5.0:
+        interior_votes += 1
+
+    # saturation signal — exterior often has higher natural saturation
+    if sat is not None:
+        if sat > 45.0:
+            exterior_votes += 1
+        elif sat < 15.0:
+            interior_votes += 1
+
+    # classify
+    is_exterior = exterior_votes > interior_votes
 
     if is_exterior and not is_night:
         return SceneType.EXTERIOR_DAY

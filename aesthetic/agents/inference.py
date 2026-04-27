@@ -109,11 +109,16 @@ def run_frame_inference(
                 if frame_metrics.composition is not None:
                     frame_metrics.composition.depth_separation = ds
 
-    # YOLO detection
+    # YOLO detection + skin tone analysis
     if features.get("yolo_enabled", True):
         try:
             detections = _run_yolo(frame_path, device)
             inference.detections = detections
+            # skin tone analysis from face bounding boxes
+            if detections:
+                skin_de = _analyse_skin_tone(frame_path, detections)
+                if skin_de is not None and frame_metrics.color is not None:
+                    frame_metrics.color.skin_tone_de = skin_de
         except Exception as exc:
             import traceback
             print(f"[inference] YOLO failed for {frame_path}: {exc}")
@@ -562,6 +567,86 @@ def _vlm_openai(image_data: str, prompt: str, api_key: str) -> Optional[str]:
         return response.choices[0].message.content.strip()
     except Exception as exc:
         _log_inference_error("OpenAI VLM", exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Skin tone analysis
+# ---------------------------------------------------------------------------
+
+_SKIN_TONE_REFERENCES = [
+    (73.0,  14.0, 17.0, "fair"),
+    (65.0,  16.0, 18.0, "light"),
+    (55.0,  18.0, 16.0, "medium"),
+    (45.0,  17.0, 13.0, "medium-dark"),
+    (35.0,  13.0,  9.0, "dark"),
+    (25.0,   9.0,  6.0, "deep"),
+]
+
+
+def _analyse_skin_tone(
+    frame_path: str,
+    detections: List[Dict[str, Any]],
+) -> Optional[float]:
+    """
+    Sample Lab values from detected person/face regions and compute
+    ΔE2000 against the closest Macbeth-derived skin tone reference.
+
+    Returns mean ΔE across all detected faces. Low ΔE = skin renders
+    close to reference; high ΔE = colour shift or WB issue.
+    """
+    try:
+        img = cv2.imread(frame_path)
+        if img is None:
+            return None
+
+        lab  = cv2.cvtColor(img, cv2.COLOR_BGR2Lab).astype(np.float32)
+        h, w = img.shape[:2]
+        face_deltas = []
+
+        for det in (detections or []):
+            if det.get("label") != "person":
+                continue
+            bbox = det.get("bbox", [])
+            if len(bbox) != 4:
+                continue
+
+            x1, y1, x2, y2 = [int(v) for v in bbox]
+            # upper 25% of person bbox ≈ head region
+            face_h = max(1, (y2 - y1) // 4)
+            fy1 = max(0, y1)
+            fy2 = min(h, y1 + face_h)
+            # inset 25% horizontally to avoid background
+            inset = (x2 - x1) // 4
+            fx1 = max(0, x1 + inset)
+            fx2 = min(w, x2 - inset)
+
+            if fy2 <= fy1 or fx2 <= fx1:
+                continue
+
+            face_region = lab[fy1:fy2, fx1:fx2]
+            if face_region.size == 0:
+                continue
+
+            L_f = float(np.mean(face_region[:, :, 0]))
+            a_f = float(np.mean(face_region[:, :, 1])) - 128.0
+            b_f = float(np.mean(face_region[:, :, 2])) - 128.0
+
+            # skip non-skin luminance ranges
+            if not (20.0 <= L_f <= 90.0):
+                continue
+
+            # find closest reference skin tone by luminance
+            ref = min(_SKIN_TONE_REFERENCES, key=lambda r: abs(r[0] - L_f))
+            L_r, a_r, b_r, _ = ref
+
+            from .metrics import _compute_delta_e2000
+            face_deltas.append(_compute_delta_e2000(L_f, a_f, b_f, L_r, a_r, b_r))
+
+        return round(float(np.mean(face_deltas)), 3) if face_deltas else None
+
+    except Exception as exc:
+        print(f"[inference] skin tone analysis failed: {exc}")
         return None
 
 

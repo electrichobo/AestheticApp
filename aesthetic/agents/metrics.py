@@ -592,29 +592,57 @@ def _estimate_blur_direction(gray: np.ndarray) -> Optional[float]:
 def _classify_movement(flow: np.ndarray, flow_mean: float) -> str:
     """
     Rule-based movement type classifier from optical flow.
-    Returns a MovementType enum value string.
+
+    Key improvements over naive approach:
+    - Static threshold raised to 1.5 to account for compression noise
+    - Handheld detection uses flow CONSISTENCY not just magnitude —
+      handheld has high spatial variance relative to mean flow
+      (lots of local disagreement), while dolly/pan has consistent
+      directional flow across the frame
+    - Direction classification uses median flow vector
+    - Dolly/zoom distinguished from pan/tilt by directionality ratio
     """
-    if flow_mean < 0.5:
+    if flow_mean < 1.5:
         return "static"
 
-    # dominant flow direction
+    # flow direction from median (robust to outliers)
     mean_dx = float(np.median(flow[..., 0]))
     mean_dy = float(np.median(flow[..., 1]))
+    abs_dx  = abs(mean_dx)
+    abs_dy  = abs(mean_dy)
 
-    abs_dx = abs(mean_dx)
-    abs_dy = abs(mean_dy)
+    # spatial consistency: handheld has high LOCAL variance relative to mean
+    # Compute per-pixel deviation from the median direction vector
+    flow_flat = flow.reshape(-1, 2).astype(np.float32)
+    median_vec = np.array([mean_dx, mean_dy])
+    deviations = np.linalg.norm(flow_flat - median_vec, axis=1)
+    flow_consistency = float(np.mean(deviations))  # lower = more consistent
 
-    # flow variance (handheld has high local variance)
-    flow_var = float(np.std(flow.reshape(-1, 2), axis=0).mean())
+    # Consistency ratio: how much of the variance is directionless vs directional
+    # High ratio = spatially inconsistent = handheld
+    # Low ratio = all pixels moving in same direction = dolly/pan
+    consistency_ratio = flow_consistency / (flow_mean + 1e-6)
 
-    if flow_var > 2.0:
+    # handheld: high spatial inconsistency AND moderate-high flow
+    # threshold 0.8 means deviations average 80% of the mean flow
+    if consistency_ratio > 0.85 and flow_mean > 1.5:
         return "handheld"
-    if abs_dx > abs_dy * 2:
+
+    # directional movements
+    if abs_dx > abs_dy * 1.8:
         return "pan"
-    if abs_dy > abs_dx * 2:
+    if abs_dy > abs_dx * 1.8:
         return "tilt"
-    if flow_mean > 1.5:
+
+    # dolly/push: roughly equal x/y but consistent forward/backward feel
+    # high flow mean with low consistency_ratio = smooth camera movement
+    if flow_mean > 2.0 and consistency_ratio < 0.6:
         return "dolly"
+
+    # borderline handheld: moderate inconsistency
+    if consistency_ratio > 0.65:
+        return "handheld"
+
     return "unknown"
 
 

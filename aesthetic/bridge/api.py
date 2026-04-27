@@ -1177,6 +1177,7 @@ def _build_ui_shots(selected: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "deltaED65":        s.get("delta_e_d65"),
             "deltaEBaseline":   s.get("delta_e_baseline"),
             "gamutCoverage":    s.get("gamut_coverage"),
+            "dominantColours":  s.get("dominant_colours"),
             "skinToneDetected": s.get("skin_tone_detected", False),
         })
     return ui_shots

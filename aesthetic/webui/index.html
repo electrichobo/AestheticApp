@@ -93,6 +93,15 @@
           class="w-full py-2 px-3 rounded text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed" disabled>
           Load
         </button>
+        <!-- Export clips toggle -->
+        <label class="flex items-center gap-2 px-1 py-0.5 cursor-pointer group">
+          <input type="checkbox" id="exportClipsChk"
+            class="rounded border-gray-600 bg-gray-700 text-indigo-500 cursor-pointer" />
+          <span class="text-xs text-gray-400 group-hover:text-gray-300 select-none">
+            Export video clips <span class="text-gray-600">(slower)</span>
+          </span>
+        </label>
+
         <button id="analyzeBtn"
           class="w-full py-2 px-3 rounded text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed" disabled>
           Find Best Shots
@@ -483,6 +492,13 @@ document.getElementById('createJobBtn').addEventListener('click', async () => {
 // ---------------------------------------------------------------------------
 // Analysis
 // ---------------------------------------------------------------------------
+// Export clips checkbox
+document.getElementById('exportClipsChk').addEventListener('change', async (e) => {
+  if(!hasBridge) return;
+  await window.pywebview.api.set_export_clips(e.target.checked);
+  log(e.target.checked ? 'Video clip export enabled' : 'Video clip export disabled');
+});
+
 document.getElementById('analyzeBtn').addEventListener('click', async () => {
   hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview.api;
   if(!hasBridge || !currentJobId) return;
@@ -732,7 +748,13 @@ function toggleShotDetail(i){
   if(!row) return;
   const hidden = row.classList.contains('hidden');
   document.querySelectorAll('[id^="mxd-"]').forEach(r=>r.classList.add('hidden'));
-  if(hidden) row.classList.remove('hidden');
+  if(hidden){
+    row.classList.remove('hidden');
+    // render CIE chart after DOM is visible
+    const shotId = i + 1;
+    const shot = (lastResults?.shots || [])[i];
+    if(shot) requestAnimationFrame(() => renderCIEChart('cie-'+shotId, shot));
+  }
 }
 
 const ML = {
@@ -831,13 +853,18 @@ function buildDetailPanel(s){
         <div class="text-gray-600 leading-relaxed">ΔE &lt;2 = imperceptible &nbsp; 2–5 = subtle cast &nbsp; 5–10 = visible &nbsp; &gt;10 = strong</div>
       </div>
       <div>
-        <div class="text-gray-500 mb-1.5">Colour Gamut Saturation</div>
-        ${['srgb','p3','rec2020'].map(k => g[k]!=null
-          ? `<div class="flex items-center gap-2 mb-1">
-               <span class="w-16 text-gray-400">${k==='srgb'?'sRGB':k==='p3'?'DCI-P3':'Rec.2020'}</span>
-               <div class="flex-1 bg-gray-700 rounded h-1.5"><div class="${k==='srgb'?'bg-red-400/70':k==='p3'?'bg-green-400/70':'bg-blue-400/70'} h-1.5 rounded" style="width:${g[k]}%"></div></div>
-               <span class="w-8 text-right text-gray-400">${g[k]}%</span>
-             </div>` : '').join('')}
+        <div class="text-gray-500 mb-1.5">CIE 1931 Chromaticity</div>
+        <canvas id="cie-${s.id}" width="160" height="160"
+          class="rounded border border-gray-700/50 bg-gray-900"></canvas>
+        <div class="mt-1 space-y-0.5 text-xs">
+          ${Object.entries(g).map(([k,v]) =>
+            `<div class="flex items-center gap-1.5">
+              <span class="${k==='srgb'?'text-red-400':k==='p3'?'text-green-400':'text-blue-400'}">■</span>
+              <span class="text-gray-500">${k==='srgb'?'sRGB':k==='p3'?'DCI-P3':'Rec.2020'}</span>
+              <span class="ml-auto ${k==='srgb'?'text-red-300':k==='p3'?'text-green-300':'text-blue-300'}">${v}%</span>
+            </div>`
+          ).join('')}
+        </div>
       </div>
     </div>
   </div>`;
@@ -885,6 +912,113 @@ function buildDetailPanel(s){
 }
 
 function deC(v){ const n=parseFloat(v); return isNaN(n)?'text-gray-500':n<2?'text-green-400':n<5?'text-yellow-400':n<10?'text-orange-400':'text-red-400'; }
+
+// ---------------------------------------------------------------------------
+// CIE 1931 xy chromaticity diagram renderer
+// ---------------------------------------------------------------------------
+function renderCIEChart(canvasId, shot) {
+  const canvas = document.getElementById(canvasId);
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // mapping from xy (0-0.8 range) to canvas pixels
+  const xMin=0.0, xMax=0.78, yMin=0.0, yMax=0.9;
+  function toCanvas(x, y) {
+    return [
+      Math.round((x - xMin) / (xMax - xMin) * (W - 10) + 5),
+      Math.round(H - 5 - (y - yMin) / (yMax - yMin) * (H - 10))
+    ];
+  }
+
+  // draw background grid (subtle)
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 0.5;
+  for(let i = 0; i <= 8; i++) {
+    const x = xMin + i * (xMax - xMin) / 8;
+    const [cx1] = toCanvas(x, yMin); ctx.beginPath(); ctx.moveTo(cx1, 5); ctx.lineTo(cx1, H-5); ctx.stroke();
+    const y = yMin + i * (yMax - yMin) / 8;
+    const [,cy1] = toCanvas(xMin, y); ctx.beginPath(); ctx.moveTo(5, cy1); ctx.lineTo(W-5, cy1); ctx.stroke();
+  }
+
+  // CIE 1931 spectral locus — simplified boundary points
+  // These are the approximate xy coordinates of the spectral locus (380-700nm)
+  const locus = [
+    [0.1741,0.0050],[0.1738,0.0049],[0.1736,0.0044],[0.1730,0.0040],
+    [0.1726,0.0037],[0.1721,0.0035],[0.1714,0.0033],[0.1703,0.0031],
+    [0.1689,0.0028],[0.1664,0.0025],[0.1644,0.0021],[0.1611,0.0014],
+    [0.1566,0.0007],[0.1510,0.0001],[0.1440,0.0000],[0.1355,0.0001],
+    [0.1241,0.0024],[0.1096,0.0082],[0.0913,0.0210],[0.0687,0.0399],
+    [0.0454,0.0689],[0.0235,0.1102],[0.0082,0.1720],[0.0039,0.2720],
+    [0.0139,0.3986],[0.0389,0.5380],[0.0743,0.6868],[0.1142,0.8262],
+    [0.1547,0.8059],[0.1929,0.7816],[0.2296,0.7543],[0.2628,0.7243],
+    [0.2920,0.6923],[0.3185,0.6589],[0.3450,0.6226],[0.3738,0.5815],
+    [0.4042,0.5375],[0.4373,0.4887],[0.4694,0.4418],[0.5000,0.3981],
+    [0.5295,0.3577],[0.5577,0.3239],[0.5832,0.2952],[0.6067,0.2714],
+    [0.6280,0.2521],[0.6467,0.2362],[0.6640,0.2218],[0.6801,0.2082],
+    [0.6942,0.1958],[0.7076,0.1839],[0.7190,0.1728],[0.7260,0.1665],
+    [0.7300,0.1633],[0.7341,0.1584],[0.1741,0.0050],
+  ];
+
+  // draw spectral locus
+  ctx.beginPath();
+  locus.forEach(([x,y], i) => {
+    const [cx,cy] = toCanvas(x, y);
+    i === 0 ? ctx.moveTo(cx,cy) : ctx.lineTo(cx,cy);
+  });
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // gamut triangles
+  const gamuts = {
+    srgb:    {r:[0.64,0.33], g:[0.30,0.60], b:[0.15,0.06], color:'rgba(239,68,68,0.5)'},
+    p3:      {r:[0.68,0.32], g:[0.265,0.69], b:[0.15,0.06], color:'rgba(34,197,94,0.5)'},
+    rec2020: {r:[0.708,0.292], g:[0.17,0.797], b:[0.131,0.046], color:'rgba(59,130,246,0.5)'},
+  };
+
+  ['rec2020','p3','srgb'].forEach(name => {
+    const gam = gamuts[name];
+    const [rx,ry] = toCanvas(gam.r[0],gam.r[1]);
+    const [gx,gy] = toCanvas(gam.g[0],gam.g[1]);
+    const [bx,by] = toCanvas(gam.b[0],gam.b[1]);
+    ctx.beginPath();
+    ctx.moveTo(rx,ry); ctx.lineTo(gx,gy); ctx.lineTo(bx,by); ctx.closePath();
+    ctx.strokeStyle = gam.color.replace('0.5','0.9');
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = gam.color.replace('0.5','0.08');
+    ctx.fill();
+  });
+
+  // D65 white point
+  const [wx,wy] = toCanvas(0.3127, 0.3290);
+  ctx.beginPath(); ctx.arc(wx,wy,3,0,Math.PI*2);
+  ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fill();
+
+  // dominant colour clusters from shot data
+  const clusters = shot.dominantColours || [];
+  if(clusters.length) {
+    clusters.forEach(([x, y, weight]) => {
+      if(x == null || y == null) return;
+      const [cx,cy] = toCanvas(x, y);
+      const r = Math.max(2, Math.round(weight * 20));
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(255,255,100,0.8)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    });
+  }
+
+  // axis labels
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.font = '9px monospace';
+  ctx.fillText('x', W-10, H-5);
+  ctx.fillText('y', 2, 12);
+}
 // ---------------------------------------------------------------------------
 // Downloads
 // ---------------------------------------------------------------------------
