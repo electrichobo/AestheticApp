@@ -39,6 +39,7 @@ def export_job(
     selected_shots: List[Dict[str, Any]],
     job_dir:      Path,
     config:       Dict[str, Any],
+    export_clips: bool = False,
 ) -> Manifest:
     """
     Run the full export pipeline for a completed job.
@@ -72,14 +73,16 @@ def export_job(
     hero_frame_paths = _export_hero_frames(selected_shots, frames_dir, warnings)
     timing["hero_frames"] = round(time.time() - t0, 2)
 
-    # --- hero clips ---
+    # --- hero clips (only if requested) ---
     t0 = time.time()
-    clip_paths = _export_hero_clips(
-        selected_shots,
-        job.source_file,
-        clips_dir,
-        warnings,
-    )
+    clip_paths = {}
+    if export_clips:
+        clip_paths = _export_hero_clips(
+            selected_shots,
+            job.source_file,
+            clips_dir,
+            warnings,
+        )
     timing["hero_clips"] = round(time.time() - t0, 2)
 
     # --- EDL and CSV timecode list ---

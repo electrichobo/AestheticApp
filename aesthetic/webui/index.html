@@ -93,6 +93,16 @@
           class="w-full py-2 px-3 rounded text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed" disabled>
           Load
         </button>
+        <!-- Export clips toggle -->
+        <label class="flex items-center gap-2 px-1 cursor-pointer group">
+          <input type="checkbox" id="exportClipsChk"
+            class="rounded border-gray-600 bg-gray-700 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 cursor-pointer" />
+          <span class="text-xs text-gray-400 group-hover:text-gray-300 select-none">
+            Export video clips
+            <span class="text-gray-600">(slower)</span>
+          </span>
+        </label>
+
         <button id="analyzeBtn"
           class="w-full py-2 px-3 rounded text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed" disabled>
           Find Best Shots
@@ -475,6 +485,13 @@ document.getElementById('createJobBtn').addEventListener('click', async () => {
     document.getElementById('analyzeBtn').disabled = false;
     document.getElementById('exportBtn').disabled  = false;
     log(`job created: ${currentJobId}`);
+    // colour space info
+    const meta = r.meta || {};
+    if(meta.is_log_encoded) {
+      log(`⚠ Log-encoded footage detected (${meta.color_trc||'unknown curve'}) — ΔE colour accuracy values may not be meaningful without a display LUT applied.`);
+    } else if(meta.color_trc && meta.color_trc !== 'unknown') {
+      log(`colour profile: primaries=${meta.color_primaries||'?'} trc=${meta.color_trc} matrix=${meta.color_space||'?'}`);
+    }
   } else {
     log(`job error: ${r.error}`);
   }
@@ -483,6 +500,13 @@ document.getElementById('createJobBtn').addEventListener('click', async () => {
 // ---------------------------------------------------------------------------
 // Analysis
 // ---------------------------------------------------------------------------
+// Export clips checkbox
+document.getElementById('exportClipsChk').addEventListener('change', async (e) => {
+  if(!hasBridge) return;
+  await window.pywebview.api.set_export_clips(e.target.checked);
+  log(e.target.checked ? 'Video clip export enabled' : 'Video clip export disabled');
+});
+
 document.getElementById('analyzeBtn').addEventListener('click', async () => {
   hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview.api;
   if(!hasBridge || !currentJobId) return;

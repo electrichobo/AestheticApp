@@ -127,6 +127,51 @@ class BaselineStore:
             "augment_metricCount": len(cast(Dict[str, Any], augment.get("stats", {}))),
         }
 
+    def get_reference_colour(self) -> Dict[str, float]:
+        """
+        Return a reference Lab colour reconstructed from the active golden baseline
+        statistics. Used for ΔE vs Baseline comparison in the Matrix.
+
+        Returns dict with keys:
+          L_mean, a_mean, b_mean  — mean Lab values of the corpus
+          wb_deviation_mean       — mean white balance deviation
+          saturation_mean         — mean Lab chroma
+          color_temp_mean         — mean estimated colour temperature (K)
+        """
+        golden = self.load_active_golden()
+        stats  = golden.get("stats", {})
+
+        def _mean(key: str) -> Optional[float]:
+            s = stats.get(key)
+            if s and isinstance(s, dict) and s.get("n", 0) > 0:
+                return float(s["mean"])
+            return None
+
+        wb_dev   = _mean("wb_deviation")      or 0.0
+        sat_mean = _mean("saturation_mean")   or 0.0
+        temp_K   = _mean("color_temp_kelvin") or 5600.0
+
+        # Reconstruct approximate a* and b* from colour temperature.
+        # Colour temperature maps to a hue angle in Lab:
+        #   Warm (3200K) → positive a* (reddish), positive b* (yellowish)
+        #   Neutral (5600K) → near-zero a* and b*
+        #   Cool (8000K) → negative a* (cyan-ish), negative b* (bluish)
+        # We use a linear approximation based on the known D65 trajectory.
+        import math
+        norm_temp = (temp_K - 5600.0) / 3400.0   # -1 (cool) to +1 (warm)
+        # warm cast: a*~+10, b*~+15 at 3200K; cool cast: a*~-5, b*~-8 at 8000K
+        a_ref = -norm_temp * 8.0    # warm temp → negative norm → positive a*
+        b_ref = -norm_temp * 12.0   # warm temp → positive b*
+
+        return {
+            "L_mean":            _mean("histogram_mean") or 128.0,
+            "a_mean":            a_ref,
+            "b_mean":            b_ref,
+            "wb_deviation_mean": wb_dev,
+            "saturation_mean":   sat_mean,
+            "color_temp_mean":   temp_K,
+        }
+
     def load_active_golden(self) -> Dict[str, Any]:
         active = self._load_json(self.active_path, {"version": 0})
         version = int(active.get("version", 0))

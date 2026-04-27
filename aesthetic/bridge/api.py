@@ -234,7 +234,25 @@ class AestheticAPI:
         _write_json(job_dir / "manifest.json", job.to_manifest_dict())
         self._jobs[job_id] = job
 
-        return {"ok": True, "job_id": job_id, "source_file": source_file}
+        # quick ingest to get colour space metadata for UI display
+        meta_dict = {}
+        try:
+            from ..agents.ingest import ingest
+            video_meta = ingest(source_file)
+            meta_dict = {
+                "duration_sec":    video_meta.duration_sec,
+                "fps":             video_meta.fps,
+                "width":           video_meta.width,
+                "height":          video_meta.height,
+                "codec":           video_meta.codec,
+                "color_primaries": video_meta.color_primaries,
+                "color_trc":       video_meta.color_trc,
+                "color_space":     video_meta.color_space,
+                "is_log_encoded":  video_meta.is_log_encoded,
+            }
+        except Exception:
+            pass
+        return {"ok": True, "job_id": job_id, "source_file": source_file, "meta": meta_dict}
 
     def resolve_file_path(self, filename: str) -> Dict[str, Any]:
         """
@@ -380,6 +398,16 @@ class AestheticAPI:
             return {"ok": False, "error": "no file selected"}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    def set_export_clips(self, enabled: bool) -> Dict[str, Any]:
+        """Toggle video clip export on or off."""
+        self._cfg.setdefault("export", {})["export_clips"] = bool(enabled)
+        return {"ok": True, "export_clips": bool(enabled)}
+
+    def get_export_clips(self) -> Dict[str, Any]:
+        """Return current clip export setting."""
+        enabled = bool(self._cfg.get("export", {}).get("export_clips", False))
+        return {"ok": True, "export_clips": enabled}
 
     def open_output_folder(self, folder_path: str) -> Dict[str, Any]:
         """Open a folder in Windows Explorer / macOS Finder / Linux file manager."""
@@ -897,6 +925,31 @@ class AestheticAPI:
                 if de_vals:
                     score.delta_e_d65 = round(float(sum(de_vals) / len(de_vals)), 3)
 
+                # ΔE vs baseline corpus reference colour
+                try:
+                    ref = self._baseline.get_reference_colour()
+                    # get mean Lab from this shot's frames
+                    from ..agents.metrics import _compute_delta_e2000
+                    L_vals = [fm.exposure.histogram_mean for fm in scene_frames
+                              if fm.exposure and fm.exposure.histogram_mean is not None]
+                    wb_vals= [fm.color.wb_deviation for fm in scene_frames
+                              if fm.color and fm.color.wb_deviation is not None]
+                    if L_vals and wb_vals:
+                        L_shot = sum(L_vals) / len(L_vals)
+                        # use temp to estimate hue direction for this shot
+                        temp_vals = [fm.lighting.color_temp_kelvin for fm in scene_frames
+                                     if fm.lighting and fm.lighting.color_temp_kelvin is not None]
+                        temp_shot = sum(temp_vals) / len(temp_vals) if temp_vals else 5600.0
+                        norm = (temp_shot - 5600.0) / 3400.0
+                        a_shot = -norm * 8.0
+                        b_shot = -norm * 12.0
+                        score.delta_e_baseline = _compute_delta_e2000(
+                            L_shot, a_shot, b_shot,
+                            ref["L_mean"], ref["a_mean"], ref["b_mean"]
+                        )
+                except Exception:
+                    pass
+
                 # Skin tone — true if any frame had YOLO detections
                 score.skin_tone_detected = any(
                     bool(fm.inference and fm.inference.detections)
@@ -993,7 +1046,9 @@ class AestheticAPI:
                 baseline_version=self._baseline.get_summary().get("active", {}).get("version", 0),
                 seed=seed,
             )
-            manifest_out = export_job(job_model, selected, job_dir, cfg)
+            export_clips = bool(cfg.get("export", {}).get("export_clips", False))
+            manifest_out = export_job(job_model, selected, job_dir, cfg,
+                                      export_clips=export_clips)
 
             self._push_progress(job_id, "Analysis complete", 100)
 

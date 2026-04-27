@@ -166,6 +166,9 @@ def _parse_ffprobe(path: Path, raw: Dict[str, Any]) -> VideoMeta:
         bit_rate=bit_rate,
         color_space=video_stream.get("color_space"),
         color_range=video_stream.get("color_range"),
+        color_primaries=video_stream.get("color_primaries"),
+        color_trc=video_stream.get("color_transfer"),
+        color_matrix=video_stream.get("color_space"),   # ffprobe uses color_space for matrix
     )
 
 

@@ -78,8 +78,27 @@ class VideoMeta(BaseModel):
     sar:          str             = "1:1"        # sample aspect ratio
     codec:        str             = "unknown"
     bit_rate:     Optional[int]   = None         # bits per second
-    color_space:  Optional[str]   = None
-    color_range:  Optional[str]   = None
+    color_space:    Optional[str]   = None
+    color_range:    Optional[str]   = None
+    color_primaries:Optional[str]   = None   # e.g. bt709, bt2020
+    color_trc:      Optional[str]   = None   # transfer characteristic: bt709, smpte2084, arib-std-b67, log, log316
+    color_matrix:   Optional[str]   = None   # matrix coefficients: bt709, bt2020nc
+
+    @property
+    def is_log_encoded(self) -> bool:
+        """True if footage appears to be log-encoded (not display-referred)."""
+        log_curves = {
+            "slog", "slog2", "slog3",
+            "log", "log316",
+            "log_c", "log3g10",
+            "v_log", "vlog",
+            "d_log", "dlog",
+            "bt2020-10", "bt2020-12",
+            "smpte2084",             # PQ / HDR
+            "arib-std-b67",          # HLG / HDR
+        }
+        trc = (self.color_trc or "").lower().replace("-", "_")
+        return any(lc in trc for lc in log_curves)
 
     @field_validator("fps")
     @classmethod
