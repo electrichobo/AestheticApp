@@ -998,17 +998,24 @@ def _build_embeddings_index(data_dir: Path) -> List[List[float]]:
     if not embeddings_dir.exists():
         return []
 
-    EXPECTED_DIM = 512   # CLIP ViT-B-32 embedding dimension
+    # Infer expected dim from the first valid embedding found — don't hardcode.
+    # Supports any model: ViT-B-32 (512), ViT-L-14 (768), SigLIP SO400M (1152)
+    EXPECTED_DIM: Optional[int] = None
 
     embeddings = []
     for p in embeddings_dir.glob("*.json"):
         try:
             record = json.loads(p.read_text(encoding="utf-8"))
             emb    = record.get("embedding")
-            if emb and len(emb) == EXPECTED_DIM:
+            if not emb:
+                continue
+            dim = len(emb)
+            if EXPECTED_DIM is None:
+                EXPECTED_DIM = dim  # lock dimension from first embedding
+            if dim == EXPECTED_DIM:
                 embeddings.append(emb)
-            elif emb:
-                print(f"[baseline] skipping {p.name}: wrong dim {len(emb)} (expected {EXPECTED_DIM})")
+            else:
+                print(f"[baseline] skipping {p.name}: dim {dim} != corpus dim {EXPECTED_DIM}")
         except Exception:
             continue
 

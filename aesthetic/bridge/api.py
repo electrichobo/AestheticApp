@@ -880,11 +880,9 @@ class AestheticAPI:
                 try:
                     import torch
                     import open_clip
-                    _clip_dev = "cuda" if (features.get("gpu_enabled", False) and torch.cuda.is_available()) else "cpu"
-                    _clip_model, _, _clip_pre = open_clip.create_model_and_transforms(
-                        "ViT-L-14", pretrained="openai", device=_clip_dev
-                    )
-                    _clip_model.eval()
+                    from ..agents.model_utils import get_device, load_model
+                    _clip_dev = get_device(bool(features.get("gpu_enabled", True)))
+                    _clip_model, _clip_pre, _mn, _ = load_model(_clip_dev)
                 except Exception:
                     pass
 

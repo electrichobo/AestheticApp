@@ -49,15 +49,20 @@ _yolo_version: Optional[str] = None
 _device: Optional[str] = None
 
 
-def _get_device(gpu_enabled: bool) -> str:
-    global _device
-    if _device is None:
-        try:
-            import torch
-            _device = "cuda" if (gpu_enabled and torch.cuda.is_available()) else "cpu"
-        except ImportError:
-            _device = "cpu"
-    return _device
+# ---------------------------------------------------------------------------
+# Model selection and device detection — delegated to model_utils
+# ---------------------------------------------------------------------------
+
+from .model_utils import (
+    get_device       as _get_device_util,
+    select_best_model as _select_best_clip_model,
+    is_siglip        as _is_siglip_model,
+    load_model       as _load_clip_model,
+)
+
+
+def _get_device(gpu_enabled: bool = True) -> str:
+    return _get_device_util(gpu_enabled)
 
 
 # ---------------------------------------------------------------------------
@@ -219,14 +224,10 @@ def _run_clip(
         import open_clip
 
         if _clip_model is None:
-            model_name = "ViT-L-14"
-            pretrained = "openai"
-            _clip_model, _, _clip_preprocess = open_clip.create_model_and_transforms(
-                model_name,
-                pretrained=pretrained,
-                device=device,
-            )
-            _clip_model.eval()
+            # Model selection cascade — best available at runtime
+            # model_utils selects best available: SigLIP > ViT-L-14-336 > ViT-L-14 > ViT-B-32
+            from .model_utils import load_model as _mu_load
+            _clip_model, _clip_preprocess, model_name, pretrained = _mu_load(device)
             _clip_version = f"{model_name}/{pretrained}"
 
         from PIL import Image

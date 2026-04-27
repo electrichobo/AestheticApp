@@ -27,6 +27,7 @@ import numpy as np
 
 from ..models.job import MovementType, ShotScale, SceneType
 from ..models.scores import FrameMetrics
+from .model_utils import get_tokenizer as _mu_get_tokenizer, select_best_model as _mu_best_model
 
 
 # ---------------------------------------------------------------------------
@@ -311,7 +312,7 @@ def _scale_from_clip(
         prompts = list(SCALE_PROMPTS.values())
 
         import open_clip
-        tokenizer = open_clip.get_tokenizer("ViT-L-14")
+        tokenizer = _mu_get_tokenizer(_mu_best_model()[0])
         tokens    = tokenizer(prompts).to(device)
 
         img    = Image.open(frame_path).convert("RGB")
@@ -421,7 +422,9 @@ def _classify_scene_clip(
         from PIL import Image
         import open_clip
 
-        tokenizer = open_clip.get_tokenizer("ViT-L-14")
+        # use model_utils to get the right tokenizer for whichever model is loaded
+        model_name, _ = _mu_best_model()
+        tokenizer = _mu_get_tokenizer(model_name)
 
         img    = Image.open(frame_path).convert("RGB")
         tensor = preprocess(img).unsqueeze(0).to(device)
@@ -431,19 +434,17 @@ def _classify_scene_clip(
             img_feat = img_feat / img_feat.norm(dim=-1, keepdim=True)
 
             # score each class using mean similarity across its prompts
-            labels      = list(SCENE_TYPE_PROMPTS_MULTI.keys())
+            labels       = list(SCENE_TYPE_PROMPTS_MULTI.keys())
             class_scores = []
             for scene_type in labels:
-                prompts = SCENE_TYPE_PROMPTS_MULTI[scene_type]
-                tokens  = tokenizer(prompts).to(device)
-                txt_feat= model.encode_text(tokens)
-                txt_feat= txt_feat / txt_feat.norm(dim=-1, keepdim=True)
-                # mean similarity across all prompts for this class
-                sims    = (img_feat @ txt_feat.T).squeeze(0)
+                prompts  = SCENE_TYPE_PROMPTS_MULTI[scene_type]
+                tokens   = tokenizer(prompts).to(device)
+                txt_feat = model.encode_text(tokens)
+                txt_feat = txt_feat / txt_feat.norm(dim=-1, keepdim=True)
+                sims     = (img_feat @ txt_feat.T).squeeze(0)
                 class_scores.append(float(sims.mean().item()))
 
         scores = np.array(class_scores)
-        # softmax for calibrated probabilities
         exp_s  = np.exp(scores - scores.max())
         probs  = exp_s / exp_s.sum()
         best   = int(np.argmax(probs))
@@ -550,7 +551,7 @@ def _classify_intent_clip(
         labels  = list(INTENT_PROMPTS.keys())
         prompts = list(INTENT_PROMPTS.values())
 
-        tokenizer = open_clip.get_tokenizer("ViT-L-14")
+        tokenizer = _mu_get_tokenizer(_mu_best_model()[0])
         tokens    = tokenizer(prompts).to(device)
 
         img    = Image.open(frame_path).convert("RGB")

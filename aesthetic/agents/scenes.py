@@ -255,13 +255,9 @@ def _ssim_diff(a: np.ndarray, b: np.ndarray) -> float:
 def _load_clip_for_scenes() -> Tuple:
     """Load CLIP for scene detection. Returns (model, preprocess, device)."""
     try:
-        import torch
-        import open_clip
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        model, _, preprocess = open_clip.create_model_and_transforms(
-            "ViT-B-32", pretrained="openai", device=device
-        )
-        model.eval()
+        from .model_utils import load_model, get_device
+        device = get_device()
+        model, preprocess, _, _ = load_model(device)
         return model, preprocess, device
     except Exception:
         return None, None, "cpu"
