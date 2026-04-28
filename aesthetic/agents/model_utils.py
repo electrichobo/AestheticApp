@@ -123,12 +123,10 @@ def get_tokenizer(model_name: str):
             self._ctx  = context_length
 
         def __call__(self, texts):
-            # Try passing context_length as kwarg first (most open_clip versions)
-            try:
-                return self._base(texts, context_length=self._ctx)
-            except TypeError:
-                pass
-            # Fallback: tokenize then hard-truncate the tensor
+            # Always tokenize first then hard-truncate.
+            # Do NOT use context_length kwarg — open_clip's SigLIP tokenizer
+            # accepts it without error but produces 77 tokens anyway (ignores it).
+            # Tensor slicing is the only reliable way to enforce the limit.
             tokens = self._base(texts)
             if hasattr(tokens, 'shape') and len(tokens.shape) >= 2:
                 return tokens[:, :self._ctx]
