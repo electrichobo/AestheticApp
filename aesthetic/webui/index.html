@@ -264,6 +264,13 @@
             <button onclick="loadBaseline()" class="py-1 px-3 rounded text-xs font-medium text-white bg-gray-700 hover:bg-gray-600">Refresh</button>
           </div>
           <div id="baselineCompatWarning" class="text-xs text-gray-500">checking…</div>
+          <div id="baselineCleanRow" class="hidden mb-2">
+            <button onclick="cleanStaleEmbeddings()"
+              class="py-1 px-3 rounded text-xs font-medium text-white bg-amber-700 hover:bg-amber-600">
+              Clean Stale Embeddings
+            </button>
+            <span class="text-xs text-gray-500 ml-2">Remove old-dimension files from a previous model</span>
+          </div>
           <pre id="baselineDisplayFull" class="text-xs text-gray-300 bg-gray-800 rounded p-3 overflow-x-auto border border-gray-700">not loaded</pre>
 
           <!-- Feedback & Training -->
@@ -1093,6 +1100,22 @@ async function loadFeedbackStats() {
   }
 }
 
+async function cleanStaleEmbeddings() {
+  if(!hasBridge) return;
+  const btn = document.querySelector('button[onclick="cleanStaleEmbeddings()"]');
+  if(btn) { btn.disabled = true; btn.textContent = 'Cleaning…'; }
+  try {
+    const r = await window.pywebview.api.clean_stale_embeddings();
+    if(r.ok) {
+      log(`Cleaned ${r.deleted} stale embeddings. Kept ${r.kept} at dim=${r.dominant_dim}.`);
+      loadBaseline();   // refresh compat status
+    } else {
+      log(`Clean failed: ${r.error}`);
+    }
+  } catch(e) { log('Clean stale embeddings failed'); }
+  if(btn) { btn.disabled = false; btn.textContent = 'Clean Stale Embeddings'; }
+}
+
 async function exportTrainingFeatures() {
   if(!hasBridge) return;
   const btn = document.getElementById('exportFeaturesBtn');
@@ -1170,6 +1193,9 @@ async function loadBaseline(){
         el.textContent = `✓ Baseline compatible — ${c.current_model} (${c.current_dim}-dim)`;
         el.className = 'text-xs text-green-400 mb-3';
       }
+      // show/hide clean button
+      const cleanRow = document.getElementById('baselineCleanRow');
+      if(cleanRow) cleanRow.classList.toggle('hidden', c.compatible || c.reason === 'no_embeddings');
     }
   } catch(e) {}
   const r = await window.pywebview.api.load_baseline();

@@ -980,49 +980,98 @@ def _store_embedding(
     out_path.write_text(json.dumps(record), encoding="utf-8")
 
 
+# Session-level embedding cache — loaded once per run, not per frame
+_EMBEDDING_CACHE: Optional[List[List[float]]] = None
+_EMBEDDING_CACHE_KEY: Optional[str]           = None
+
+
+def invalidate_embedding_cache() -> None:
+    """Force reload on next call — call after train/augment."""
+    global _EMBEDDING_CACHE, _EMBEDDING_CACHE_KEY
+    _EMBEDDING_CACHE     = None
+    _EMBEDDING_CACHE_KEY = None
+
+
+def clean_stale_embeddings(data_dir: Path) -> Dict[str, Any]:
+    """
+    Delete embedding files whose dim doesn't match the dominant dim group.
+    Call this after upgrading models to clear out old-generation files.
+    Returns {deleted, kept, dominant_dim}.
+    """
+    embeddings_dir = data_dir / "baseline" / "embeddings"
+    if not embeddings_dir.exists():
+        return {"deleted": 0, "kept": 0, "dominant_dim": 0}
+    dim_files: Dict[int, list] = {}
+    for p in embeddings_dir.glob("*.json"):
+        try:
+            emb = json.loads(p.read_text(encoding="utf-8")).get("embedding")
+            if emb:
+                dim_files.setdefault(len(emb), []).append(p)
+        except Exception:
+            continue
+    if not dim_files:
+        return {"deleted": 0, "kept": 0, "dominant_dim": 0}
+    dominant = max(dim_files, key=lambda d: len(dim_files[d]))
+    deleted = 0
+    for dim, files in dim_files.items():
+        if dim != dominant:
+            for p in files:
+                try:
+                    p.unlink(); deleted += 1
+                except Exception:
+                    pass
+    invalidate_embedding_cache()
+    return {"deleted": deleted, "kept": len(dim_files[dominant]), "dominant_dim": dominant}
+
+
 def _build_embeddings_index(data_dir: Path) -> List[List[float]]:
     """
-    Load all stored reference embeddings into a list.
+    Load baseline embeddings into a session-level cache.
     Called by compute_baseline_similarity() at scoring time.
+    Loading happens once per session — not once per frame.
+    If the folder has mixed-dim files (e.g. after a model upgrade),
+    the dominant dimension group is used and a single warning is printed.
     """
+    global _EMBEDDING_CACHE, _EMBEDDING_CACHE_KEY
+
     embeddings_dir = data_dir / "baseline" / "embeddings"
     if not embeddings_dir.exists():
         return []
 
-    # Infer expected dim from the first valid embedding found — don't hardcode.
-    # Supports any model: ViT-B-32 (512), ViT-L-14 (768), SigLIP SO400M (1152)
-    EXPECTED_DIM: Optional[int] = None
-    skipped = 0
+    cache_key = str(embeddings_dir)
+    if _EMBEDDING_CACHE is not None and _EMBEDDING_CACHE_KEY == cache_key:
+        return _EMBEDDING_CACHE
 
-    embeddings = []
+    # Group embeddings by dimension
+    dim_groups: Dict[int, list] = {}
     for p in embeddings_dir.glob("*.json"):
         try:
-            record = json.loads(p.read_text(encoding="utf-8"))
-            emb    = record.get("embedding")
-            if not emb:
-                continue
-            dim = len(emb)
-            if EXPECTED_DIM is None:
-                EXPECTED_DIM = dim  # lock dimension from first embedding
-            if dim == EXPECTED_DIM:
-                embeddings.append(emb)
-            else:
-                skipped += 1
+            emb = json.loads(p.read_text(encoding="utf-8")).get("embedding")
+            if emb:
+                dim_groups.setdefault(len(emb), []).append(emb)
         except Exception:
             continue
 
-    if skipped > 0:
-        from ..agents.model_utils import select_best_model, get_model_dim
-        current_model, _ = select_best_model()
-        current_dim      = get_model_dim(current_model)
+    if not dim_groups:
+        _EMBEDDING_CACHE     = []
+        _EMBEDDING_CACHE_KEY = cache_key
+        return []
+
+    # Use the largest group (most files = most recent retrain)
+    dominant_dim = max(dim_groups, key=lambda d: len(dim_groups[d]))
+    embeddings   = dim_groups[dominant_dim]
+    stale_count  = sum(len(v) for d, v in dim_groups.items() if d != dominant_dim)
+
+    if stale_count > 0:
         print(
-            f"[baseline] WARNING: {skipped} embeddings skipped — "
-            f"corpus dim={EXPECTED_DIM}, current model dim={current_dim} "
-            f"({current_model}). "
-            f"Rebuild the baseline to restore Creative pillar scoring."
+            f"[baseline] {stale_count} stale embeddings (dim != {dominant_dim}) ignored. "
+            f"Run Tools → Clean Stale Embeddings or retrain to remove them permanently."
         )
 
+    _EMBEDDING_CACHE     = embeddings
+    _EMBEDDING_CACHE_KEY = cache_key
     return embeddings
+
 
 
 # ---------------------------------------------------------------------------

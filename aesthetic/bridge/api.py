@@ -167,6 +167,12 @@ class AestheticAPI:
                     print(f"[bridge] cluster rebuild failed (non-fatal): {cluster_exc}")
                 self._baseline_video_result[task_id] = {"status": "complete", "result": result}
                 self._push_progress(task_id, "Baseline ingest complete", 100)
+                # invalidate embedding cache so next analysis loads fresh data
+                try:
+                    from ..agents.baseline_trainer import invalidate_embedding_cache
+                    invalidate_embedding_cache()
+                except Exception:
+                    pass
             except Exception as exc:
                 self._baseline_video_result[task_id] = {"status": "error", "error": str(exc)}
                 self._push_progress(task_id, f"Error: {exc}", -1)
@@ -542,6 +548,15 @@ class AestheticAPI:
             from ..agents.feedback_store import get_feedback_for_job
             feedback = get_feedback_for_job(job_id)
             return {"ok": True, "feedback": feedback}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def clean_stale_embeddings(self) -> Dict[str, Any]:
+        """Delete embedding files whose dim doesn't match the dominant group."""
+        try:
+            from ..agents.baseline_trainer import clean_stale_embeddings
+            result = clean_stale_embeddings(DATA_DIR)
+            return {"ok": True, **result}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
