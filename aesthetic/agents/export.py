@@ -375,7 +375,7 @@ def _export_contact_sheet(
         # strongest category badge top-right
         scores_dict = shot.get("scores", {})
         if scores_dict:
-            best_cat = max(scores_dict.items(), key=lambda kv: kv[1] or 0, default=(None, None))
+            best_cat = max(scores_dict.items(), key=lambda kv: (kv[1].get("total") if isinstance(kv[1], dict) else kv[1]) or 0, default=(None, None))
             if best_cat[0]:
                 cat_label = best_cat[0][:3].upper()   # EXP / LIT / COM / MOV / COL / QUA / NAR
                 cv2.rectangle(sheet, (x+thumb_w-36, y), (x+thumb_w, y+20), (0, 0, 0), -1)

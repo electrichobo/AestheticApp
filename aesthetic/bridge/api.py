@@ -1010,7 +1010,7 @@ class AestheticAPI:
                         pct = 71 + int((idx2 / max(1, len(shortlisted_frames))) * 4)
                         self._push_progress(
                             job_id,
-                            f"Stage 2 depth: {idx2+1}/{len(shortlisted_frames)} scenes",
+                            f"Stage 2 depth: {len(_midas_done)}/{len(shortlist_ids)} scenes processed",
                             pct
                         )
 

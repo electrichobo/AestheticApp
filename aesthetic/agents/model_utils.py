@@ -90,20 +90,39 @@ def is_siglip(model_name: str) -> bool:
     return "siglip" in model_name.lower()
 
 
+# SigLIP has a shorter context window than standard CLIP
+_SIGLIP_CONTEXT_LENGTH = 64   # SigLIP max sequence length
+_CLIP_CONTEXT_LENGTH   = 77   # standard CLIP max sequence length
+
+
 def get_tokenizer(model_name: str):
     """
-    Get the appropriate tokenizer for a model.
-    SigLIP models need their own tokenizer; others use ViT-L-14 tokenizer.
+    Get the appropriate tokenizer for a model, wrapped to enforce the
+    correct context length. SigLIP uses 64 tokens max; CLIP uses 77.
+    Passing longer sequences to SigLIP causes a CUDA index-out-of-bounds
+    assertion failure that floods the console.
     """
     import open_clip
+    context_length = _SIGLIP_CONTEXT_LENGTH if is_siglip(model_name) else _CLIP_CONTEXT_LENGTH
+
     try:
-        return open_clip.get_tokenizer(model_name)
+        base_tokenizer = open_clip.get_tokenizer(model_name)
     except Exception:
-        # fallback to ViT-L-14 tokenizer for any model we don't know
         try:
-            return open_clip.get_tokenizer("ViT-L-14")
+            base_tokenizer = open_clip.get_tokenizer("ViT-L-14")
         except Exception:
-            return open_clip.get_tokenizer("ViT-B-32")
+            base_tokenizer = open_clip.get_tokenizer("ViT-B-32")
+
+    # wrap to enforce context length truncation
+    class _TruncatingTokenizer:
+        def __init__(self, tok, ctx_len):
+            self._tok = tok
+            self._ctx = ctx_len
+        def __call__(self, texts):
+            import open_clip as _oc
+            return self._tok(texts, context_length=self._ctx)
+
+    return _TruncatingTokenizer(base_tokenizer, context_length)
 
 
 def load_model(device: str):

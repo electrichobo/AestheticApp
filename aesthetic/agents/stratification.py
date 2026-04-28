@@ -94,12 +94,17 @@ def compute_stratified_similarity(
         frame_vec = _normalise(np.array(embedding, dtype=np.float32))
         clusters  = index["clusters"]
 
-        # find nearest cluster centroid
+        # find nearest cluster centroid — skip if dim mismatch (stale index)
         best_cluster_id   = -1
         best_centroid_sim = -1.0
+        frame_dim = len(frame_vec)
         for cid, cluster in enumerate(clusters):
             centroid = np.array(cluster["centroid"], dtype=np.float32)
-            sim      = float(np.dot(frame_vec, centroid))
+            if len(centroid) != frame_dim:
+                # stale centroids from a different model — bail out entirely
+                # and fall back to flat similarity
+                return _flat_similarity(embedding, data_dir) or 0.0
+            sim = float(np.dot(frame_vec, centroid))
             if sim > best_centroid_sim:
                 best_centroid_sim = sim
                 best_cluster_id   = cid
