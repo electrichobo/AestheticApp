@@ -55,18 +55,21 @@ def _encode_text_safe(model, tokenizer, prompts: list, device: str, model_name: 
 
     with torch.no_grad():
         if is_sig:
-            # Keep tokens on CPU, temporarily move text tower to CPU
-            # This avoids the GPU position embedding overflow entirely
+            # SigLIP: create a temporary CPU copy of the model for text encoding.
+            # Moving just the text tower causes device mismatches on internal buffers
+            # (position IDs, attention masks) that were pre-allocated on GPU.
+            # A full CPU copy is safe and only runs once per unique prompt set
+            # since results are cached below.
             try:
-                # open_clip model has a .text submodule
-                text_tower = model.text
-                text_tower_device = next(text_tower.parameters()).device
-                text_tower.to("cpu")
-                txt_feat = model.encode_text(tokens)  # tokens already on CPU
-                text_tower.to(text_tower_device)       # move back
-            except Exception:
-                # Fallback: encode on GPU with truncated tokens
-                tokens = tokens.to(device)
+                import copy
+                cpu_model = copy.deepcopy(model).to("cpu")
+                tokens_cpu = tokens  # already on CPU from _SafeTokenizer
+                txt_feat = cpu_model.encode_text(tokens_cpu)
+                txt_feat = txt_feat.to(device)  # move result back to GPU for matmul
+                del cpu_model  # free immediately
+            except Exception as e:
+                # Last resort: truncate hard to 64 and try GPU
+                tokens = tokens[:, :64].to(device)
                 txt_feat = model.encode_text(tokens)
         else:
             tokens = tokens.to(device)
