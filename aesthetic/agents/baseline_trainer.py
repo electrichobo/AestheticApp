@@ -669,46 +669,37 @@ def _corpus_qc(img: np.ndarray, img_path: Path) -> Dict[str, Any]:
     lab  = cv2.cvtColor(img, cv2.COLOR_BGR2Lab).astype(np.float32)
     hsv  = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-    nc_flags = 0
-
-    # low color entropy — title cards have near-zero hue variety
-    hue_flat  = hsv[:, :, 0].flatten().astype(np.float32)
-    hist_h, _ = np.histogram(hue_flat, bins=36, range=(0, 180))
-    hist_h    = hist_h.astype(np.float32) + 1e-6
-    hist_h   /= hist_h.sum()
-    entropy   = float(-np.sum(hist_h * np.log2(hist_h)))
-    if entropy < 2.5:
-        nc_flags += 1
-
-    # low saturation — black/white/grey has zero chroma
-    # OpenCV 8-bit Lab has a*/b* centred at 128 — subtract before measuring
-    a_ch   = lab[:, :, 1].astype(np.float32) - 128.0
-    b_ch   = lab[:, :, 2].astype(np.float32) - 128.0
-    chroma = np.sqrt(a_ch**2 + b_ch**2)
+    # non-cinematic content detection
+    # We only want to catch genuine title cards, logos, and graphics —
+    # NOT legitimate cinematic choices like desaturation, high contrast,
+    # negative space, or monochromatic colour grades.
+    #
+    # Strategy: require ALL of the following to be true simultaneously,
+    # not just a majority. Cinematic images will fail at least one.
+    a_ch     = lab[:, :, 1].astype(np.float32) - 128.0
+    b_ch     = lab[:, :, 2].astype(np.float32) - 128.0
+    chroma   = np.sqrt(a_ch**2 + b_ch**2)
     sat_mean = float(np.mean(chroma))
-    if sat_mean < 8.0:
-        nc_flags += 1
 
-    # bimodal histogram — title cards have pixels clustered at extremes (black + white)
-    # measure fraction of pixels in the two extreme deciles vs the middle
-    p10 = float(np.percentile(flat, 10))
-    p90 = float(np.percentile(flat, 90))
-    extreme_px = float(np.mean((flat < p10 + 10) | (flat > p90 - 10)))
-    if extreme_px > 0.85:
-        nc_flags += 1
+    # Flag 1: near-zero saturation (< 3 Lab chroma units — truly achromatic,
+    # not just a desaturated grade — bleach bypass still has ~5-15 chroma)
+    near_zero_chroma = sat_mean < 3.0
 
-    # very sparse content — almost no mid-tone pixels
-    bg_thresh = float(np.percentile(gray, 20))
-    occ = float(np.mean(gray > bg_thresh * 1.5))
-    if occ < 0.10:
-        nc_flags += 1
+    # Flag 2: almost no spatial complexity — a title card is nearly uniform.
+    # Measure std of the Laplacian (edge energy variance).
+    # Real images have complex spatial structure even when tonally simple.
+    lap      = cv2.Laplacian(gray.astype(np.uint8), cv2.CV_32F)
+    lap_std  = float(np.std(lap))
+    spatially_flat = lap_std < 8.0   # threshold: essentially zero edge complexity
 
-    # zero saturation — perfectly achromatic content (0 chroma pixels)
-    zero_sat_pct = float(np.mean(chroma < 2.0))
-    if zero_sat_pct > 0.90:
-        nc_flags += 1
+    # Flag 3: extremely uniform luminance — genuine image will always have
+    # some tonal variation even in the most minimal shot.
+    lum_std = float(np.std(flat))
+    tonally_flat = lum_std < 12.0
 
-    if nc_flags >= 3:
+    # Only reject if ALL THREE fire — this combination is near-impossible
+    # in a real cinematic image but common in solid-colour title cards.
+    if near_zero_chroma and spatially_flat and tonally_flat:
         return {"pass": False, "reason": "non-cinematic content (title card / logo / graphic)"}
 
     # 4. subtitle / watermark detection — look for horizontal text bands
