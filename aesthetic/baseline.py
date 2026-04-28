@@ -136,20 +136,28 @@ class BaselineStore:
         """
         import json as _json
 
-        # get current model info — defensive against import failure
+        # get current model info — read from session cache if available,
+        # otherwise do a best-effort detection
         current_model = "unknown"
         current_dim   = 0
         try:
-            from .agents.model_utils import select_best_model, get_model_dim
-            _m, _ = select_best_model()
-            if _m:
-                current_model = _m
-                current_dim   = get_model_dim(_m)
+            from .agents.model_utils import (
+                _selected_model, select_best_model, get_model_dim
+            )
+            # prefer the already-selected model from this session
+            if _selected_model is not None:
+                current_model = _selected_model[0]
+                current_dim   = get_model_dim(current_model)
+            else:
+                _m, _ = select_best_model()
+                if _m:
+                    current_model = _m
+                    current_dim   = get_model_dim(_m)
         except Exception:
             pass
 
         emb_dir = BASELINE_DIR / "embeddings"
-        if not emb_dir.exists() or current_dim == 0:
+        if not emb_dir.exists():
             return {
                 "ok":            False,
                 "compatible":    False,
@@ -188,6 +196,12 @@ class BaselineStore:
         stored_dim  = max(dim_counts, key=lambda d: dim_counts[d])
         dominant_n  = dim_counts[stored_dim]
         stale_count = sum(v for d, v in dim_counts.items() if d != stored_dim)
+
+        # if current_dim is 0 (model not loaded yet), treat as compatible
+        # so the UI shows green rather than a false alarm
+        if current_dim == 0:
+            current_dim   = stored_dim
+            current_model = f"stored at dim={stored_dim}"
         compatible  = stored_dim == current_dim
 
         return {

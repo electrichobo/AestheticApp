@@ -113,14 +113,21 @@ def get_tokenizer(model_name: str):
         except Exception:
             base_tokenizer = open_clip.get_tokenizer("ViT-B-32")
 
-    # wrap to enforce context length truncation
+    # Wrap to enforce context length truncation.
+    # We truncate the output tensor rather than passing context_length
+    # as a kwarg — open_clip tokenizers don't consistently support that kwarg.
+    # Truncating the tensor is safe: positions beyond context_length are just
+    # padding tokens anyway, and SigLIP's position embedding only goes to 64.
     class _TruncatingTokenizer:
         def __init__(self, tok, ctx_len):
             self._tok = tok
             self._ctx = ctx_len
         def __call__(self, texts):
-            import open_clip as _oc
-            return self._tok(texts, context_length=self._ctx)
+            tokens = self._tok(texts)
+            # tokens shape: (batch, seq_len) — truncate seq_len to ctx_len
+            if hasattr(tokens, '__getitem__'):
+                return tokens[..., :self._ctx]
+            return tokens
 
     return _TruncatingTokenizer(base_tokenizer, context_length)
 
