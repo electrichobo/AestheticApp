@@ -422,23 +422,26 @@ def _classify_scene_clip(
         from PIL import Image
         import open_clip
 
-        # use model_utils to get the right tokenizer for whichever model is loaded
         model_name, _ = _mu_best_model()
         tokenizer = _mu_get_tokenizer(model_name)
 
         img    = Image.open(frame_path).convert("RGB")
         tensor = preprocess(img).unsqueeze(0).to(device)
 
+        labels = list(SCENE_TYPE_PROMPTS_MULTI.keys())
+
         with torch.no_grad():
             img_feat = model.encode_image(tensor)
             img_feat = img_feat / img_feat.norm(dim=-1, keepdim=True)
 
-            # score each class using mean similarity across its prompts
-            labels       = list(SCENE_TYPE_PROMPTS_MULTI.keys())
             class_scores = []
             for scene_type in labels:
-                prompts  = SCENE_TYPE_PROMPTS_MULTI[scene_type]
-                tokens   = tokenizer(prompts).to(device)
+                prompts = SCENE_TYPE_PROMPTS_MULTI[scene_type]
+                # Tokenize and encode text — keep on CPU, then move to device.
+                # The tokenizer wrapper already enforces the correct context
+                # length (64 for SigLIP, 77 for CLIP) via tensor slicing.
+                tokens   = tokenizer(prompts)          # CPU tensor, correct length
+                tokens   = tokens.to(device)           # now move to GPU
                 txt_feat = model.encode_text(tokens)
                 txt_feat = txt_feat / txt_feat.norm(dim=-1, keepdim=True)
                 sims     = (img_feat @ txt_feat.T).squeeze(0)

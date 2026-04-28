@@ -1177,7 +1177,12 @@ function renderDownloads(r){
 // Baseline
 // ---------------------------------------------------------------------------
 async function loadBaseline(){
-  if(!hasBridge) return;
+  hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview?.api;
+  if(!hasBridge) {
+    // retry in 500ms — bridge may not be connected yet
+    setTimeout(loadBaseline, 500);
+    return;
+  }
   // check embedding dimension compatibility first
   try {
     const c = await window.pywebview.api.get_baseline_compat();
@@ -1208,9 +1213,11 @@ async function loadBaseline(){
         el.textContent = `✓ Compatible — ${modelName} (${currentDim}-dim, ${total.toLocaleString()} embeddings)`;
         el.className = 'text-xs text-green-400 mb-2';
       }
-      // show clean button only when there are genuinely stale files
+      // show clean button whenever there are stale files OR incompatibility
+      // (stale files are the fix for incompatibility)
       const cleanRow = document.getElementById('baselineCleanRow');
-      if(cleanRow) cleanRow.classList.toggle('hidden', stale === 0);
+      const showClean = stale > 0 || (!c.compatible && c.reason === 'dim_mismatch');
+      if(cleanRow) cleanRow.classList.toggle('hidden', !showClean);
     }
   } catch(e) {}
   const r = await window.pywebview.api.load_baseline();

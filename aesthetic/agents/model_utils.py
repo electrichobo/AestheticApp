@@ -97,39 +97,44 @@ _CLIP_CONTEXT_LENGTH   = 77   # standard CLIP max sequence length
 
 def get_tokenizer(model_name: str):
     """
-    Get the appropriate tokenizer for a model, wrapped to enforce the
-    correct context length. SigLIP uses 64 tokens max; CLIP uses 77.
-    Passing longer sequences to SigLIP causes a CUDA index-out-of-bounds
-    assertion failure that floods the console.
+    Get the appropriate tokenizer for a model.
+    Returns a callable that always produces tokens of the correct length.
+
+    SigLIP uses 64-token sequences. Passing 77-token sequences to SigLIP
+    causes a GPU index-out-of-bounds assertion that floods the console.
+
+    We enforce the limit by passing context_length to the tokenizer call.
+    open_clip tokenizers accept this as a keyword argument in all versions.
     """
     import open_clip
-    context_length = _SIGLIP_CONTEXT_LENGTH if is_siglip(model_name) else _CLIP_CONTEXT_LENGTH
+    ctx = _SIGLIP_CONTEXT_LENGTH if is_siglip(model_name) else _CLIP_CONTEXT_LENGTH
 
     try:
-        base_tokenizer = open_clip.get_tokenizer(model_name)
+        tok = open_clip.get_tokenizer(model_name)
     except Exception:
         try:
-            base_tokenizer = open_clip.get_tokenizer("ViT-L-14")
+            tok = open_clip.get_tokenizer("ViT-L-14")
         except Exception:
-            base_tokenizer = open_clip.get_tokenizer("ViT-B-32")
+            tok = open_clip.get_tokenizer("ViT-B-32")
 
-    # Wrap to enforce context length truncation.
-    # We truncate the output tensor rather than passing context_length
-    # as a kwarg — open_clip tokenizers don't consistently support that kwarg.
-    # Truncating the tensor is safe: positions beyond context_length are just
-    # padding tokens anyway, and SigLIP's position embedding only goes to 64.
-    class _TruncatingTokenizer:
-        def __init__(self, tok, ctx_len):
-            self._tok = tok
-            self._ctx = ctx_len
+    class _SafeTokenizer:
+        def __init__(self, base, context_length):
+            self._base = base
+            self._ctx  = context_length
+
         def __call__(self, texts):
-            tokens = self._tok(texts)
-            # tokens shape: (batch, seq_len) — truncate seq_len to ctx_len
-            if hasattr(tokens, '__getitem__'):
-                return tokens[..., :self._ctx]
+            # Try passing context_length as kwarg first (most open_clip versions)
+            try:
+                return self._base(texts, context_length=self._ctx)
+            except TypeError:
+                pass
+            # Fallback: tokenize then hard-truncate the tensor
+            tokens = self._base(texts)
+            if hasattr(tokens, 'shape') and len(tokens.shape) >= 2:
+                return tokens[:, :self._ctx]
             return tokens
 
-    return _TruncatingTokenizer(base_tokenizer, context_length)
+    return _SafeTokenizer(tok, ctx)
 
 
 def load_model(device: str):
