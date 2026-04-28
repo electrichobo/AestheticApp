@@ -263,6 +263,7 @@
             <h3 class="text-sm font-semibold text-white">Golden Baseline Status</h3>
             <button onclick="loadBaseline()" class="py-1 px-3 rounded text-xs font-medium text-white bg-gray-700 hover:bg-gray-600">Refresh</button>
           </div>
+          <div id="baselineCompatWarning" class="text-xs text-gray-500">checking…</div>
           <pre id="baselineDisplayFull" class="text-xs text-gray-300 bg-gray-800 rounded p-3 overflow-x-auto border border-gray-700">not loaded</pre>
 
           <!-- Feedback & Training -->
@@ -554,6 +555,12 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
   }, 600);
 
   const sens = parseInt(document.getElementById('sensitivitySlider').value, 10);
+  // check baseline compatibility before running
+  const compatR = await window.pywebview.api.get_baseline_compat().catch(() => null);
+  if(compatR && !compatR.compatible && compatR.reason === 'dim_mismatch') {
+    log(`⚠ BASELINE MISMATCH: stored embeddings are ${compatR.stored_dim}-dim but current model (${compatR.current_model}) produces ${compatR.current_dim}-dim. Creative pillar scores will be empty. Rebuild the baseline in the Baseline tab.`);
+  }
+
   const r    = await window.pywebview.api.analyze(currentJobId, sens);
 
   clearInterval(pollInterval);
@@ -1148,6 +1155,23 @@ function renderDownloads(r){
 // ---------------------------------------------------------------------------
 async function loadBaseline(){
   if(!hasBridge) return;
+  // check embedding dimension compatibility first
+  try {
+    const c = await window.pywebview.api.get_baseline_compat();
+    const el = document.getElementById('baselineCompatWarning');
+    if(el) {
+      if(!c.compatible && c.reason === 'dim_mismatch') {
+        el.textContent = `⚠ Baseline mismatch: stored embeddings are ${c.stored_dim}-dim but current model (${c.current_model}) produces ${c.current_dim}-dim. Rebuild the baseline to restore Creative scores.`;
+        el.className = 'text-xs text-amber-400 mb-3 p-2 bg-amber-900/20 rounded border border-amber-700/40';
+      } else if(c.reason === 'no_embeddings') {
+        el.textContent = 'No baseline found. Train a baseline to enable Creative pillar scoring.';
+        el.className = 'text-xs text-gray-500 mb-3';
+      } else if(c.compatible) {
+        el.textContent = `✓ Baseline compatible — ${c.current_model} (${c.current_dim}-dim)`;
+        el.className = 'text-xs text-green-400 mb-3';
+      }
+    }
+  } catch(e) {}
   const r = await window.pywebview.api.load_baseline();
   const txt = JSON.stringify(r.baseline||{}, null, 2);
   document.getElementById('baselineDisplay').textContent     = txt;

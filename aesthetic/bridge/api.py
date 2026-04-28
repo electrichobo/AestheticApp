@@ -545,6 +545,13 @@ class AestheticAPI:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def get_baseline_compat(self) -> Dict[str, Any]:
+        """Check whether stored baseline embeddings match the current model."""
+        try:
+            return self._baseline.get_embedding_dim_status()
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
     def get_feedback_stats(self) -> Dict[str, Any]:
         """Return summary stats for the feedback store (for UI display)."""
         try:

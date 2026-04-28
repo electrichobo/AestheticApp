@@ -127,6 +127,47 @@ class BaselineStore:
             "augment_metricCount": len(cast(Dict[str, Any], augment.get("stats", {}))),
         }
 
+    def get_embedding_dim_status(self) -> Dict[str, Any]:
+        """
+        Check whether the stored baseline embeddings are compatible
+        with the current vision model. Returns a status dict for the UI.
+        """
+        from .agents.model_utils import select_best_model, get_model_dim
+        current_model, _ = select_best_model()
+        current_dim      = get_model_dim(current_model)
+
+        emb_dir = BASELINE_DIR / "embeddings"
+        if not emb_dir.exists():
+            return {"ok": False, "reason": "no_embeddings",
+                    "current_model": current_model, "current_dim": current_dim}
+
+        # sample first embedding to get stored dim
+        stored_dim = None
+        for p in emb_dir.glob("*.json"):
+            try:
+                import json as _json
+                rec = _json.loads(p.read_text(encoding="utf-8"))
+                emb = rec.get("embedding")
+                if emb:
+                    stored_dim = len(emb)
+                    break
+            except Exception:
+                continue
+
+        if stored_dim is None:
+            return {"ok": False, "reason": "no_embeddings",
+                    "current_model": current_model, "current_dim": current_dim}
+
+        compatible = stored_dim == current_dim
+        return {
+            "ok":            compatible,
+            "stored_dim":    stored_dim,
+            "current_dim":   current_dim,
+            "current_model": current_model,
+            "compatible":    compatible,
+            "reason":        None if compatible else "dim_mismatch",
+        }
+
     def get_reference_colour(self) -> Dict[str, float]:
         """
         Return a reference Lab colour reconstructed from the active golden baseline

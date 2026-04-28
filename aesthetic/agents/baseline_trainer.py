@@ -992,6 +992,7 @@ def _build_embeddings_index(data_dir: Path) -> List[List[float]]:
     # Infer expected dim from the first valid embedding found — don't hardcode.
     # Supports any model: ViT-B-32 (512), ViT-L-14 (768), SigLIP SO400M (1152)
     EXPECTED_DIM: Optional[int] = None
+    skipped = 0
 
     embeddings = []
     for p in embeddings_dir.glob("*.json"):
@@ -1006,9 +1007,20 @@ def _build_embeddings_index(data_dir: Path) -> List[List[float]]:
             if dim == EXPECTED_DIM:
                 embeddings.append(emb)
             else:
-                print(f"[baseline] skipping {p.name}: dim {dim} != corpus dim {EXPECTED_DIM}")
+                skipped += 1
         except Exception:
             continue
+
+    if skipped > 0:
+        from ..agents.model_utils import select_best_model, get_model_dim
+        current_model, _ = select_best_model()
+        current_dim      = get_model_dim(current_model)
+        print(
+            f"[baseline] WARNING: {skipped} embeddings skipped — "
+            f"corpus dim={EXPECTED_DIM}, current model dim={current_dim} "
+            f"({current_model}). "
+            f"Rebuild the baseline to restore Creative pillar scoring."
+        )
 
     return embeddings
 
