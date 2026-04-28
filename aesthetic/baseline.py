@@ -167,7 +167,7 @@ class BaselineStore:
         except Exception:
             pass
 
-        emb_dir = BASELINE_DIR / "embeddings"
+        emb_dir = self.base / "embeddings"
         if not emb_dir.exists():
             return {
                 "ok":            False,
