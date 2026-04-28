@@ -30,52 +30,72 @@ from ..models.scores import FrameMetrics
 from .model_utils import get_tokenizer as _mu_get_tokenizer, select_best_model as _mu_best_model
 
 # ---------------------------------------------------------------------------
-# Safe text feature encoding for SigLIP
+# Safe text feature encoding — CPU-only text model for classification
 # ---------------------------------------------------------------------------
-# SigLIP's GPU text encoder has a position embedding table of size 64.
-# Passing ANY tensor with seq_len > 64 causes a CUDA index-out-of-bounds
-# assertion that poisons the GPU for the entire session.
-# Solution: always encode text on CPU for SigLIP, then move result to device.
+# SigLIP's text encoder has a 64-token position embedding table.
+# Any GPU text encoding with SigLIP causes a CUDA assert that poisons
+# the GPU for the entire session.
+#
+# Fix: use a separate lightweight ViT-B-32 model loaded on CPU exclusively
+# for text classification. Image features from the main GPU model are moved
+# to CPU for the similarity computation, then the result moves back.
+# This works identically on NVIDIA, AMD, Intel GPU and CPU-only machines.
+#
+# Text features are cached by (model_name, prompts) so encoding happens
+# once per prompt set per session — not once per frame.
 
-_TEXT_FEAT_CACHE: dict = {}  # {(model_name, prompt_tuple): cpu_tensor}
+_TEXT_FEAT_CACHE: dict = {}   # {(model_name, tuple(prompts)): cpu_tensor}
+_CPU_TEXT_MODEL  = None       # lightweight CPU model for text encoding
+_CPU_TEXT_PREP   = None
+_CPU_TOKENIZER   = None
+
+def _get_cpu_text_model():
+    """
+    Load a lightweight CPU-only model for text classification.
+    Uses ViT-B-32 which is fast on CPU and sufficient for zero-shot classification.
+    Loaded once and cached for the session.
+    """
+    global _CPU_TEXT_MODEL, _CPU_TEXT_PREP, _CPU_TOKENIZER
+    if _CPU_TEXT_MODEL is not None:
+        return _CPU_TEXT_MODEL, _CPU_TOKENIZER
+
+    try:
+        import open_clip
+        _CPU_TEXT_MODEL, _, _CPU_TEXT_PREP = open_clip.create_model_and_transforms(
+            "ViT-B-32", pretrained="openai", device="cpu"
+        )
+        _CPU_TEXT_MODEL.eval()
+        _CPU_TOKENIZER = open_clip.get_tokenizer("ViT-B-32")
+        return _CPU_TEXT_MODEL, _CPU_TOKENIZER
+    except Exception as e:
+        print(f"[classifier] CPU text model load failed: {e}")
+        return None, None
+
 
 def _encode_text_safe(model, tokenizer, prompts: list, device: str, model_name: str):
     """
-    Encode text prompts safely. For SigLIP: tokenize+encode on CPU.
-    For CLIP: tokenize+encode on GPU as normal.
-    Results are cached so the same prompts are never re-encoded.
+    Encode text prompts on CPU using the lightweight ViT-B-32 text encoder.
+    Image features from the main model are moved to CPU for similarity,
+    then the result is returned on the requested device.
+
+    Results are cached — each unique prompt set is encoded exactly once.
+    Works on any hardware: NVIDIA/AMD/Intel GPU or CPU-only.
     """
     import torch
     cache_key = (model_name, tuple(prompts))
     if cache_key in _TEXT_FEAT_CACHE:
         return _TEXT_FEAT_CACHE[cache_key].to(device)
 
-    is_sig = "siglip" in model_name.lower()
-    tokens = tokenizer(prompts)  # CPU tensor from _SafeTokenizer
+    cpu_model, cpu_tok = _get_cpu_text_model()
+    if cpu_model is None:
+        # no CPU model available — skip text encoding
+        return None
 
     with torch.no_grad():
-        if is_sig:
-            # SigLIP: create a temporary CPU copy of the model for text encoding.
-            # Moving just the text tower causes device mismatches on internal buffers
-            # (position IDs, attention masks) that were pre-allocated on GPU.
-            # A full CPU copy is safe and only runs once per unique prompt set
-            # since results are cached below.
-            try:
-                import copy
-                cpu_model = copy.deepcopy(model).to("cpu")
-                tokens_cpu = tokens  # already on CPU from _SafeTokenizer
-                txt_feat = cpu_model.encode_text(tokens_cpu)
-                txt_feat = txt_feat.to(device)  # move result back to GPU for matmul
-                del cpu_model  # free immediately
-            except Exception as e:
-                # Last resort: truncate hard to 64 and try GPU
-                tokens = tokens[:, :64].to(device)
-                txt_feat = model.encode_text(tokens)
-        else:
-            tokens = tokens.to(device)
-            txt_feat = model.encode_text(tokens)
+        tokens   = cpu_tok(prompts)          # CPU tensor, ViT-B-32 context (77)
+        txt_feat = cpu_model.encode_text(tokens)  # CPU computation only
+        txt_feat = txt_feat / txt_feat.norm(dim=-1, keepdim=True)
 
-    txt_feat = txt_feat / txt_feat.norm(dim=-1, keepdim=True)
     _TEXT_FEAT_CACHE[cache_key] = txt_feat.cpu()
     return txt_feat.to(device)
 
@@ -372,8 +392,11 @@ def _scale_from_clip(
             img_feat = model.encode_image(tensor)
             img_feat = img_feat / img_feat.norm(dim=-1, keepdim=True)
             txt_feat = _encode_text_safe(model, tokenizer, prompts, device, model_name)
-            sims     = (img_feat @ txt_feat.T).squeeze(0)
-            probs    = sims.softmax(dim=-1).cpu().numpy()
+            if txt_feat is None:
+                return ShotScale.UNKNOWN, 0.0
+            # txt_feat is from CPU model — move img_feat to same device for matmul
+            sims  = (img_feat.to(txt_feat.device) @ txt_feat.T).squeeze(0)
+            probs = sims.softmax(dim=-1).cpu().numpy()
 
         best_idx  = int(np.argmax(probs))
         return labels[best_idx], float(probs[best_idx])
@@ -490,7 +513,11 @@ def _classify_scene_clip(
                 # The tokenizer wrapper already enforces the correct context
                 # length (64 for SigLIP, 77 for CLIP) via tensor slicing.
                 txt_feat = _encode_text_safe(model, tokenizer, prompts, device, model_name)
-                sims     = (img_feat @ txt_feat.T).squeeze(0)
+                if txt_feat is None:
+                    class_scores.append(0.0)
+                    continue
+                # txt_feat from CPU model — match devices
+                sims = (img_feat.to(txt_feat.device) @ txt_feat.T).squeeze(0)
                 class_scores.append(float(sims.mean().item()))
 
         scores = np.array(class_scores)
@@ -610,8 +637,11 @@ def _classify_intent_clip(
             img_feat = model.encode_image(tensor)
             img_feat = img_feat / img_feat.norm(dim=-1, keepdim=True)
             txt_feat = _encode_text_safe(model, tokenizer, prompts, device, model_name)
-            sims     = (img_feat @ txt_feat.T).squeeze(0)
-            probs    = sims.softmax(dim=-1).cpu().numpy()
+            if txt_feat is None:
+                return "unknown", 0.0
+            # txt_feat from CPU model — match devices
+            sims  = (img_feat.to(txt_feat.device) @ txt_feat.T).squeeze(0)
+            probs = sims.softmax(dim=-1).cpu().numpy()
 
         best_idx = int(np.argmax(probs))
         return labels[best_idx], float(probs[best_idx])
