@@ -132,45 +132,73 @@ class BaselineStore:
         Check whether the stored baseline embeddings are compatible
         with the current vision model. Returns a status dict for the UI.
         Uses dominant-dim logic — same as _build_embeddings_index.
+        All fields are guaranteed non-None so the JS never gets undefined.
         """
         import json as _json
-        from .agents.model_utils import select_best_model, get_model_dim
-        current_model, _ = select_best_model()
-        current_dim      = get_model_dim(current_model)
+
+        # get current model info — defensive against import failure
+        current_model = "unknown"
+        current_dim   = 0
+        try:
+            from .agents.model_utils import select_best_model, get_model_dim
+            _m, _ = select_best_model()
+            if _m:
+                current_model = _m
+                current_dim   = get_model_dim(_m)
+        except Exception:
+            pass
 
         emb_dir = BASELINE_DIR / "embeddings"
-        if not emb_dir.exists():
-            return {"ok": False, "compatible": False, "reason": "no_embeddings",
-                    "current_model": current_model, "current_dim": current_dim}
+        if not emb_dir.exists() or current_dim == 0:
+            return {
+                "ok":            False,
+                "compatible":    False,
+                "reason":        "no_embeddings",
+                "stored_dim":    0,
+                "current_dim":   current_dim,
+                "current_model": current_model,
+                "stale_count":   0,
+                "total_count":   0,
+            }
 
-        # group by dim to find dominant (same logic as _build_embeddings_index)
+        # count embeddings grouped by dimension
         dim_counts: Dict[int, int] = {}
         for p in emb_dir.glob("*.json"):
             try:
                 emb = _json.loads(p.read_text(encoding="utf-8")).get("embedding")
                 if emb:
-                    dim_counts[len(emb)] = dim_counts.get(len(emb), 0) + 1
+                    d = len(emb)
+                    dim_counts[d] = dim_counts.get(d, 0) + 1
             except Exception:
                 continue
 
         if not dim_counts:
-            return {"ok": False, "compatible": False, "reason": "no_embeddings",
-                    "current_model": current_model, "current_dim": current_dim}
+            return {
+                "ok":            False,
+                "compatible":    False,
+                "reason":        "no_embeddings",
+                "stored_dim":    0,
+                "current_dim":   current_dim,
+                "current_model": current_model,
+                "stale_count":   0,
+                "total_count":   0,
+            }
 
-        # dominant dim = the one with most files
-        stored_dim = max(dim_counts, key=lambda d: dim_counts[d])
+        # dominant dim = most files (most recent retrain wins)
+        stored_dim  = max(dim_counts, key=lambda d: dim_counts[d])
+        dominant_n  = dim_counts[stored_dim]
         stale_count = sum(v for d, v in dim_counts.items() if d != stored_dim)
-        compatible = stored_dim == current_dim
+        compatible  = stored_dim == current_dim
 
         return {
             "ok":            compatible,
             "compatible":    compatible,
+            "reason":        None if compatible else "dim_mismatch",
             "stored_dim":    stored_dim,
             "current_dim":   current_dim,
-            "stale_count":   stale_count,
             "current_model": current_model,
-            "compatible":    compatible,
-            "reason":        None if compatible else "dim_mismatch",
+            "stale_count":   stale_count,
+            "total_count":   dominant_n,
         }
 
     def get_reference_colour(self) -> Dict[str, float]:

@@ -1183,23 +1183,34 @@ async function loadBaseline(){
     const c = await window.pywebview.api.get_baseline_compat();
     const el = document.getElementById('baselineCompatWarning');
     if(el) {
-      const staleNote = (c.stale_count > 0) ? ` (${c.stale_count} stale files from old model)` : '';
-      if(c.reason === 'no_embeddings') {
-        el.textContent = 'No baseline found. Train a baseline to enable Creative pillar scoring.';
+      // all fields guaranteed non-null from bridge — no undefined risk
+      const storedDim  = c.stored_dim    || 0;
+      const currentDim = c.current_dim   || 0;
+      const modelName  = c.current_model || 'unknown';
+      const stale      = c.stale_count   || 0;
+      const total      = c.total_count   || 0;
+
+      if(!storedDim || c.reason === 'no_embeddings') {
+        el.innerHTML = 'No baseline embeddings found. Train a baseline to enable Creative pillar scoring.';
         el.className = 'text-xs text-gray-500 mb-2';
       } else if(!c.compatible) {
-        el.textContent = `⚠ Baseline mismatch: stored dim=${c.stored_dim}, current model ${c.current_model} produces dim=${c.current_dim}${staleNote}. Rebuild or clean stale files.`;
-        el.className = 'text-xs text-amber-400 mb-2 p-2 bg-amber-900/20 rounded border border-amber-700/40';
-      } else if(c.stale_count > 0) {
-        el.textContent = `✓ Compatible (${c.current_model}, ${c.current_dim}-dim) — ${c.stale_count} stale files from old model can be cleaned.`;
+        el.innerHTML =
+          `<strong>⚠ Baseline rebuild required</strong><br>` +
+          `Corpus: ${storedDim}-dim (${total.toLocaleString()} embeddings) &nbsp;·&nbsp; ` +
+          `Current model: <em>${modelName}</em> → ${currentDim}-dim<br>` +
+          `Creative pillar scores are unavailable until the baseline is rebuilt with the current model.` +
+          (stale ? `<br><span class="text-gray-400">${stale.toLocaleString()} stale files from old model also present.</span>` : '');
+        el.className = 'text-xs text-amber-400 mb-2 p-2 bg-amber-900/20 rounded border border-amber-700/40 leading-relaxed';
+      } else if(stale > 0) {
+        el.textContent = `✓ Compatible — ${modelName} (${currentDim}-dim, ${total.toLocaleString()} embeddings). ${stale.toLocaleString()} stale files from old model can be cleaned.`;
         el.className = 'text-xs text-yellow-400 mb-2';
       } else {
-        el.textContent = `✓ Baseline compatible — ${c.current_model} (${c.current_dim}-dim)`;
+        el.textContent = `✓ Compatible — ${modelName} (${currentDim}-dim, ${total.toLocaleString()} embeddings)`;
         el.className = 'text-xs text-green-400 mb-2';
       }
-      // show clean button if there are stale files (even if dims otherwise match)
+      // show clean button only when there are genuinely stale files
       const cleanRow = document.getElementById('baselineCleanRow');
-      if(cleanRow) cleanRow.classList.toggle('hidden', !c.stale_count && c.compatible);
+      if(cleanRow) cleanRow.classList.toggle('hidden', stale === 0);
     }
   } catch(e) {}
   const r = await window.pywebview.api.load_baseline();
