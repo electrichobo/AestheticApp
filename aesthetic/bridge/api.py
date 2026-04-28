@@ -567,9 +567,16 @@ class AestheticAPI:
     def get_baseline_compat(self) -> Dict[str, Any]:
         """Check whether stored baseline embeddings match the current model."""
         try:
-            return self._baseline.get_embedding_dim_status()
+            result = self._baseline.get_embedding_dim_status()
+            print(f"[compat] {result}")
+            return result
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            import traceback
+            print(f"[compat] EXCEPTION: {exc}")
+            traceback.print_exc()
+            return {"ok": False, "error": str(exc), "compatible": False,
+                    "reason": "error", "stored_dim": 0, "current_dim": 0,
+                    "current_model": "unknown", "stale_count": 0, "total_count": 0}
 
     def get_feedback_stats(self) -> Dict[str, Any]:
         """Return summary stats for the feedback store (for UI display)."""
