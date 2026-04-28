@@ -889,38 +889,111 @@ class AestheticAPI:
                 all_frame_metrics.append(fm)
                 scene_candidate_map[c.scene_id].append(fm)
 
-            # --- stage 5: AI inference ---
+            # --- stage 5: AI inference — two-stage ---
+            #
+            # Stage 1 (all frames): CLIP + YOLO, NO MiDaS
+            #   → fast first-pass scores, used to compute shortlist
+            #
+            # Stage 2 (shortlisted scenes only): MiDaS depth
+            #   → refines depth_separation for scenes that matter
+            #   → gamut data also collected per-scene in aggregation
+            #
             features = cfg.get("features", {})
-            if features.get("clip_enabled", True) or features.get("midas_enabled", True) or features.get("yolo_enabled", True):
-                self._push_progress(job_id, "Running AI model inference…", 60)
-                from ..agents.inference import run_frame_inference
-                from collections import defaultdict as _dd3
-                import copy as _copy
+            from ..agents.two_stage import (
+                stage1_config, compute_shortlist,
+                stage2_config, shortlist_progress_label, build_stage_summary,
+                DEFAULT_SHORTLIST_PCT,
+            )
+            shortlist_pct = float(cfg.get("selection", {}).get("shortlist_pct", DEFAULT_SHORTLIST_PCT))
 
-                # MiDaS is expensive — only run on first frame per scene
-                # CLIP and YOLO run on all frames (needed for embeddings and detections)
-                _midas_done_scenes: set = set()
+            if features.get("clip_enabled", True) or features.get("midas_enabled", True) or features.get("yolo_enabled", True):
+                from ..agents.inference import run_frame_inference
+
+                # ── Stage 1: CLIP + YOLO on all frames, MiDaS disabled ──
+                self._push_progress(job_id, "Stage 1: running CLIP + YOLO on all frames…", 58)
+                s1_cfg = stage1_config(cfg)   # MiDaS disabled
 
                 for fi, fm in enumerate(all_frame_metrics):
                     c = candidates[fi]
-                    # create a per-frame config that disables MiDaS after first scene frame
-                    frame_cfg = cfg
-                    if features.get("midas_enabled", True):
-                        if fm.scene_id in _midas_done_scenes:
-                            # disable MiDaS for this frame — depth won't change much
-                            frame_cfg = dict(cfg)
-                            frame_cfg["features"] = dict(features)
-                            frame_cfg["features"]["midas_enabled"] = False
-                        else:
-                            _midas_done_scenes.add(fm.scene_id)
-
-                    all_frame_metrics[fi] = run_frame_inference(fm, c.path, job_dir, frame_cfg)
+                    all_frame_metrics[fi] = run_frame_inference(fm, c.path, job_dir, s1_cfg)
                     if fi % 5 == 0:
-                        pct = 60 + int((fi / total_frames) * 15)
-                        self._push_progress(job_id, f"Inference: {fi+1}/{total_frames} frames", pct)
+                        pct = 58 + int((fi / total_frames) * 10)
+                        self._push_progress(job_id, f"Stage 1 inference: {fi+1}/{total_frames} frames", pct)
+
+                # ── Stage 1 aggregation: quick scores to determine shortlist ──
+                self._push_progress(job_id, "Stage 1: computing initial scores…", 68)
+                from ..agents.aggregation import aggregate_shot as _agg
+                from ..agents.scoring import compute_harmonised_score as _score
+
+                s1_shots: List[Shot] = []
+                s1_scores: List[ShotScore] = []
+
+                for scene in scenes:
+                    scene_frames = scene_candidate_map[scene.scene_id]
+                    if not scene_frames:
+                        continue
+                    s_id  = f"shot_{scene.scene_id:04d}"
+                    sc    = _agg(s_id, scene.scene_id, scene_frames, cfg)
+                    sc    = _score(sc, "unknown", cfg)   # intent unknown at stage 1
+                    s1_shots.append(Shot(
+                        shot_id=s_id,
+                        scene_id=scene.scene_id,
+                        start_time=scene.start_time,
+                        end_time=scene.end_time,
+                        start_frame=scene.start_frame,
+                        end_frame=scene.end_frame,
+                        frame_paths=[],
+                        hero_frame=None,
+                    ))
+                    s1_scores.append(sc)
+
+                # compute shortlist from stage-1 scores
+                shortlist_ids = compute_shortlist(s1_shots, s1_scores, shortlist_pct)
+                summary = build_stage_summary(s1_scores, shortlist_ids)
+                self._push_progress(
+                    job_id,
+                    shortlist_progress_label(shortlist_ids, len(scenes)),
+                    70
+                )
+                print(f"[bridge] two-stage summary: {summary}")
+                self._push_progress(
+                    job_id,
+                    f"Shortlist: {summary['shortlisted']}/{summary['total_scenes']} scenes "
+                    f"(avg score: all={summary['avg_score_all']:.1f}, shortlist={summary['avg_score_shortlist']:.1f})",
+                    70
+                )
+
+                # ── Stage 2: MiDaS on shortlisted scenes only ──
+                if features.get("midas_enabled", True) and shortlist_ids:
+                    self._push_progress(job_id, "Stage 2: depth analysis on shortlisted scenes…", 71)
+                    _midas_done: set = set()
+                    shortlisted_frames = [
+                        (fi, fm) for fi, fm in enumerate(all_frame_metrics)
+                        if fm.scene_id in shortlist_ids
+                    ]
+                    for idx2, (fi, fm) in enumerate(shortlisted_frames):
+                        c = candidates[fi]
+                        run_midas = fm.scene_id not in _midas_done
+                        if run_midas:
+                            _midas_done.add(fm.scene_id)
+                        # build per-frame config: MiDaS only for first frame of each shortlisted scene
+                        frame_cfg = dict(cfg)
+                        frame_cfg["features"] = dict(features)
+                        frame_cfg["features"]["midas_enabled"] = run_midas
+                        # re-run inference (CLIP cached, only depth runs again)
+                        if run_midas:
+                            all_frame_metrics[fi] = run_frame_inference(
+                                all_frame_metrics[fi], c.path, job_dir, frame_cfg
+                            )
+                        pct = 71 + int((idx2 / max(1, len(shortlisted_frames))) * 4)
+                        self._push_progress(
+                            job_id,
+                            f"Stage 2 depth: {idx2+1}/{len(shortlisted_frames)} scenes",
+                            pct
+                        )
 
             # --- stage 5b: shot classification ---
-            self._push_progress(job_id, "Classifying shot intent and scale…", 75)
+            self._push_progress(job_id, "Classifying shot intent and scale…", 76)
             from ..agents.classifier import classify_shot, classify_scene_from_shots
 
             # load CLIP once and reuse across all frames
@@ -971,7 +1044,7 @@ class AestheticAPI:
                 shot_classifications[scene_id] = classify_scene_from_shots(frame_cls_list)
 
             # --- stage 6: aggregation ---
-            self._push_progress(job_id, "Aggregating shot scores…", 76)
+            self._push_progress(job_id, "Aggregating shot scores…", 78)
             from ..agents.aggregation import aggregate_shot
 
             shots: List[Shot]     = []
@@ -1080,10 +1153,10 @@ class AestheticAPI:
                 scores.append(score)
 
             # --- stage 7: selection ---
-            self._push_progress(job_id, "Selecting best shots…", 82)
+            self._push_progress(job_id, "Selecting best shots…", 84)
             from ..agents.selection import select_shots
             selected = select_shots(shots, scores, job_dir, cfg, seed=seed)
-            self._push_progress(job_id, f"Selected {len(selected)} shots", 88)
+            self._push_progress(job_id, f"Selected {len(selected)} shots", 90)
 
             # --- stage 8: VLM rationale (optional) ---
             if features.get("vlm_rationale_enabled", False):

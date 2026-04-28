@@ -27,6 +27,7 @@ extract:
 
 # Selection
 selection:
+  shortlist_pct:        0.25   # fraction of scenes for Stage 2 deep analysis
   top_k: 10                    # maximum number of shots to select globally
   dedupe_hash_threshold: 8     # hamming distance for perceptual hash dedupe (0-64)
   diversity_weight: 0.5        # balance between quality (0) and diversity (1)
