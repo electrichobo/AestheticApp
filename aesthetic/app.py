@@ -50,13 +50,11 @@ def main() -> None:
         js_api=api,
     )
     api._window = window
-    try:
-        webview.start(http_server=frozen)
-    finally:
-        # Ensure process exits cleanly — pywebview can leave threads running
-        # on Windows which prevents the terminal from releasing
-        import os, sys
-        os._exit(0)
+    webview.start(http_server=frozen)
+    # Ensure process exits cleanly — pywebview can leave threads running
+    # on Windows which prevents the terminal from releasing
+    import os as _os
+    _os._exit(0)
 
 
 if __name__ == "__main__":
