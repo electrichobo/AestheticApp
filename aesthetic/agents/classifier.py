@@ -29,6 +29,53 @@ from ..models.job import MovementType, ShotScale, SceneType
 from ..models.scores import FrameMetrics
 from .model_utils import get_tokenizer as _mu_get_tokenizer, select_best_model as _mu_best_model
 
+# ---------------------------------------------------------------------------
+# Safe text feature encoding for SigLIP
+# ---------------------------------------------------------------------------
+# SigLIP's GPU text encoder has a position embedding table of size 64.
+# Passing ANY tensor with seq_len > 64 causes a CUDA index-out-of-bounds
+# assertion that poisons the GPU for the entire session.
+# Solution: always encode text on CPU for SigLIP, then move result to device.
+
+_TEXT_FEAT_CACHE: dict = {}  # {(model_name, prompt_tuple): cpu_tensor}
+
+def _encode_text_safe(model, tokenizer, prompts: list, device: str, model_name: str):
+    """
+    Encode text prompts safely. For SigLIP: tokenize+encode on CPU.
+    For CLIP: tokenize+encode on GPU as normal.
+    Results are cached so the same prompts are never re-encoded.
+    """
+    import torch
+    cache_key = (model_name, tuple(prompts))
+    if cache_key in _TEXT_FEAT_CACHE:
+        return _TEXT_FEAT_CACHE[cache_key].to(device)
+
+    is_sig = "siglip" in model_name.lower()
+    tokens = tokenizer(prompts)  # CPU tensor from _SafeTokenizer
+
+    with torch.no_grad():
+        if is_sig:
+            # Keep tokens on CPU, temporarily move text tower to CPU
+            # This avoids the GPU position embedding overflow entirely
+            try:
+                # open_clip model has a .text submodule
+                text_tower = model.text
+                text_tower_device = next(text_tower.parameters()).device
+                text_tower.to("cpu")
+                txt_feat = model.encode_text(tokens)  # tokens already on CPU
+                text_tower.to(text_tower_device)       # move back
+            except Exception:
+                # Fallback: encode on GPU with truncated tokens
+                tokens = tokens.to(device)
+                txt_feat = model.encode_text(tokens)
+        else:
+            tokens = tokens.to(device)
+            txt_feat = model.encode_text(tokens)
+
+    txt_feat = txt_feat / txt_feat.norm(dim=-1, keepdim=True)
+    _TEXT_FEAT_CACHE[cache_key] = txt_feat.cpu()
+    return txt_feat.to(device)
+
 
 # ---------------------------------------------------------------------------
 # CLIP zero-shot label sets
@@ -314,18 +361,16 @@ def _scale_from_clip(
         import open_clip
         model_name, _ = _mu_best_model()
         tokenizer = _mu_get_tokenizer(model_name)
-        tokens    = tokenizer(prompts).to(device)  # _SafeTokenizer enforces ctx len
 
         img    = Image.open(frame_path).convert("RGB")
         tensor = preprocess(img).unsqueeze(0).to(device)
 
         with torch.no_grad():
-            img_feat  = model.encode_image(tensor)
-            txt_feat  = model.encode_text(tokens)
-            img_feat  = img_feat / img_feat.norm(dim=-1, keepdim=True)
-            txt_feat  = txt_feat / txt_feat.norm(dim=-1, keepdim=True)
-            sims      = (img_feat @ txt_feat.T).squeeze(0)
-            probs     = sims.softmax(dim=-1).cpu().numpy()
+            img_feat = model.encode_image(tensor)
+            img_feat = img_feat / img_feat.norm(dim=-1, keepdim=True)
+            txt_feat = _encode_text_safe(model, tokenizer, prompts, device, model_name)
+            sims     = (img_feat @ txt_feat.T).squeeze(0)
+            probs    = sims.softmax(dim=-1).cpu().numpy()
 
         best_idx  = int(np.argmax(probs))
         return labels[best_idx], float(probs[best_idx])
@@ -441,10 +486,7 @@ def _classify_scene_clip(
                 # Tokenize and encode text — keep on CPU, then move to device.
                 # The tokenizer wrapper already enforces the correct context
                 # length (64 for SigLIP, 77 for CLIP) via tensor slicing.
-                tokens   = tokenizer(prompts)          # CPU tensor, correct length
-                tokens   = tokens.to(device)           # now move to GPU
-                txt_feat = model.encode_text(tokens)
-                txt_feat = txt_feat / txt_feat.norm(dim=-1, keepdim=True)
+                txt_feat = _encode_text_safe(model, tokenizer, prompts, device, model_name)
                 sims     = (img_feat @ txt_feat.T).squeeze(0)
                 class_scores.append(float(sims.mean().item()))
 
@@ -557,16 +599,14 @@ def _classify_intent_clip(
 
         model_name, _ = _mu_best_model()
         tokenizer = _mu_get_tokenizer(model_name)
-        tokens    = tokenizer(prompts).to(device)  # _SafeTokenizer enforces ctx len
 
         img    = Image.open(frame_path).convert("RGB")
         tensor = preprocess(img).unsqueeze(0).to(device)
 
         with torch.no_grad():
             img_feat = model.encode_image(tensor)
-            txt_feat = model.encode_text(tokens)
             img_feat = img_feat / img_feat.norm(dim=-1, keepdim=True)
-            txt_feat = txt_feat / txt_feat.norm(dim=-1, keepdim=True)
+            txt_feat = _encode_text_safe(model, tokenizer, prompts, device, model_name)
             sims     = (img_feat @ txt_feat.T).squeeze(0)
             probs    = sims.softmax(dim=-1).cpu().numpy()
 
