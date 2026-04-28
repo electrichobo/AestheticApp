@@ -131,38 +131,43 @@ class BaselineStore:
         """
         Check whether the stored baseline embeddings are compatible
         with the current vision model. Returns a status dict for the UI.
+        Uses dominant-dim logic — same as _build_embeddings_index.
         """
+        import json as _json
         from .agents.model_utils import select_best_model, get_model_dim
         current_model, _ = select_best_model()
         current_dim      = get_model_dim(current_model)
 
         emb_dir = BASELINE_DIR / "embeddings"
         if not emb_dir.exists():
-            return {"ok": False, "reason": "no_embeddings",
+            return {"ok": False, "compatible": False, "reason": "no_embeddings",
                     "current_model": current_model, "current_dim": current_dim}
 
-        # sample first embedding to get stored dim
-        stored_dim = None
+        # group by dim to find dominant (same logic as _build_embeddings_index)
+        dim_counts: Dict[int, int] = {}
         for p in emb_dir.glob("*.json"):
             try:
-                import json as _json
-                rec = _json.loads(p.read_text(encoding="utf-8"))
-                emb = rec.get("embedding")
+                emb = _json.loads(p.read_text(encoding="utf-8")).get("embedding")
                 if emb:
-                    stored_dim = len(emb)
-                    break
+                    dim_counts[len(emb)] = dim_counts.get(len(emb), 0) + 1
             except Exception:
                 continue
 
-        if stored_dim is None:
-            return {"ok": False, "reason": "no_embeddings",
+        if not dim_counts:
+            return {"ok": False, "compatible": False, "reason": "no_embeddings",
                     "current_model": current_model, "current_dim": current_dim}
 
+        # dominant dim = the one with most files
+        stored_dim = max(dim_counts, key=lambda d: dim_counts[d])
+        stale_count = sum(v for d, v in dim_counts.items() if d != stored_dim)
         compatible = stored_dim == current_dim
+
         return {
             "ok":            compatible,
+            "compatible":    compatible,
             "stored_dim":    stored_dim,
             "current_dim":   current_dim,
+            "stale_count":   stale_count,
             "current_model": current_model,
             "compatible":    compatible,
             "reason":        None if compatible else "dim_mismatch",

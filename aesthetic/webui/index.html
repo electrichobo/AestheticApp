@@ -1139,7 +1139,7 @@ async function exportTrainingFeatures() {
 
 // Load feedback stats when baseline tab is opened
 document.getElementById('tab-baseline')?.addEventListener('click', () => {
-  setTimeout(loadFeedbackStats, 100);
+  setTimeout(() => { loadBaseline(); loadFeedbackStats(); }, 100);
 });
 
 // ---------------------------------------------------------------------------
@@ -1183,19 +1183,23 @@ async function loadBaseline(){
     const c = await window.pywebview.api.get_baseline_compat();
     const el = document.getElementById('baselineCompatWarning');
     if(el) {
-      if(!c.compatible && c.reason === 'dim_mismatch') {
-        el.textContent = `⚠ Baseline mismatch: stored embeddings are ${c.stored_dim}-dim but current model (${c.current_model}) produces ${c.current_dim}-dim. Rebuild the baseline to restore Creative scores.`;
-        el.className = 'text-xs text-amber-400 mb-3 p-2 bg-amber-900/20 rounded border border-amber-700/40';
-      } else if(c.reason === 'no_embeddings') {
+      const staleNote = (c.stale_count > 0) ? ` (${c.stale_count} stale files from old model)` : '';
+      if(c.reason === 'no_embeddings') {
         el.textContent = 'No baseline found. Train a baseline to enable Creative pillar scoring.';
-        el.className = 'text-xs text-gray-500 mb-3';
-      } else if(c.compatible) {
+        el.className = 'text-xs text-gray-500 mb-2';
+      } else if(!c.compatible) {
+        el.textContent = `⚠ Baseline mismatch: stored dim=${c.stored_dim}, current model ${c.current_model} produces dim=${c.current_dim}${staleNote}. Rebuild or clean stale files.`;
+        el.className = 'text-xs text-amber-400 mb-2 p-2 bg-amber-900/20 rounded border border-amber-700/40';
+      } else if(c.stale_count > 0) {
+        el.textContent = `✓ Compatible (${c.current_model}, ${c.current_dim}-dim) — ${c.stale_count} stale files from old model can be cleaned.`;
+        el.className = 'text-xs text-yellow-400 mb-2';
+      } else {
         el.textContent = `✓ Baseline compatible — ${c.current_model} (${c.current_dim}-dim)`;
-        el.className = 'text-xs text-green-400 mb-3';
+        el.className = 'text-xs text-green-400 mb-2';
       }
-      // show/hide clean button
+      // show clean button if there are stale files (even if dims otherwise match)
       const cleanRow = document.getElementById('baselineCleanRow');
-      if(cleanRow) cleanRow.classList.toggle('hidden', c.compatible || c.reason === 'no_embeddings');
+      if(cleanRow) cleanRow.classList.toggle('hidden', !c.stale_count && c.compatible);
     }
   } catch(e) {}
   const r = await window.pywebview.api.load_baseline();
