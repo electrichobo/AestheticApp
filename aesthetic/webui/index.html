@@ -264,6 +264,38 @@
             <button onclick="loadBaseline()" class="py-1 px-3 rounded text-xs font-medium text-white bg-gray-700 hover:bg-gray-600">Refresh</button>
           </div>
           <pre id="baselineDisplayFull" class="text-xs text-gray-300 bg-gray-800 rounded p-3 overflow-x-auto border border-gray-700">not loaded</pre>
+
+          <!-- Feedback & Training -->
+          <div class="border-t border-gray-700 pt-4">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-semibold text-white">Feedback &amp; Reranker Training</h3>
+              <button onclick="loadFeedbackStats()" class="py-1 px-3 rounded text-xs font-medium text-white bg-gray-700 hover:bg-gray-600">Refresh</button>
+            </div>
+            <div id="feedbackStats" class="grid grid-cols-3 gap-3 mb-3">
+              <div class="bg-gray-800 rounded p-3 border border-gray-700 text-center">
+                <div id="fbStatUps" class="text-xl font-bold text-green-400">—</div>
+                <div class="text-xs text-gray-500 mt-0.5">Thumbs Up</div>
+              </div>
+              <div class="bg-gray-800 rounded p-3 border border-gray-700 text-center">
+                <div id="fbStatDowns" class="text-xl font-bold text-red-400">—</div>
+                <div class="text-xs text-gray-500 mt-0.5">Thumbs Down</div>
+              </div>
+              <div class="bg-gray-800 rounded p-3 border border-gray-700 text-center">
+                <div id="fbStatPairs" class="text-xl font-bold text-indigo-400">—</div>
+                <div class="text-xs text-gray-500 mt-0.5">Pairwise Pairs</div>
+              </div>
+            </div>
+            <div id="fbReadiness" class="text-xs text-gray-500 mb-3">—</div>
+            <button onclick="exportTrainingFeatures()"
+              class="w-full py-2 px-3 rounded text-sm font-medium text-white bg-indigo-700 hover:bg-indigo-600 disabled:opacity-40"
+              id="exportFeaturesBtn">
+              Export Training Features
+            </button>
+            <p class="text-xs text-gray-600 mt-1.5">
+              Exports feedback_features.csv and pairwise_features.csv to the training/ data folder.
+              Use these to train a reranker with LightGBM or a small MLP.
+            </p>
+          </div>
         </div>
 
         <!-- Corpus Browser -->
@@ -1020,6 +1052,67 @@ function renderCIEChart(canvasId, shot) {
   ctx.fillText('y', 2, 12);
 }
 // ---------------------------------------------------------------------------
+// Feedback stats + training export
+// ---------------------------------------------------------------------------
+
+async function loadFeedbackStats() {
+  if(!hasBridge) return;
+  try {
+    const r = await window.pywebview.api.get_feedback_stats();
+    if(!r.ok) return;
+    document.getElementById('fbStatUps').textContent    = r.thumbs_up   ?? '—';
+    document.getElementById('fbStatDowns').textContent  = r.thumbs_down ?? '—';
+    document.getElementById('fbStatPairs').textContent  = r.pairwise_pairs ?? '—';
+
+    const total = (r.thumbs_up || 0) + (r.thumbs_down || 0);
+    const pairs = r.pairwise_pairs || 0;
+    const ready = r.reranker_ready;
+
+    let msg = '';
+    if(total === 0) {
+      msg = 'No feedback yet. Rate shots with thumbs up / thumbs down to start building training data.';
+    } else if(!ready) {
+      const needed = Math.max(0, 50 - pairs);
+      msg = `${total} feedback events · ${pairs} pairwise pairs. Need ${needed} more pairs to train a reranker.`;
+    } else {
+      msg = `✓ ${total} feedback events · ${pairs} pairwise pairs — enough to train a reranker. Export features below.`;
+    }
+    document.getElementById('fbReadiness').textContent = msg;
+    document.getElementById('fbReadiness').className =
+      'text-xs mb-3 ' + (ready ? 'text-green-400' : 'text-gray-500');
+    document.getElementById('exportFeaturesBtn').disabled = total === 0;
+  } catch(e) {
+    console.error('loadFeedbackStats:', e);
+  }
+}
+
+async function exportTrainingFeatures() {
+  if(!hasBridge) return;
+  const btn = document.getElementById('exportFeaturesBtn');
+  btn.disabled = true;
+  btn.textContent = 'Exporting…';
+  try {
+    const r = await window.pywebview.api.export_training_features();
+    if(r.ok) {
+      log(`Training features exported: ${r.feedback_rows} feedback rows, ${r.pairwise_rows} pairwise pairs → ${r.output_dir}`);
+      btn.textContent = `Exported (${r.feedback_rows} rows)`;
+    } else {
+      log(`Feature export failed: ${r.error}`);
+      btn.textContent = 'Export Training Features';
+      btn.disabled = false;
+    }
+  } catch(e) {
+    btn.textContent = 'Export Training Features';
+    btn.disabled = false;
+  }
+}
+
+// Load feedback stats when baseline tab is opened
+document.getElementById('tab-baseline')?.addEventListener('click', () => {
+  setTimeout(loadFeedbackStats, 100);
+});
+
+// ---------------------------------------------------------------------------
 // Downloads
 // ---------------------------------------------------------------------------
 function renderDownloads(r){
@@ -1216,6 +1309,10 @@ async function setFeedback(shotKey, rating, btn) {
   const current = feedbackState[shotKey] || 0;
   const newRating = current === rating ? 0 : rating;
   feedbackState[shotKey] = newRating;
+  // find full shot context for richer event logging
+  const shotContext = (lastResults?.shots || []).find(
+    s => (s.shot_id || ('shot_' + s.id)) === shotKey
+  ) || null;
 
   // update button styles in all cards
   document.querySelectorAll(`.feedback-btn[data-key="${shotKey}"]`).forEach(b => {
@@ -1230,7 +1327,7 @@ async function setFeedback(shotKey, rating, btn) {
   });
 
   if(hasBridge && currentJobId){
-    await window.pywebview.api.save_feedback(currentJobId, shotKey, newRating);
+    await window.pywebview.api.save_feedback(currentJobId, shotKey, newRating, shotContext);
   }
 }
 

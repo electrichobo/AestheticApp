@@ -489,47 +489,97 @@ class AestheticAPI:
     # Editor feedback
     # -----------------------------------------------------------------------
 
-    def save_feedback(self, job_id: str, shot_id: str, rating: int) -> Dict[str, Any]:
+    def save_feedback(
+        self,
+        job_id:       str,
+        shot_id:      str,
+        rating:       int,
+        shot_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         """
-        Save editor feedback for a shot.
-        rating: 1 = thumbs up, -1 = thumbs down, 0 = neutral/reset
-        Feedback persists across sessions in data/feedback/<job_id>.json
+        Persist a feedback event to the SQLite feedback store.
+        rating: 1 = thumbs up, -1 = thumbs down, 0 = retracted/neutral
+
+        Only thumbs up and thumbs down generate training signal.
+        Neutral (0) is recorded for audit but excluded from reranker training.
+        Pairwise preferences are derived automatically after each event.
+
+        shot_context: full shot dict from the UI — attached to the event so
+        the feature export pipeline doesn't need to re-run inference.
         """
         try:
-            feedback_dir  = DATA_DIR / "feedback"
-            feedback_dir.mkdir(parents=True, exist_ok=True)
-            feedback_path = feedback_dir / f"{job_id}.json"
+            from ..agents.feedback_store import save_feedback_event
 
-            feedback: Dict[str, Any] = {}
-            if feedback_path.exists():
-                try:
-                    feedback = json.loads(feedback_path.read_text(encoding="utf-8"))
-                except Exception:
-                    feedback = {}
-
-            if rating == 0:
-                feedback.pop(shot_id, None)   # reset to neutral
-            else:
-                feedback[shot_id] = {
-                    "rating":    rating,
-                    "shot_id":   shot_id,
-                    "job_id":    job_id,
-                    "timestamp": _now_iso(),
+            # build job context from current job if available
+            job_context: Dict[str, Any] = {}
+            job = self._jobs.get(job_id)
+            if job and job.video_meta:
+                vm = job.video_meta
+                job_context = {
+                    "source_file":    str(job.source_file),
+                    "width":          vm.width,
+                    "height":         vm.height,
+                    "fps":            vm.fps,
+                    "color_primaries":vm.color_primaries,
+                    "color_trc":      vm.color_trc,
+                    "is_log_encoded": vm.is_log_encoded,
                 }
 
-            feedback_path.write_text(json.dumps(feedback, indent=2), encoding="utf-8")
-            return {"ok": True, "shot_id": shot_id, "rating": rating}
+            ok = save_feedback_event(
+                job_id       = job_id,
+                shot_id      = shot_id,
+                rating       = rating,
+                shot_context = shot_context or {},
+                job_context  = job_context,
+            )
+            return {"ok": ok, "shot_id": shot_id, "rating": rating}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
     def get_feedback(self, job_id: str) -> Dict[str, Any]:
-        """Return all feedback for a job."""
+        """Return all non-neutral feedback for a job as {shot_id: rating}."""
         try:
-            feedback_path = DATA_DIR / "feedback" / f"{job_id}.json"
-            if not feedback_path.exists():
-                return {"ok": True, "feedback": {}}
-            feedback = json.loads(feedback_path.read_text(encoding="utf-8"))
+            from ..agents.feedback_store import get_feedback_for_job
+            feedback = get_feedback_for_job(job_id)
             return {"ok": True, "feedback": feedback}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def get_feedback_stats(self) -> Dict[str, Any]:
+        """Return summary stats for the feedback store (for UI display)."""
+        try:
+            from ..agents.feedback_store import get_feedback_stats
+            return {"ok": True, **get_feedback_stats()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def export_training_features(self, output_dir: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Export feedback events as a flat feature matrix for reranker training.
+        Writes feedback_features.csv and pairwise_features.csv to output_dir
+        (defaults to DATA_DIR/training/).
+        """
+        try:
+            from ..agents.feature_export import (
+                export_training_features,
+                export_pairwise_features,
+            )
+            out = Path(output_dir) if output_dir else DATA_DIR / "training"
+            out.mkdir(parents=True, exist_ok=True)
+
+            feat_result = export_training_features(
+                output_path=str(out / "feedback_features.csv")
+            )
+            pair_result = export_pairwise_features(
+                output_path=str(out / "pairwise_features.csv")
+            )
+            return {
+                "ok":             feat_result["ok"],
+                "feedback_rows":  feat_result.get("rows", 0),
+                "pairwise_rows":  pair_result.get("rows", 0),
+                "feature_cols":   feat_result.get("feature_cols", 0),
+                "output_dir":     str(out),
+            }
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
