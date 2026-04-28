@@ -173,9 +173,16 @@ def _load_or_build_index(
                 clusters = index.get("clusters", [])
                 if clusters:
                     centroid_dim = len(clusters[0].get("centroid", []))
-                    if centroid_dim != 512:
+                    # check against current model dim, not hardcoded 512
+                    try:
+                        from .model_utils import _selected_model, select_best_model, get_model_dim
+                        _m = _selected_model[0] if _selected_model else select_best_model()[0]
+                        expected_dim = get_model_dim(_m) if _m else centroid_dim
+                    except Exception:
+                        expected_dim = centroid_dim
+                    if centroid_dim != expected_dim:
                         print(f"[stratification] stale index: centroid dim "
-                              f"{centroid_dim} != 512 — rebuilding")
+                              f"{centroid_dim} != {expected_dim} — rebuilding")
                     else:
                         emb_dir = data_dir / "baseline" / "embeddings"
                         actual  = sum(1 for _ in emb_dir.glob("*.json")) if emb_dir.exists() else 0

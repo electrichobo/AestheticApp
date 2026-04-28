@@ -312,8 +312,9 @@ def _scale_from_clip(
         prompts = list(SCALE_PROMPTS.values())
 
         import open_clip
-        tokenizer = _mu_get_tokenizer(_mu_best_model()[0])
-        tokens    = tokenizer(prompts).to(device)
+        model_name, _ = _mu_best_model()
+        tokenizer = _mu_get_tokenizer(model_name)
+        tokens    = tokenizer(prompts).to(device)  # _SafeTokenizer enforces ctx len
 
         img    = Image.open(frame_path).convert("RGB")
         tensor = preprocess(img).unsqueeze(0).to(device)
@@ -554,8 +555,9 @@ def _classify_intent_clip(
         labels  = list(INTENT_PROMPTS.keys())
         prompts = list(INTENT_PROMPTS.values())
 
-        tokenizer = _mu_get_tokenizer(_mu_best_model()[0])
-        tokens    = tokenizer(prompts).to(device)
+        model_name, _ = _mu_best_model()
+        tokenizer = _mu_get_tokenizer(model_name)
+        tokens    = tokenizer(prompts).to(device)  # _SafeTokenizer enforces ctx len
 
         img    = Image.open(frame_path).convert("RGB")
         tensor = preprocess(img).unsqueeze(0).to(device)
