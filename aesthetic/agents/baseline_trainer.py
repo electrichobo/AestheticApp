@@ -1011,7 +1011,17 @@ def clean_stale_embeddings(data_dir: Path) -> Dict[str, Any]:
             continue
     if not dim_files:
         return {"deleted": 0, "kept": 0, "dominant_dim": 0}
-    dominant = max(dim_files, key=lambda d: len(dim_files[d]))
+
+    # Use current model dim as authoritative — delete everything else
+    try:
+        from .model_utils import _selected_model, select_best_model, get_model_dim
+        _m = _selected_model[0] if _selected_model else select_best_model()[0]
+        current_dim = get_model_dim(_m) if _m else 0
+    except Exception:
+        current_dim = 0
+
+    dominant = current_dim if (current_dim and current_dim in dim_files) else                max(dim_files, key=lambda d: len(dim_files[d]))
+
     deleted = 0
     for dim, files in dim_files.items():
         if dim != dominant:
@@ -1021,7 +1031,7 @@ def clean_stale_embeddings(data_dir: Path) -> Dict[str, Any]:
                 except Exception:
                     pass
     invalidate_embedding_cache()
-    return {"deleted": deleted, "kept": len(dim_files[dominant]), "dominant_dim": dominant}
+    return {"deleted": deleted, "kept": len(dim_files.get(dominant, [])), "dominant_dim": dominant}
 
 
 def _build_embeddings_index(data_dir: Path) -> List[List[float]]:
@@ -1057,10 +1067,24 @@ def _build_embeddings_index(data_dir: Path) -> List[List[float]]:
         _EMBEDDING_CACHE_KEY = cache_key
         return []
 
-    # Use the largest group (most files = most recent retrain)
-    dominant_dim = max(dim_groups, key=lambda d: len(dim_groups[d]))
-    embeddings   = dim_groups[dominant_dim]
-    stale_count  = sum(len(v) for d, v in dim_groups.items() if d != dominant_dim)
+    # Current model dim is authoritative — NOT most files.
+    # After a model upgrade you may have 41,869 old-dim files vs 773 new-dim
+    # files. "Most files" would pick the old ones. We want the new ones.
+    try:
+        from .model_utils import _selected_model, select_best_model, get_model_dim
+        _m = _selected_model[0] if _selected_model else select_best_model()[0]
+        current_dim = get_model_dim(_m) if _m else 0
+    except Exception:
+        current_dim = 0
+
+    if current_dim and current_dim in dim_groups:
+        dominant_dim = current_dim
+    else:
+        # Model not loaded yet — fall back to most-files heuristic
+        dominant_dim = max(dim_groups, key=lambda d: len(dim_groups[d]))
+
+    embeddings  = dim_groups[dominant_dim]
+    stale_count = sum(len(v) for d, v in dim_groups.items() if d != dominant_dim)
 
     if stale_count > 0:
         print(
