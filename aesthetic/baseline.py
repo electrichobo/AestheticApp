@@ -127,13 +127,24 @@ class BaselineStore:
             "augment_metricCount": len(cast(Dict[str, Any], augment.get("stats", {}))),
         }
 
-    def get_embedding_dim_status(self) -> Dict[str, Any]:
+    def get_embedding_dim_status(self, _cache: dict = {}) -> Dict[str, Any]:
         """
         Check whether the stored baseline embeddings are compatible
         with the current vision model. Returns a status dict for the UI.
-        Uses dominant-dim logic — same as _build_embeddings_index.
+        Result is cached per baseline-version so we don't glob 42K files
+        on every tab open. Cache invalidates when baseline version changes.
         All fields are guaranteed non-None so the JS never gets undefined.
         """
+        # cache key = baseline version + model name
+        try:
+            from .agents.model_utils import _selected_model
+            _m = _selected_model[0] if _selected_model else "unknown"
+        except Exception:
+            _m = "unknown"
+        version = self.get_summary().get("active", {}).get("version", 0)
+        cache_key = f"{version}:{_m}"
+        if cache_key in _cache:
+            return _cache[cache_key]
         import json as _json
 
         # get current model info — read from session cache if available,
@@ -192,19 +203,25 @@ class BaselineStore:
                 "total_count":   0,
             }
 
-        # dominant dim = most files (most recent retrain wins)
-        stored_dim  = max(dim_counts, key=lambda d: dim_counts[d])
-        dominant_n  = dim_counts[stored_dim]
-        stale_count = sum(v for d, v in dim_counts.items() if d != stored_dim)
-
-        # if current_dim is 0 (model not loaded yet), treat as compatible
-        # so the UI shows green rather than a false alarm
-        if current_dim == 0:
+        # Current model dim is authoritative — NOT most-files.
+        # After a model upgrade there may be far more old-dim files than new.
+        # "Most files" would incorrectly pick the old generation.
+        if current_dim and current_dim in dim_counts:
+            stored_dim = current_dim   # model loaded, its dim has files — use it
+        elif current_dim == 0:
+            # Model not loaded yet — fall back to most-files and mark compatible
+            stored_dim    = max(dim_counts, key=lambda d: dim_counts[d])
             current_dim   = stored_dim
             current_model = f"stored at dim={stored_dim}"
+        else:
+            # Model loaded but no files at its dim — baseline not rebuilt yet
+            stored_dim = max(dim_counts, key=lambda d: dim_counts[d])
+
+        dominant_n  = dim_counts.get(stored_dim, 0)
+        stale_count = sum(v for d, v in dim_counts.items() if d != stored_dim)
         compatible  = stored_dim == current_dim
 
-        return {
+        result = {
             "ok":            compatible,
             "compatible":    compatible,
             "reason":        None if compatible else "dim_mismatch",
@@ -214,6 +231,8 @@ class BaselineStore:
             "stale_count":   stale_count,
             "total_count":   dominant_n,
         }
+        _cache[cache_key] = result
+        return result
 
     def get_reference_colour(self) -> Dict[str, float]:
         """

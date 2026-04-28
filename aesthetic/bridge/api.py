@@ -552,10 +552,14 @@ class AestheticAPI:
             return {"ok": False, "error": str(exc)}
 
     def clean_stale_embeddings(self) -> Dict[str, Any]:
-        """Delete embedding files whose dim doesn't match the dominant group."""
+        """Delete embedding files whose dim doesn't match the current model dim."""
         try:
-            from ..agents.baseline_trainer import clean_stale_embeddings
+            from ..agents.baseline_trainer import clean_stale_embeddings, invalidate_embedding_cache
             result = clean_stale_embeddings(DATA_DIR)
+            invalidate_embedding_cache()
+            # also clear the compat cache on the baseline object
+            if hasattr(self._baseline.get_embedding_dim_status, '__defaults__'):
+                self._baseline.get_embedding_dim_status.__defaults__[0].clear()
             return {"ok": True, **result}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
