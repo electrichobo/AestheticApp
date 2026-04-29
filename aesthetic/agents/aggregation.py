@@ -223,7 +223,36 @@ def _collect_metric_detail(frames: List[FrameMetrics]) -> Dict[str, Dict[str, fl
         "ssim":                 _avg([f.exposure.ssim                 for f in frames]),
         "exposure_intent":      _avg([f.exposure.exposure_intent      for f in frames]),
         "temporal_consistency": _avg([f.exposure.temporal_consistency for f in frames]),
+        # new exposure refinement
+        "highlight_rolloff":    _avg([f.exposure.highlight_rolloff    for f in frames]),
+        "midtone_separation":   _avg([f.exposure.midtone_separation   for f in frames]),
+        "toe_character":        _avg([f.exposure.toe_character        for f in frames]),
+        "shoulder_character":   _avg([f.exposure.shoulder_character   for f in frames]),
     }
+    # Flicker: variance of mean luma across frames (temporal metric)
+    luma_means = [f.exposure.histogram_mean for f in frames if f.exposure.histogram_mean is not None]
+    if len(luma_means) >= 2:
+        import numpy as _np
+        flicker = float(_np.clip(float(_np.std(luma_means)) / 20 * 100, 0, 100))
+        for f in frames:
+            if f.exposure is not None:
+                f.exposure.flicker_score = round(flicker, 1)
+        exp["flicker_score"] = round(flicker, 1)
+    # Skin IRE: face luma as % of full range (from inference skin tone data)
+    skin_ires = []
+    for f in frames:
+        if f.color and f.color.skin_tone_de is not None:
+            # Proxy: use face region luma from YOLo detections if available
+            if f.inference and f.inference.detections:
+                face_dets = [d for d in f.inference.detections
+                             if d.get("class_name","").lower() == "person"]
+                if face_dets:
+                    # Already have skin_tone_de; IRE proxy from histogram mean
+                    skin_ires.append(f.exposure.histogram_mean or 128)
+    if skin_ires:
+        import numpy as _np2
+        mean_ire = float(_np2.mean(skin_ires)) / 255 * 100  # % of full range
+        exp["skin_ire_placement"] = round(mean_ire, 1)
     detail["exposure"] = {k: v for k, v in exp.items() if v is not None}
 
     lit = {
@@ -235,6 +264,8 @@ def _collect_metric_detail(frames: List[FrameMetrics]) -> Dict[str, Dict[str, fl
         "shadow_noise":         _avg([f.lighting.shadow_noise          for f in frames]),
         "transition_hardness":  _avg([f.lighting.transition_hardness   for f in frames]),
         "light_motivation":     _avg([f.lighting.light_motivation      for f in frames]),
+        "lighting_complexity":  _avg([f.lighting.lighting_complexity   for f in frames]),
+        "atmosphere_density":   _avg([f.lighting.atmosphere_density    for f in frames]),
     }
     detail["lighting"] = {k: v for k, v in lit.items() if v is not None}
 

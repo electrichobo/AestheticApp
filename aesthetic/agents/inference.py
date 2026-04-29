@@ -129,6 +129,20 @@ def run_frame_inference(
             print(f"[inference] YOLO failed for {frame_path}: {exc}")
             traceback.print_exc()
 
+    # --- Focus metrics (YOLO face region + temporal, requires detections) ---
+    if features.get("yolo_enabled", True) and inference.detections:
+        try:
+            _compute_focus_metrics(frame_path, inference.detections, frame_metrics)
+        except Exception as exc:
+            print(f"[inference] focus metrics failed: {exc}")
+
+    # --- Subject metrics (SigLIP zero-shot + emotion) ---
+    if features.get("clip_enabled", True):
+        try:
+            _compute_subject_metrics(frame_path, device, frame_metrics)
+        except Exception as exc:
+            print(f"[inference] subject metrics failed: {exc}")
+
     frame_metrics.inference = inference
     _write_sidecar(frame_metrics, job_dir)
     return frame_metrics
@@ -669,3 +683,215 @@ def _write_sidecar(metrics: FrameMetrics, job_dir: Path) -> None:
 def _log_inference_error(model: str, exc: Exception) -> None:
     """Log inference errors without aborting — graceful degradation."""
     print(f"[inference] {model} failed: {exc}")
+
+# ---------------------------------------------------------------------------
+# Focus metrics
+# ---------------------------------------------------------------------------
+
+def _compute_focus_metrics(
+    frame_path: str,
+    detections: list,
+    frame_metrics: "FrameMetrics",
+) -> None:
+    """
+    Compute focus quality metrics using YOLO face bboxes.
+    Populates frame_metrics.focus in place.
+    """
+    import cv2
+    import numpy as np
+    from ..models.scores import FocusMetrics
+
+    bgr = cv2.imread(frame_path)
+    if bgr is None:
+        return
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+    fm   = FocusMetrics()
+
+    # Find face detections
+    faces = [d for d in detections if d.get("class_name", "").lower() in
+             ("person", "face") and d.get("confidence", 0) > 0.5]
+
+    if faces:
+        # Use the highest-confidence face
+        face = max(faces, key=lambda d: d.get("confidence", 0))
+        x1   = int(face.get("x1", 0) * w)
+        y1   = int(face.get("y1", 0) * h)
+        x2   = int(face.get("x2", 1) * w)
+        y2   = int(face.get("y2", 1) * h)
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+
+        if x2 > x1 and y2 > y1:
+            face_crop = gray[y1:y2, x1:x2]
+
+            # Subject focus accuracy: Laplacian variance in face region
+            lap_face = float(cv2.Laplacian(face_crop, cv2.CV_64F).var())
+            fm.subject_focus_accuracy = round(float(np.clip(lap_face / 500 * 100, 0, 100)), 1)
+
+            # Eye region: upper 35% of face bbox
+            eye_h = max(1, (y2 - y1) // 3)
+            eye_crop = gray[y1:y1 + eye_h, x1:x2]
+            if eye_crop.size > 0:
+                lap_eye = float(cv2.Laplacian(eye_crop, cv2.CV_64F).var())
+                fm.eye_sharpness = round(float(np.clip(lap_eye / 300 * 100, 0, 100)), 1)
+
+                # Catchlight: bright specular in eye region
+                _, bright = cv2.threshold(eye_crop, 240, 255, cv2.THRESH_BINARY)
+                bright_pct = float(bright.sum()) / max(eye_crop.size * 255, 1) * 100
+                # Good catchlight: small (0.5-5% of eye area) bright spot
+                if 0.3 < bright_pct < 8:
+                    fm.catchlight_quality = round(float(np.clip(
+                        100 - abs(bright_pct - 2) * 15, 0, 100)), 1)
+                else:
+                    fm.catchlight_quality = 0.0
+
+    # Gaze direction already captured in lead_room — mirror it
+    if frame_metrics.composition and frame_metrics.composition.lead_room is not None:
+        fm.gaze_direction_score = frame_metrics.composition.lead_room
+
+    frame_metrics.focus = fm
+
+
+# ---------------------------------------------------------------------------
+# Subject metrics (SigLIP zero-shot + optional emotion detection)
+# ---------------------------------------------------------------------------
+
+# Session cache for SigLIP zero-shot text features used in subject scoring
+_SUBJECT_TEXT_CACHE: dict = {}
+
+_SUBJECT_PROMPTS = {
+    # readability
+    "subject_clarity":       ["a photograph with a clear, obvious subject",
+                               "a frame where the main subject is immediately recognizable"],
+    "mood_clarity":          ["a photograph with an unmistakable emotional tone",
+                               "a frame with immediate, clear mood"],
+    "one_sec_comprehension": ["a photograph that is instantly understandable at a glance",
+                               "a clear, readable frame with obvious content"],
+    # thumbnail potency
+    "thumbnail_strength":    ["a photograph that would make a compelling thumbnail",
+                               "a visually striking frame that works at small size"],
+    "portfolio_potential":   ["a frame that would work as a showreel hero shot",
+                               "a cinematic image with portfolio cover quality"],
+    "graphic_simplicity":    ["a graphically simple, bold composition",
+                               "a photograph with strong shapes and clear visual hierarchy"],
+    # human presence
+    "gesture_readability":   ["a photograph with clear, readable body language",
+                               "a frame where the person's gesture communicates immediately"],
+    "presence_signal":       ["a photograph of a person with commanding screen presence",
+                               "a portrait with strong charisma and magnetism"],
+    "silhouette_readability":["a photograph with a strong, clear silhouette",
+                               "a frame with a bold, readable outline against the background"],
+    # world/mood
+    "atmosphere_mood":       ["a photograph with rich, cohesive atmosphere",
+                               "a cinematic frame with strong environmental mood"],
+}
+
+
+def _compute_subject_metrics(
+    frame_path: str,
+    device:     str,
+    frame_metrics: "FrameMetrics",
+) -> None:
+    """
+    Compute SubjectMetrics using SigLIP zero-shot scoring and optional emotion detection.
+    All text features are cached per session.
+    """
+    import cv2
+    import numpy as np
+    import torch
+    from PIL import Image
+    from ..models.scores import SubjectMetrics
+    from .model_utils import select_best_model, get_tokenizer, is_siglip
+
+    sm = SubjectMetrics()
+
+    # --- SigLIP zero-shot ---
+    try:
+        import open_clip
+        model_name, pretrained = select_best_model()
+        model, _, preprocess  = open_clip.create_model_and_transforms(
+            model_name, pretrained=pretrained, device=device
+        )
+        model.eval()
+        tokenizer = get_tokenizer(model_name)
+
+        img    = Image.open(frame_path).convert("RGB")
+        tensor = preprocess(img).unsqueeze(0).to(device)
+
+        with torch.no_grad():
+            img_feat = model.encode_image(tensor)
+            img_feat = img_feat / img_feat.norm(dim=-1, keepdim=True)
+
+        # For SigLIP: use CPU ViT-B-32 for text (same pattern as classifier)
+        from .classifier import _get_cpu_text_model
+        cpu_model, cpu_tok = _get_cpu_text_model()
+
+        for field, prompts in _SUBJECT_PROMPTS.items():
+            try:
+                cache_key = (model_name, tuple(prompts))
+                if cache_key in _SUBJECT_TEXT_CACHE:
+                    txt_feat = _SUBJECT_TEXT_CACHE[cache_key]
+                else:
+                    if cpu_model is not None and cpu_tok is not None:
+                        with torch.no_grad():
+                            toks     = cpu_tok(prompts)
+                            txt_feat = cpu_model.encode_text(toks)
+                            txt_feat = txt_feat / txt_feat.norm(dim=-1, keepdim=True)
+                    else:
+                        toks     = tokenizer(prompts).to(device)
+                        with torch.no_grad():
+                            txt_feat = model.encode_text(toks)
+                            txt_feat = txt_feat / txt_feat.norm(dim=-1, keepdim=True)
+                    _SUBJECT_TEXT_CACHE[cache_key] = txt_feat.cpu()
+
+                txt_feat_d = _SUBJECT_TEXT_CACHE[cache_key]
+                sims = (img_feat.cpu() @ txt_feat_d.T).squeeze(0)
+                score = float(sims.mean().item())
+                # Convert cosine sim (-1 to 1) to 0-100
+                score_100 = round(float(np.clip((score + 1) / 2 * 100, 0, 100)), 1)
+                setattr(sm, field, score_100)
+            except Exception:
+                pass
+
+    except Exception as e:
+        print(f"[inference] SigLIP subject scoring failed: {e}")
+
+    # --- Emotion detection (optional, CPU, lightweight) ---
+    try:
+        _compute_emotion(frame_path, sm)
+    except Exception:
+        pass
+
+    frame_metrics.subject = sm
+
+
+def _compute_emotion(frame_path: str, sm: "SubjectMetrics") -> None:
+    """
+    Lightweight face emotion detection using DeepFace (FER2013 backend).
+    Falls back silently if DeepFace isn't installed.
+    Only runs if a face was already detected (lead_room or catchlight hint).
+    """
+    try:
+        from deepface import DeepFace
+        import numpy as np
+        result = DeepFace.analyze(
+            img_path=frame_path,
+            actions=["emotion"],
+            enforce_detection=False,
+            silent=True,
+        )
+        if isinstance(result, list):
+            result = result[0]
+        emotions  = result.get("emotion", {})
+        dominant  = result.get("dominant_emotion", None)
+        if emotions:
+            # Peak emotion confidence (excluding neutral as a baseline)
+            non_neutral = {k: v for k, v in emotions.items() if k != "neutral"}
+            peak = float(max(non_neutral.values())) if non_neutral else 0.0
+            sm.facial_emotion_intensity = round(float(np.clip(peak, 0, 100)), 1)
+            sm.dominant_emotion = dominant
+    except ImportError:
+        pass  # DeepFace not installed — skip silently
+    except Exception:
+        pass

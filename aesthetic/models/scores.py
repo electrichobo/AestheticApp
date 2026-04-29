@@ -43,6 +43,13 @@ class ExposureMetrics(BaseModel):
     snr_chroma:           Optional[float] = None
     temporal_consistency: Optional[float] = None   # variance across shot frames
     exposure_intent:      Optional[float] = None   # rule-based intent match score
+    # --- exposure refinement ---
+    highlight_rolloff:    Optional[float] = None   # 0=hard clip, 100=smooth shoulder
+    midtone_separation:   Optional[float] = None   # midband histogram spread (0-100)
+    toe_character:        Optional[float] = None   # shadow curve shape score
+    shoulder_character:   Optional[float] = None   # highlight curve shape score
+    skin_ire_placement:   Optional[float] = None   # face luma % IRE (0=crushed,100=clipped)
+    flicker_score:        Optional[float] = None   # temporal luma variance (0=clean,100=bad)
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +67,9 @@ class LightingMetrics(BaseModel):
     coverage_consistency:    Optional[float] = None   # cross-shot consistency
     light_motivation:        Optional[float] = None   # heuristic motivated/unmotivated
     lighting_style_adherence:Optional[float] = None   # creative: delta vs baseline lighting style
+    # --- lighting design ---
+    lighting_complexity:  Optional[float] = None   # estimated number of distinct light sources
+    atmosphere_density:   Optional[float] = None   # haze/fog/smoke scattering signal (0-100)
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +90,9 @@ class CompositionMetrics(BaseModel):
     lead_room:            Optional[float] = None
     shot_scale:           Optional[str]   = None   # ShotScale enum value
     frame_balance:        Optional[float] = None   # composite balance score
+    # --- composition sophistication ---
+    depth_plane_count:    Optional[float] = None   # distinct MiDaS depth layers with content
+    silhouette_clarity:   Optional[float] = None   # subject edge contrast vs background
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +117,37 @@ class MovementMetrics(BaseModel):
 # Color metrics
 # ---------------------------------------------------------------------------
 
+class FocusMetrics(BaseModel):
+    """Per-frame focus quality and temporal focus behaviour."""
+    subject_focus_accuracy: Optional[float] = None  # sharpness in subject region (0-100)
+    eye_sharpness:          Optional[float] = None  # Laplacian in detected eye region (0-100)
+    catchlight_quality:     Optional[float] = None  # specular highlight in eye (0=none,100=good)
+    rack_focus_detected:    Optional[float] = None  # 0=no rack, 1=rack detected
+    focus_hunting:          Optional[float] = None  # oscillating sharpness variance (0=clean)
+    focus_breathing:        Optional[float] = None  # apparent magnification change during focus
+
+
+class SubjectMetrics(BaseModel):
+    """SigLIP zero-shot + emotion model — subjective signal."""
+    # readability
+    subject_clarity:        Optional[float] = None  # SigLIP: clear subject vs ambiguous frame
+    mood_clarity:           Optional[float] = None  # SigLIP: immediate emotional tone clarity
+    one_sec_comprehension:  Optional[float] = None  # SigLIP: immediately understandable
+    # thumbnail potency
+    thumbnail_strength:     Optional[float] = None  # SigLIP: compelling at small size
+    portfolio_potential:    Optional[float] = None  # SigLIP: portfolio/showreel hero frame
+    graphic_simplicity:     Optional[float] = None  # SigLIP: graphically simple and strong
+    # human moment
+    facial_emotion_intensity:Optional[float]= None  # emotion model: peak emotion confidence
+    dominant_emotion:        Optional[str]  = None  # emotion label (happy/sad/neutral/etc.)
+    gesture_readability:     Optional[float] = None  # SigLIP: clear body language
+    presence_signal:         Optional[float] = None  # SigLIP: screen presence / charisma
+    gaze_direction_score:    Optional[float] = None  # lead_room proxy (already in composition)
+    silhouette_readability:  Optional[float] = None  # SigLIP: strong silhouette read
+    # world/mood
+    atmosphere_mood:        Optional[float] = None  # SigLIP: cohesive atmosphere/world
+
+
 class ColorMetrics(BaseModel):
     wb_deviation:         Optional[float] = None   # white balance error
     wb_cross_scene_var:   Optional[float] = None
@@ -117,6 +161,11 @@ class ColorMetrics(BaseModel):
     chroma_noise:         Optional[float] = None   # noise in a* b* channels
     banding_score:        Optional[float] = None   # banding artifact proxy
     color_temp_variance:  Optional[float] = None   # cross-scene color temp variance
+    # --- colour design ---
+    complementary_use:    Optional[float] = None   # complementary hue pair presence (0-100)
+    analogous_use:        Optional[float] = None   # analogous palette coherence (0-100)
+    warm_cool_contrast:   Optional[float] = None   # warm vs cool pixel area ratio distance
+    color_separation:     Optional[float] = None   # inter-region colour distinguishability
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +188,14 @@ class QualityMetrics(BaseModel):
     vmaf:                  Optional[float] = None   # optional QC pack - requires reference
     psnr_qc:               Optional[float] = None   # optional QC pack - requires reference
     ssim_qc:               Optional[float] = None   # optional QC pack - requires reference
+    # --- production artifact detection ---
+    over_sharpening:       Optional[float] = None   # halo energy around edges (0=clean,100=bad)
+    dead_pixel_score:      Optional[float] = None   # isolated extreme pixels (0=clean,100=bad)
+    rolling_shutter_wobble:Optional[float] = None   # non-uniform horizontal flow distortion
+    moire_score:           Optional[float] = None   # periodic high-freq FFT pattern energy
+    ai_upscaling_artifact: Optional[float] = None   # texture anomaly + edge pattern score
+    dirty_lens_score:      Optional[float] = None   # diffuse low-freq blob in frame edge
+    unwanted_reflection:   Optional[float] = None   # specular patch inconsistency score
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +247,8 @@ class FrameMetrics(BaseModel):
     color:       ColorMetrics       = Field(default_factory=ColorMetrics)
     quality:     QualityMetrics     = Field(default_factory=QualityMetrics)
     narrative:   NarrativeMetrics   = Field(default_factory=NarrativeMetrics)
+    focus:       FocusMetrics       = Field(default_factory=FocusMetrics)
+    subject:     SubjectMetrics     = Field(default_factory=SubjectMetrics)
     inference:   InferenceOutputs   = Field(default_factory=InferenceOutputs)
 
     metrics_version: str = "1.0"   # bump when metric definitions change

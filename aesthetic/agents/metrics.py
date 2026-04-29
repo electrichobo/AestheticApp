@@ -208,6 +208,48 @@ def _compute_exposure(bgr: np.ndarray) -> ExposureMetrics:
     spread_score = min(100.0, (std / 64.0) * 100.0)
     exposure_intent = round(max(0.0, spread_score - intent_penalty), 2)
 
+    # --- Exposure refinement metrics ---
+    hist_full, _ = np.histogram(gray.flatten(), bins=256, range=(0, 256))
+
+    # Highlight rolloff: smoothness of shoulder (bins 210-255)
+    shoulder_bins = hist_full[210:256].astype(float)
+    if shoulder_bins.sum() > 1:
+        s_norm  = shoulder_bins / shoulder_bins.sum()
+        s_grads = np.abs(np.diff(s_norm))
+        highlight_rolloff = round(float(np.clip((1.0 - s_grads.max() / 0.05) * 100, 0, 100)), 1)
+    else:
+        highlight_rolloff = 100.0  # clean/no highlights
+
+    # Midtone separation: spread in midband 85-170
+    mid_bins = hist_full[85:170].astype(float)
+    if mid_bins.sum() > 0:
+        mid_n = mid_bins / mid_bins.sum()
+        m_idx = np.arange(len(mid_bins))
+        m_mu  = float(np.sum(m_idx * mid_n))
+        m_std = float(np.sqrt(np.sum(((m_idx - m_mu) ** 2) * mid_n)))
+        midtone_separation = round(float(np.clip(m_std / 42.5 * 100, 0, 100)), 1)
+    else:
+        midtone_separation = 0.0
+
+    # Toe character: shadow curve gradient variance (bins 0-45)
+    toe_bins = hist_full[0:45].astype(float)
+    if toe_bins.sum() > 0:
+        t_n   = toe_bins / toe_bins.sum()
+        t_std = float(np.std(np.diff(t_n)))
+        toe_character = round(float(np.clip((1.0 - t_std * 30) * 100, 0, 100)), 1)
+    else:
+        toe_character = 50.0
+
+    # Shoulder character: highlight curve gradient variance (bins 210-255)
+    if shoulder_bins.sum() > 0:
+        s_n   = shoulder_bins / shoulder_bins.sum()
+        s_std = float(np.std(np.diff(s_n)))
+        shoulder_character = round(float(np.clip((1.0 - s_std * 30) * 100, 0, 100)), 1)
+    else:
+        shoulder_character = 50.0
+
+    # skin_ire_placement and flicker_score require per-shot context — set at aggregation
+
     return ExposureMetrics(
         histogram_mean=round(mean, 2),
         histogram_median=round(median, 2),
@@ -222,6 +264,10 @@ def _compute_exposure(bgr: np.ndarray) -> ExposureMetrics:
         snr_luma=snr_luma,
         snr_chroma=snr_chroma,
         exposure_intent=exposure_intent,
+        highlight_rolloff=highlight_rolloff,
+        midtone_separation=midtone_separation,
+        toe_character=toe_character,
+        shoulder_character=shoulder_character,
     )
 
 
@@ -313,6 +359,36 @@ def _compute_lighting(bgr: np.ndarray) -> LightingMetrics:
     # high std across quadrants = directional, motivated light
     light_motivation = round(min(100.0, q_std / 30.0 * 100.0), 2)
 
+    # Lighting complexity: estimate number of distinct light source directions
+    # via number of distinct gradient orientation clusters in bright regions
+    lighting_complexity = 0.0
+    try:
+        gray_l = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        bright_mask = gray_l > 180
+        if bright_mask.sum() > 100:
+            gx = cv2.Sobel(gray_l.astype(np.float32), cv2.CV_32F, 1, 0, ksize=3)
+            gy = cv2.Sobel(gray_l.astype(np.float32), cv2.CV_32F, 0, 1, ksize=3)
+            angles = np.degrees(np.arctan2(gy[bright_mask], gx[bright_mask])) % 180
+            hist_a, _ = np.histogram(angles, bins=12, range=(0, 180))
+            # More non-zero bins = more distinct light directions = more complex lighting
+            n_peaks = int(np.sum(hist_a > hist_a.mean()))
+            lighting_complexity = round(float(np.clip(n_peaks / 12 * 100, 0, 100)), 1)
+    except Exception:
+        pass
+
+    # Atmosphere density: haze/fog/smoke via contrast reduction at depth edges
+    # Proxy: low frequency energy ratio (scattering reduces high-freq detail)
+    atmosphere_density = 0.0
+    try:
+        gray_a = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        # Low-pass: blur then compare to original — more blur tolerance = more haze
+        blurred = cv2.GaussianBlur(gray_a, (21, 21), 0)
+        diff    = float(np.mean(np.abs(gray_a - blurred)))
+        # Low diff = low high-freq detail = atmospheric haze signal
+        atmosphere_density = round(float(np.clip((1.0 - diff / 30.0) * 100, 0, 100)), 1)
+    except Exception:
+        pass
+
     return LightingMetrics(
         dynamic_range_stops=dr_stops,
         key_fill_ratio=key_fill,
@@ -322,6 +398,8 @@ def _compute_lighting(bgr: np.ndarray) -> LightingMetrics:
         shadow_noise=shadow_noise,
         transition_hardness=transition_hardness,
         light_motivation=light_motivation,
+        lighting_complexity=lighting_complexity,
+        atmosphere_density=atmosphere_density,
     )
 
 
@@ -402,6 +480,33 @@ def _compute_composition(bgr: np.ndarray) -> CompositionMetrics:
     # high variance in low-frequency bands suggests depth separation
     depth_separation = _estimate_depth_separation(gray)
 
+    # Depth plane count: distinct depth layers using luminance proxy
+    # (MiDaS gives better result — this is a fast fallback)
+    depth_plane_count = 0.0
+    try:
+        gray_c = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        # Simple depth proxy: quantise luma into bands, count non-empty bands
+        hist_d, _ = np.histogram(gray_c.ravel(), bins=5, range=(0, 256))
+        n_planes  = int(np.sum(hist_d > gray_c.size * 0.03))
+        depth_plane_count = round(float(n_planes / 5 * 100), 1)
+    except Exception:
+        pass
+
+    # Silhouette clarity: subject edge contrast vs background
+    silhouette_clarity = 0.0
+    try:
+        gray_s = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        # Canny edges + mean gradient magnitude
+        edges_s = cv2.Canny(gray_s, 50, 150)
+        gx = cv2.Sobel(gray_s.astype(np.float32), cv2.CV_32F, 1, 0)
+        gy = cv2.Sobel(gray_s.astype(np.float32), cv2.CV_32F, 0, 1)
+        mag_s = np.sqrt(gx**2 + gy**2)
+        if edges_s.sum() > 0:
+            edge_contrast = float(mag_s[edges_s > 0].mean())
+            silhouette_clarity = round(float(np.clip(edge_contrast / 80 * 100, 0, 100)), 1)
+    except Exception:
+        pass
+
     return CompositionMetrics(
         rule_of_thirds=rule_of_thirds,
         face_placement=face_placement,
@@ -415,6 +520,8 @@ def _compute_composition(bgr: np.ndarray) -> CompositionMetrics:
         headroom=headroom,
         lead_room=lead_room,
         frame_balance=frame_balance,
+        depth_plane_count=depth_plane_count,
+        silhouette_clarity=silhouette_clarity,
     )
 
 
@@ -691,6 +798,80 @@ def _compute_color(bgr: np.ndarray) -> ColorMetrics:
     L_mean  = float(np.mean(L))
     delta_e = _compute_delta_e2000(L_mean, a_mean, b_mean, L_mean, 0.0, 0.0)
 
+    # --- Colour design metrics ---
+    lab_c = cv2.cvtColor(bgr, cv2.COLOR_BGR2Lab).astype(np.float32)
+    a_ch  = lab_c[:, :, 1]  # a* axis (-128 to 127 in float)
+    b_ch  = lab_c[:, :, 2]  # b* axis
+
+    # Hue angle of mean colour
+    mean_a = float(a_ch.mean())
+    mean_b = float(b_ch.mean())
+    mean_hue = (np.degrees(np.arctan2(mean_b, mean_a)) % 360)
+
+    # Warm-cool contrast: ratio of warm pixels (hue 0-60 & 300-360) vs cool (180-300)
+    warm_cool_contrast = 0.0
+    try:
+        hsv_c = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
+        hue_c = hsv_c[:, :, 0] * 2  # OpenCV hue is 0-180 -> scale to 0-360
+        warm  = float(np.mean((hue_c < 60) | (hue_c > 300)))
+        cool  = float(np.mean((hue_c > 180) & (hue_c < 300)))
+        balance = abs(warm - cool)
+        warm_cool_contrast = round(float(np.clip(balance * 200, 0, 100)), 1)
+    except Exception:
+        pass
+
+    # Complementary colour use: check for hue pairs ~180° apart
+    complementary_use = 0.0
+    try:
+        hsv_comp = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+        h_flat   = hsv_comp[:, :, 0].flatten().astype(float) * 2  # 0-360
+        s_flat   = hsv_comp[:, :, 1].flatten()
+        # Only saturated pixels (s > 60) contribute
+        sat_mask = s_flat > 60
+        if sat_mask.sum() > 100:
+            h_sat = h_flat[sat_mask]
+            hist_h, _ = np.histogram(h_sat, bins=36, range=(0, 360))
+            hist_h = hist_h.astype(float) / hist_h.sum()
+            # Check complementary pairs (bins 18 apart = ~180°)
+            comp_score = max(float(hist_h[i] * hist_h[(i + 18) % 36]) for i in range(36))
+            complementary_use = round(float(np.clip(comp_score * 5000, 0, 100)), 1)
+    except Exception:
+        pass
+
+    # Analogous colour use: palette concentrated within 60° arc
+    analogous_use = 0.0
+    try:
+        hsv_an  = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+        h_an    = hsv_an[:, :, 0].flatten().astype(float) * 2
+        s_an    = hsv_an[:, :, 1].flatten()
+        sat_m   = s_an > 60
+        if sat_m.sum() > 100:
+            h_sat_a = h_an[sat_m]
+            hist_a, _ = np.histogram(h_sat_a, bins=36, range=(0, 360))
+            hist_a    = hist_a.astype(float) / hist_a.sum()
+            # Find max 3-bin window (60° arc)
+            max_window = max(sum(hist_a[i:i+3]) for i in range(34))
+            analogous_use = round(float(np.clip(max_window * 150, 0, 100)), 1)
+    except Exception:
+        pass
+
+    # Colour separation: distinguishability between dominant regions
+    color_separation = 0.0
+    try:
+        from sklearn.cluster import MiniBatchKMeans
+        pixels = bgr.reshape(-1, 3).astype(np.float32)
+        sample = pixels[np.random.choice(len(pixels), min(2000, len(pixels)), replace=False)]
+        km     = MiniBatchKMeans(n_clusters=3, n_init=3, random_state=42)
+        km.fit(sample)
+        centres = km.cluster_centers_
+        diffs   = []
+        for i in range(len(centres)):
+            for j in range(i+1, len(centres)):
+                diffs.append(float(np.linalg.norm(centres[i] - centres[j])))
+        color_separation = round(float(np.clip(np.mean(diffs) / 255 * 100, 0, 100)), 1)
+    except Exception:
+        pass
+
     return ColorMetrics(
         wb_deviation=wb_deviation,
         saturation_mean=sat_mean,
@@ -700,6 +881,10 @@ def _compute_color(bgr: np.ndarray) -> ColorMetrics:
         chroma_noise=chroma_noise,
         banding_score=banding,
         color_accuracy_de2000=delta_e,
+        warm_cool_contrast=warm_cool_contrast,
+        complementary_use=complementary_use,
+        analogous_use=analogous_use,
+        color_separation=color_separation,
     )
 
 
@@ -846,6 +1031,81 @@ def _compute_quality(bgr: np.ndarray) -> QualityMetrics:
     # texture retention — local SSIM on high-texture regions
     texture_retention = _measure_texture_retention(gray)
 
+    # --- Production artifact detection ---
+
+    # Over-sharpening: halo energy — bimodal sign-change at edges
+    over_sharpening = 0.0
+    try:
+        laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+        edge_mask = np.abs(laplacian) > np.percentile(np.abs(laplacian), 90)
+        if edge_mask.sum() > 100:
+            halo_energy = float(np.std(laplacian[edge_mask]))
+            over_sharpening = round(float(np.clip((halo_energy - 15) / 35 * 100, 0, 100)), 1)
+    except Exception:
+        pass
+
+    # Dead pixel detection: isolated extreme pixels vs median neighbourhood
+    dead_pixel_score = 0.0
+    try:
+        median_blur  = cv2.medianBlur(gray, 5)
+        diff         = np.abs(gray.astype(np.int32) - median_blur.astype(np.int32))
+        dead_pct     = float((diff > 100).sum()) / max(gray.size, 1) * 100
+        dead_pixel_score = round(float(np.clip(dead_pct * 500, 0, 100)), 2)
+    except Exception:
+        pass
+
+    # Moiré / aliasing: concentrated energy in FFT outer band
+    moire_score = 0.0
+    try:
+        h_f, w_f = gray.shape
+        fft_in   = gray[:min(h_f, 512), :min(w_f, 512)].astype(np.float64)
+        fft_s    = np.fft.fftshift(np.fft.fft2(fft_in))
+        mag      = np.abs(fft_s)
+        cy, cx   = mag.shape[0] // 2, mag.shape[1] // 2
+        r_max    = min(cy, cx)
+        y_g, x_g = np.ogrid[:mag.shape[0], :mag.shape[1]]
+        r_grid   = np.sqrt((y_g - cy) ** 2 + (x_g - cx) ** 2)
+        outer    = (r_grid > r_max * 0.4) & (r_grid < r_max * 0.9)
+        if outer.sum() > 0 and mag.mean() > 0:
+            ratio       = float(mag[outer].mean() / mag.mean())
+            moire_score = round(float(np.clip((ratio - 0.3) / 0.7 * 100, 0, 100)), 1)
+    except Exception:
+        pass
+
+    # Dirty lens: diffuse dark blob at frame edges vs centre
+    dirty_lens_score = 0.0
+    try:
+        small   = cv2.resize(gray, (64, 64)).astype(float)
+        centre  = float(small[24:40, 24:40].mean())
+        edges_q = min(small[:8, :].mean(), small[-8:, :].mean(),
+                      small[:, :8].mean(), small[:, -8:].mean())
+        darkness = float(np.clip((centre - edges_q) / max(centre, 1) * 100, 0, 100))
+        dirty_lens_score = round(darkness * 0.5, 1)
+    except Exception:
+        pass
+
+    # Unwanted reflection: bright isolated region inconsistent with flare
+    unwanted_reflection = 0.0
+    try:
+        _, bright = cv2.threshold(gray, 220, 255, cv2.THRESH_BINARY)
+        bright_pct = float(bright.sum()) / max(gray.size * 255, 1) * 100
+        if bright_pct > 2 and (flare or 0) < 1:
+            unwanted_reflection = round(float(np.clip((bright_pct - 2) * 10, 0, 100)), 1)
+    except Exception:
+        pass
+
+    # AI upscaling: high edge density + low texture = upscaling signature
+    ai_upscaling = 0.0
+    try:
+        edge_count = float(cv2.Canny(gray, 50, 150).sum()) / max(gray.size * 255, 1) * 100
+        tex        = texture_retention or 50.0
+        if tex < 70 and edge_count > 3:
+            ai_upscaling = round(float(np.clip((edge_count - 3) * (70 - tex) / 300, 0, 100)), 1)
+    except Exception:
+        pass
+
+    # rolling_shutter_wobble computed at aggregation (needs optical flow)
+
     return QualityMetrics(
         sharpness_laplacian=lap_var,
         sharpness_edge_density=edge_density,
@@ -859,6 +1119,12 @@ def _compute_quality(bgr: np.ndarray) -> QualityMetrics:
         compression_mosquito=mosquito,
         compression_ringing=ringing,
         texture_retention=texture_retention,
+        over_sharpening=over_sharpening,
+        dead_pixel_score=dead_pixel_score,
+        moire_score=moire_score,
+        dirty_lens_score=dirty_lens_score,
+        unwanted_reflection=unwanted_reflection,
+        ai_upscaling_artifact=ai_upscaling,
     )
 
 
