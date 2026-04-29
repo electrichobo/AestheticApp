@@ -74,30 +74,55 @@ def _get_cpu_text_model():
 
 def _encode_text_safe(model, tokenizer, prompts: list, device: str, model_name: str):
     """
-    Encode text prompts on CPU using the lightweight ViT-B-32 text encoder.
-    Image features from the main model are moved to CPU for similarity,
-    then the result is returned on the requested device.
-
-    Results are cached — each unique prompt set is encoded exactly once.
-    Works on any hardware: NVIDIA/AMD/Intel GPU or CPU-only.
+    Encode text prompts using the CPU ViT-B-32 model.
+    Always returns CPU tensors — callers must NOT move to GPU.
+    Results cached per (model_name, prompts).
     """
     import torch
     cache_key = (model_name, tuple(prompts))
     if cache_key in _TEXT_FEAT_CACHE:
-        return _TEXT_FEAT_CACHE[cache_key].to(device)
+        return _TEXT_FEAT_CACHE[cache_key]  # always CPU
 
     cpu_model, cpu_tok = _get_cpu_text_model()
     if cpu_model is None:
-        # no CPU model available — skip text encoding
         return None
 
     with torch.no_grad():
-        tokens   = cpu_tok(prompts)          # CPU tensor, ViT-B-32 context (77)
-        txt_feat = cpu_model.encode_text(tokens)  # CPU computation only
+        tokens   = cpu_tok(prompts)
+        txt_feat = cpu_model.encode_text(tokens)
         txt_feat = txt_feat / txt_feat.norm(dim=-1, keepdim=True)
 
     _TEXT_FEAT_CACHE[cache_key] = txt_feat.cpu()
-    return txt_feat.to(device)
+    return txt_feat.cpu()
+
+
+def _encode_image_for_cls(frame_path: str) -> "Optional[torch.Tensor]":
+    """
+    Encode a frame image using the CPU ViT-B-32 model for classification.
+    Returns a CPU tensor. This keeps image and text features in the same
+    512-dim ViT-B-32 space so cosine similarity is valid.
+
+    The main SigLIP model encodes images separately for baseline similarity —
+    this is only for zero-shot scale/scene/intent classification.
+    """
+    import torch
+    from PIL import Image
+
+    cpu_model, cpu_tok = _get_cpu_text_model()
+    if cpu_model is None:
+        return None
+    if _CPU_TEXT_PREP is None:
+        return None
+
+    try:
+        img    = Image.open(frame_path).convert("RGB")
+        tensor = _CPU_TEXT_PREP(img).unsqueeze(0)  # already on CPU
+        with torch.no_grad():
+            img_feat = cpu_model.encode_image(tensor)
+            img_feat = img_feat / img_feat.norm(dim=-1, keepdim=True)
+        return img_feat.cpu()
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -385,17 +410,17 @@ def _scale_from_clip(
         model_name, _ = _mu_best_model()
         tokenizer = _mu_get_tokenizer(model_name)
 
-        img    = Image.open(frame_path).convert("RGB")
-        tensor = preprocess(img).unsqueeze(0).to(device)
+        # Use CPU ViT-B-32 for BOTH image and text — same embedding space
+        img_feat = _encode_image_for_cls(frame_path)
+        if img_feat is None:
+            return ShotScale.UNKNOWN, 0.0
+        txt_feat = _encode_text_safe(model, tokenizer, prompts, device, model_name)
+        if txt_feat is None:
+            return ShotScale.UNKNOWN, 0.0
 
+        import torch
         with torch.no_grad():
-            img_feat = model.encode_image(tensor)
-            img_feat = img_feat / img_feat.norm(dim=-1, keepdim=True)
-            txt_feat = _encode_text_safe(model, tokenizer, prompts, device, model_name)
-            if txt_feat is None:
-                return ShotScale.UNKNOWN, 0.0
-            # txt_feat is from CPU model — move img_feat to same device for matmul
-            sims  = (img_feat.to(txt_feat.device) @ txt_feat.T).squeeze(0)
+            sims  = (img_feat @ txt_feat.T).squeeze(0)
             probs = sims.softmax(dim=-1).cpu().numpy()
 
         best_idx  = int(np.argmax(probs))
@@ -497,27 +522,21 @@ def _classify_scene_clip(
         model_name, _ = _mu_best_model()
         tokenizer = _mu_get_tokenizer(model_name)
 
-        img    = Image.open(frame_path).convert("RGB")
-        tensor = preprocess(img).unsqueeze(0).to(device)
+        labels   = list(SCENE_TYPE_PROMPTS_MULTI.keys())
+        img_feat = _encode_image_for_cls(frame_path)
+        if img_feat is None:
+            return SceneType.UNKNOWN, 0.0
 
-        labels = list(SCENE_TYPE_PROMPTS_MULTI.keys())
-
+        import torch
         with torch.no_grad():
-            img_feat = model.encode_image(tensor)
-            img_feat = img_feat / img_feat.norm(dim=-1, keepdim=True)
-
             class_scores = []
             for scene_type in labels:
-                prompts = SCENE_TYPE_PROMPTS_MULTI[scene_type]
-                # Tokenize and encode text — keep on CPU, then move to device.
-                # The tokenizer wrapper already enforces the correct context
-                # length (64 for SigLIP, 77 for CLIP) via tensor slicing.
+                prompts  = SCENE_TYPE_PROMPTS_MULTI[scene_type]
                 txt_feat = _encode_text_safe(model, tokenizer, prompts, device, model_name)
                 if txt_feat is None:
                     class_scores.append(0.0)
                     continue
-                # txt_feat from CPU model — match devices
-                sims = (img_feat.to(txt_feat.device) @ txt_feat.T).squeeze(0)
+                sims = (img_feat @ txt_feat.T).squeeze(0)
                 class_scores.append(float(sims.mean().item()))
 
         scores = np.array(class_scores)
@@ -630,17 +649,17 @@ def _classify_intent_clip(
         model_name, _ = _mu_best_model()
         tokenizer = _mu_get_tokenizer(model_name)
 
-        img    = Image.open(frame_path).convert("RGB")
-        tensor = preprocess(img).unsqueeze(0).to(device)
+        # Use CPU ViT-B-32 for BOTH image and text — same embedding space
+        img_feat = _encode_image_for_cls(frame_path)
+        if img_feat is None:
+            return "unknown", 0.0
+        txt_feat = _encode_text_safe(model, tokenizer, prompts, device, model_name)
+        if txt_feat is None:
+            return "unknown", 0.0
 
+        import torch
         with torch.no_grad():
-            img_feat = model.encode_image(tensor)
-            img_feat = img_feat / img_feat.norm(dim=-1, keepdim=True)
-            txt_feat = _encode_text_safe(model, tokenizer, prompts, device, model_name)
-            if txt_feat is None:
-                return "unknown", 0.0
-            # txt_feat from CPU model — match devices
-            sims  = (img_feat.to(txt_feat.device) @ txt_feat.T).squeeze(0)
+            sims  = (img_feat @ txt_feat.T).squeeze(0)
             probs = sims.softmax(dim=-1).cpu().numpy()
 
         best_idx = int(np.argmax(probs))
