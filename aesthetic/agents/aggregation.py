@@ -422,14 +422,61 @@ def _point_in_triangle(px, py, ax, ay, bx, by, cx, cy) -> bool:
     return not (has_neg and has_pos)
 
 
+def _xy_from_bgr(img: np.ndarray) -> "Optional[np.ndarray]":
+    """Convert a BGR image to xy chromaticity array, filtering dark pixels."""
+    small  = cv2.resize(img, (32, 32), interpolation=cv2.INTER_AREA)
+    pixels = small.reshape(-1, 3).astype(np.float32) / 255.0
+    linear = np.where(pixels <= 0.04045, pixels / 12.92,
+                      ((pixels + 0.055) / 1.055) ** 2.4)
+    linear = linear[:, ::-1]  # BGR → RGB
+    xyz    = linear @ _SRGB_TO_XYZ.T
+    xyz_sum = xyz.sum(axis=1, keepdims=True) + 1e-8
+    xy     = xyz[:, :2] / xyz_sum
+    Y      = xyz[:, 1]
+    mask   = Y > 0.005
+    return xy[mask] if mask.any() else None
+
+
+def _kmeans_xy(xy_pts: np.ndarray, k: int = 4, seed: int = 42) -> tuple:
+    """Mini k-means in xy space. Returns (centres, weights)."""
+    k   = min(k, len(xy_pts))
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(len(xy_pts), k, replace=False)
+    centres = xy_pts[idx].copy()
+    labels  = np.zeros(len(xy_pts), dtype=int)
+    for _ in range(15):
+        diffs  = xy_pts[:, None, :] - centres[None, :, :]
+        labels = np.argmin(np.sum(diffs ** 2, axis=2), axis=1)
+        new_c  = np.array([
+            xy_pts[labels == i].mean(axis=0) if np.any(labels == i) else centres[i]
+            for i in range(k)
+        ])
+        if np.allclose(centres, new_c, atol=0.001):
+            break
+        centres = new_c
+    sizes   = [int(np.sum(labels == i)) for i in range(k)]
+    total   = max(1, sum(sizes))
+    weights = [round(s / total, 3) for s in sizes]
+    return centres, weights
+
+
 def _collect_gamut_data(frames: List[FrameMetrics]) -> Dict[str, Any]:
     """
     Collect xy chromaticity data from frame image files for the gamut chart.
-
-    Converts sampled pixels BGR → linear RGB → XYZ D65 → xy chromaticity.
-    Returns dominant colour clusters in xy space plus gamut coverage percentages.
+    Returns:
+      - dominant_colours: 8 aggregate clusters across all frames (for backward compat)
+      - per_frame_colours: list of per-frame cluster arrays — one entry per valid frame
+      - gamut_coverage: % of pixels inside each gamut triangle
+      - waveform: per-column percentile bands for luma and R/G/B channels
     """
-    all_xy: List[np.ndarray] = []
+    all_xy:        List[np.ndarray] = []
+    per_frame_xy:  List[list]       = []   # per-frame 4-cluster sets
+    waveform_cols: List[np.ndarray] = []   # per-frame column luma arrays
+    parade_cols_r: List[np.ndarray] = []
+    parade_cols_g: List[np.ndarray] = []
+    parade_cols_b: List[np.ndarray] = []
+
+    N_COLS = 64  # waveform resolution
 
     for f in frames:
         if not f.frame_path or not Path(f.frame_path).exists():
@@ -439,30 +486,27 @@ def _collect_gamut_data(frames: List[FrameMetrics]) -> Dict[str, Any]:
             if img is None:
                 continue
 
-            # downsample aggressively for speed — 32×32 is enough for colour stats
-            small = cv2.resize(img, (32, 32), interpolation=cv2.INTER_AREA)
-            pixels = small.reshape(-1, 3).astype(np.float32) / 255.0
+            # --- chromaticity ---
+            xy = _xy_from_bgr(img)
+            if xy is not None:
+                all_xy.append(xy)
+                centres, weights = _kmeans_xy(xy, k=4)
+                per_frame_xy.append([
+                    [round(float(c[0]), 4), round(float(c[1]), 4), w]
+                    for c, w in zip(centres, weights)
+                ])
 
-            # sRGB gamma removal → linear RGB
-            linear = np.where(pixels <= 0.04045,
-                              pixels / 12.92,
-                              ((pixels + 0.055) / 1.055) ** 2.4)
-
-            # BGR → RGB
-            linear = linear[:, ::-1]
-
-            # linear RGB → XYZ D65
-            xyz = linear @ _SRGB_TO_XYZ.T
-
-            # XYZ → xy chromaticity (avoid division by zero)
-            xyz_sum = xyz.sum(axis=1, keepdims=True) + 1e-8
-            xy = xyz[:, :2] / xyz_sum
-
-            # filter out near-zero luminance (very dark pixels)
-            Y = xyz[:, 1]
-            mask = Y > 0.005
-            if mask.any():
-                all_xy.append(xy[mask])
+            # --- waveform data ---
+            # resize to N_COLS wide, keep height for column sampling
+            wf_h = min(img.shape[0], 128)
+            wf   = cv2.resize(img, (N_COLS, wf_h), interpolation=cv2.INTER_AREA)
+            gray = cv2.cvtColor(wf, cv2.COLOR_BGR2GRAY).astype(np.float32)
+            # luma as IRE (0-100)
+            waveform_cols.append(gray / 255.0 * 100.0)
+            # R/G/B channels (BGR order from OpenCV)
+            parade_cols_b.append(wf[:, :, 0].astype(np.float32) / 255.0 * 100.0)
+            parade_cols_g.append(wf[:, :, 1].astype(np.float32) / 255.0 * 100.0)
+            parade_cols_r.append(wf[:, :, 2].astype(np.float32) / 255.0 * 100.0)
 
         except Exception:
             continue
@@ -472,45 +516,46 @@ def _collect_gamut_data(frames: List[FrameMetrics]) -> Dict[str, Any]:
 
     xy_all = np.vstack(all_xy)
 
-    # k-means clustering in xy space (k=8 colour clusters)
-    k = min(8, len(xy_all))
-    rng = np.random.default_rng(42)
-    idx = rng.choice(len(xy_all), k, replace=False)
-    centres = xy_all[idx].copy()
+    # aggregate 8-cluster for dominant_colours (backward compat)
+    centres8, weights8 = _kmeans_xy(xy_all, k=8, seed=42)
 
-    for _ in range(20):
-        diffs  = xy_all[:, None, :] - centres[None, :, :]
-        dists  = np.sum(diffs**2, axis=2)
-        labels = np.argmin(dists, axis=1)
-        new_c  = np.array([
-            xy_all[labels == i].mean(axis=0) if np.any(labels == i) else centres[i]
-            for i in range(k)
-        ])
-        if np.allclose(centres, new_c, atol=0.001):
-            break
-        centres = new_c
-
-    # cluster sizes (for point sizing in chart)
-    sizes = [int(np.sum(labels == i)) for i in range(k)]
-    total = max(1, sum(sizes))
-    weights = [round(s / total, 3) for s in sizes]
-
-    # gamut coverage — what % of pixels fall inside each gamut triangle
+    # gamut coverage
     gamut_coverage = {}
     for gamut_name, primaries in _GAMUT_PRIMARIES.items():
         rx, ry = primaries["r"]
         gx, gy = primaries["g"]
         bx, by = primaries["b"]
-        inside = sum(
-            1 for x, y in xy_all
-            if _point_in_triangle(x, y, rx, ry, gx, gy, bx, by)
-        )
+        inside = sum(1 for x, y in xy_all
+                     if _point_in_triangle(x, y, rx, ry, gx, gy, bx, by))
         gamut_coverage[gamut_name] = round(inside / len(xy_all) * 100.0, 1)
 
+    # waveform: average percentile bands across frames for each column
+    def _col_bands(stacked: List[np.ndarray]) -> list:
+        """For each of N_COLS columns, compute [p5,p25,p50,p75,p95] across all frame rows."""
+        if not stacked:
+            return []
+        arr = np.concatenate(stacked, axis=0)  # all rows from all frames, N_COLS wide
+        bands = []
+        for c in range(N_COLS):
+            col = arr[:, c]
+            bands.append([
+                round(float(np.percentile(col, 5)),  1),
+                round(float(np.percentile(col, 25)), 1),
+                round(float(np.percentile(col, 50)), 1),
+                round(float(np.percentile(col, 75)), 1),
+                round(float(np.percentile(col, 95)), 1),
+            ])
+        return bands
+
     return {
-        "dominant_colours": [[round(float(c[0]), 4), round(float(c[1]), 4), w]
-                              for c, w in zip(centres, weights)],
-        "gamut_coverage":   gamut_coverage,
+        "dominant_colours":  [[round(float(c[0]),4), round(float(c[1]),4), w]
+                               for c, w in zip(centres8, weights8)],
+        "per_frame_colours": per_frame_xy,
+        "gamut_coverage":    gamut_coverage,
+        "waveform":          _col_bands(waveform_cols),
+        "parade_r":          _col_bands(parade_cols_r),
+        "parade_g":          _col_bands(parade_cols_g),
+        "parade_b":          _col_bands(parade_cols_b),
     }
 
 

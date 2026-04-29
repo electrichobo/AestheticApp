@@ -1350,6 +1350,11 @@ def _build_ui_shots(selected: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "deltaEBaseline":   s.get("delta_e_baseline"),
             "gamutCoverage":    s.get("gamut_coverage"),
             "dominantColours":  s.get("dominant_colours"),
+            "perFrameColours":  s.get("per_frame_colours"),
+            "waveform":         s.get("waveform"),
+            "paradeR":          s.get("parade_r"),
+            "paradeG":          s.get("parade_g"),
+            "paradeB":          s.get("parade_b"),
             "skinToneDetected": s.get("skin_tone_detected", False),
         })
     return ui_shots

@@ -746,11 +746,11 @@ def _compute_focus_metrics(
                 else:
                     fm.catchlight_quality = 0.0
 
-    # Gaze direction already captured in lead_room — mirror it
-    if frame_metrics.composition and frame_metrics.composition.lead_room is not None:
-        fm.gaze_direction_score = frame_metrics.composition.lead_room
-
     frame_metrics.focus = fm
+
+    # Gaze direction lives on SubjectMetrics — set after focus is done
+    if frame_metrics.composition and frame_metrics.composition.lead_room is not None:
+        frame_metrics.subject.gaze_direction_score = frame_metrics.composition.lead_room
 
 
 # ---------------------------------------------------------------------------

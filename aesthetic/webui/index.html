@@ -799,7 +799,11 @@ function toggleShotDetail(i){
     // render CIE chart after DOM is visible
     const shotId = i + 1;
     const shot = (lastResults?.shots || [])[i];
-    if(shot) requestAnimationFrame(() => renderCIEChart('cie-'+shotId, shot));
+    if(shot) requestAnimationFrame(() => {
+      renderCIEChart('cie-'+shotId, shot);
+      if(shot.waveform) renderWaveform('wf-'+shotId, shot);
+      if(shot.paradeR)  renderParade('par-'+shotId, shot);
+    });
   }
 }
 
@@ -889,9 +893,10 @@ function buildDetailPanel(s){
   const deB    = s.deltaEBaseline != null ? Number(s.deltaEBaseline).toFixed(2) : '—';
   const skin   = s.skinToneDetected ? '<span class="text-pink-400 ml-2 text-xs">● face detected</span>' : '';
 
+  const hasWaveform = s.waveform && s.waveform.length > 0;
   const colourSection = `<div class="mb-3 p-3 bg-gray-800/60 rounded border border-gray-700/50">
     <div class="text-xs font-semibold text-pink-400 uppercase tracking-wide mb-2">Colour Analysis${skin}</div>
-    <div class="grid grid-cols-2 gap-4 text-xs">
+    <div class="grid grid-cols-2 gap-4 text-xs mb-3">
       <div>
         <div class="text-gray-500 mb-1">ΔE2000 Colour Accuracy</div>
         <div class="mb-1">vs D65 neutral: <span class="${deC(deD)}">${deD}</span>
@@ -900,7 +905,7 @@ function buildDetailPanel(s){
       </div>
       <div>
         <div class="text-gray-500 mb-1.5">CIE 1931 Chromaticity</div>
-        <canvas id="cie-${s.id}" width="160" height="160"
+        <canvas id="cie-${s.id}" width="180" height="180"
           class="rounded border border-gray-700/50 bg-gray-900"></canvas>
         <div class="mt-1 space-y-0.5 text-xs">
           ${Object.entries(g).map(([k,v]) =>
@@ -913,6 +918,22 @@ function buildDetailPanel(s){
         </div>
       </div>
     </div>
+    ${hasWaveform ? `
+    <div class="border-t border-gray-700/40 pt-3 mt-1">
+      <div class="flex items-center gap-4 mb-1.5">
+        <span class="text-gray-500 text-xs">Waveform (luma)</span>
+        <span class="text-gray-500 text-xs ml-auto">RGB Parade</span>
+      </div>
+      <div class="flex gap-3">
+        <canvas id="wf-${s.id}" width="280" height="100"
+          class="rounded border border-gray-700/50 bg-gray-950 flex-shrink-0"></canvas>
+        <canvas id="par-${s.id}" width="280" height="100"
+          class="rounded border border-gray-700/50 bg-gray-950 flex-1"></canvas>
+      </div>
+      <div class="flex justify-between mt-1 text-gray-700 text-xs">
+        <span>0 IRE</span><span>50 IRE</span><span>100 IRE</span>
+      </div>
+    </div>` : ''}
   </div>`;
 
   const catSections = cats.map(cat => {
@@ -969,27 +990,25 @@ function renderCIEChart(canvasId, shot) {
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
 
-  // mapping from xy (0-0.8 range) to canvas pixels
   const xMin=0.0, xMax=0.78, yMin=0.0, yMax=0.9;
   function toCanvas(x, y) {
     return [
-      Math.round((x - xMin) / (xMax - xMin) * (W - 10) + 5),
-      Math.round(H - 5 - (y - yMin) / (yMax - yMin) * (H - 10))
+      Math.round((x - xMin) / (xMax - xMin) * (W - 12) + 6),
+      Math.round(H - 6 - (y - yMin) / (yMax - yMin) * (H - 12))
     ];
   }
 
-  // draw background grid (subtle)
+  // grid
   ctx.strokeStyle = 'rgba(255,255,255,0.05)';
   ctx.lineWidth = 0.5;
-  for(let i = 0; i <= 8; i++) {
-    const x = xMin + i * (xMax - xMin) / 8;
-    const [cx1] = toCanvas(x, yMin); ctx.beginPath(); ctx.moveTo(cx1, 5); ctx.lineTo(cx1, H-5); ctx.stroke();
-    const y = yMin + i * (yMax - yMin) / 8;
-    const [,cy1] = toCanvas(xMin, y); ctx.beginPath(); ctx.moveTo(5, cy1); ctx.lineTo(W-5, cy1); ctx.stroke();
+  for(let i=0; i<=8; i++) {
+    const [cx] = toCanvas(xMin + i*(xMax-xMin)/8, yMin);
+    ctx.beginPath(); ctx.moveTo(cx,6); ctx.lineTo(cx,H-6); ctx.stroke();
+    const [,cy] = toCanvas(xMin, yMin + i*(yMax-yMin)/8);
+    ctx.beginPath(); ctx.moveTo(6,cy); ctx.lineTo(W-6,cy); ctx.stroke();
   }
 
-  // CIE 1931 spectral locus — simplified boundary points
-  // These are the approximate xy coordinates of the spectral locus (380-700nm)
+  // spectral locus
   const locus = [
     [0.1741,0.0050],[0.1738,0.0049],[0.1736,0.0044],[0.1730,0.0040],
     [0.1726,0.0037],[0.1721,0.0035],[0.1714,0.0033],[0.1703,0.0031],
@@ -1006,65 +1025,186 @@ function renderCIEChart(canvasId, shot) {
     [0.6942,0.1958],[0.7076,0.1839],[0.7190,0.1728],[0.7260,0.1665],
     [0.7300,0.1633],[0.7341,0.1584],[0.1741,0.0050],
   ];
-
-  // draw spectral locus
   ctx.beginPath();
-  locus.forEach(([x,y], i) => {
-    const [cx,cy] = toCanvas(x, y);
-    i === 0 ? ctx.moveTo(cx,cy) : ctx.lineTo(cx,cy);
-  });
-  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
+  locus.forEach(([x,y],i) => { const [cx,cy]=toCanvas(x,y); i===0?ctx.moveTo(cx,cy):ctx.lineTo(cx,cy); });
+  ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.lineWidth=1; ctx.stroke();
 
   // gamut triangles
   const gamuts = {
-    srgb:    {r:[0.64,0.33], g:[0.30,0.60], b:[0.15,0.06], color:'rgba(239,68,68,0.5)'},
-    p3:      {r:[0.68,0.32], g:[0.265,0.69], b:[0.15,0.06], color:'rgba(34,197,94,0.5)'},
-    rec2020: {r:[0.708,0.292], g:[0.17,0.797], b:[0.131,0.046], color:'rgba(59,130,246,0.5)'},
+    srgb:    {r:[0.64,0.33],  g:[0.30,0.60],   b:[0.15,0.06],  col:'rgba(239,68,68,'},
+    p3:      {r:[0.68,0.32],  g:[0.265,0.69],  b:[0.15,0.06],  col:'rgba(34,197,94,'},
+    rec2020: {r:[0.708,0.292],g:[0.17,0.797],  b:[0.131,0.046],col:'rgba(59,130,246,'},
   };
-
   ['rec2020','p3','srgb'].forEach(name => {
-    const gam = gamuts[name];
-    const [rx,ry] = toCanvas(gam.r[0],gam.r[1]);
-    const [gx,gy] = toCanvas(gam.g[0],gam.g[1]);
-    const [bx,by] = toCanvas(gam.b[0],gam.b[1]);
-    ctx.beginPath();
-    ctx.moveTo(rx,ry); ctx.lineTo(gx,gy); ctx.lineTo(bx,by); ctx.closePath();
-    ctx.strokeStyle = gam.color.replace('0.5','0.9');
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.fillStyle = gam.color.replace('0.5','0.08');
-    ctx.fill();
+    const gam=gamuts[name];
+    const [rx,ry]=toCanvas(gam.r[0],gam.r[1]);
+    const [gx,gy]=toCanvas(gam.g[0],gam.g[1]);
+    const [bx,by]=toCanvas(gam.b[0],gam.b[1]);
+    ctx.beginPath(); ctx.moveTo(rx,ry); ctx.lineTo(gx,gy); ctx.lineTo(bx,by); ctx.closePath();
+    ctx.strokeStyle=gam.col+'0.9)'; ctx.lineWidth=1.2; ctx.stroke();
+    ctx.fillStyle=gam.col+'0.06)'; ctx.fill();
   });
 
   // D65 white point
-  const [wx,wy] = toCanvas(0.3127, 0.3290);
+  const [wx,wy]=toCanvas(0.3127,0.3290);
   ctx.beginPath(); ctx.arc(wx,wy,3,0,Math.PI*2);
-  ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.6)'; ctx.fill();
 
-  // dominant colour clusters from shot data
-  const clusters = shot.dominantColours || [];
-  if(clusters.length) {
-    clusters.forEach(([x, y, weight]) => {
-      if(x == null || y == null) return;
+  // Per-frame colour clusters — each frame gets a distinct hue tint
+  const perFrame = shot.perFrameColours || [];
+  const frameHues = [0,30,60,120,180,240,270,300,330,15];  // up to 10 frames
+  if(perFrame.length > 0) {
+    perFrame.forEach((clusters, fi) => {
+      const hue = frameHues[fi % frameHues.length];
+      clusters.forEach(([x, y, w]) => {
+        if(x==null || y==null) return;
+        const [cx,cy] = toCanvas(x, y);
+        const r = Math.max(2, Math.round(w * 14));
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+        ctx.fillStyle = `hsla(${hue},90%,70%,0.65)`;
+        ctx.fill();
+        ctx.strokeStyle = `hsla(${hue},90%,90%,0.4)`;
+        ctx.lineWidth = 0.5; ctx.stroke();
+      });
+    });
+  } else {
+    // fallback: aggregate clusters in yellow
+    const clusters = shot.dominantColours || [];
+    clusters.forEach(([x, y, w]) => {
+      if(x==null || y==null) return;
       const [cx,cy] = toCanvas(x, y);
-      const r = Math.max(2, Math.round(weight * 20));
+      const r = Math.max(2, Math.round(w * 16));
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
-      ctx.fillStyle = 'rgba(255,255,100,0.8)';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-      ctx.lineWidth = 0.5;
-      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,100,0.75)'; ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth=0.5; ctx.stroke();
     });
   }
 
+  // frame count label
+  if(perFrame.length > 1) {
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.font = '9px monospace';
+    ctx.fillText(`${perFrame.length} frames`, 6, H-4);
+  }
+
   // axis labels
-  ctx.fillStyle = 'rgba(255,255,255,0.3)';
-  ctx.font = '9px monospace';
-  ctx.fillText('x', W-10, H-5);
-  ctx.fillText('y', 2, 12);
+  ctx.fillStyle='rgba(255,255,255,0.25)'; ctx.font='9px monospace';
+  ctx.fillText('x', W-10, H-3);
+  ctx.fillText('y', 2, 11);
 }
+
+// ---------------------------------------------------------------------------
+// Waveform monitor renderer (luma, 0-100 IRE)
+// ---------------------------------------------------------------------------
+function renderWaveform(canvasId, shot) {
+  const canvas = document.getElementById(canvasId);
+  if(!canvas || !shot.waveform) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // IRE grid lines
+  function yIRE(ire) { return Math.round(H - 2 - (ire / 100) * (H - 4)); }
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 0.5;
+  [0, 18, 50, 75, 100].forEach(ire => {
+    const y = yIRE(ire);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  });
+  // IRE labels
+  ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.font = '8px monospace';
+  ctx.fillText('100', 2, yIRE(100)+8);
+  ctx.fillText(' 50', 2, yIRE(50)+4);
+  ctx.fillText('  0', 2, yIRE(0));
+
+  const bands = shot.waveform;
+  const nCols = bands.length;
+  const colW  = (W - 30) / nCols;
+  const xOff  = 26;
+
+  // draw p25-p75 band (fill), p5-p95 band (thin), p50 line
+  for(let c = 0; c < nCols; c++) {
+    const [p5, p25, p50, p75, p95] = bands[c];
+    const cx = xOff + c * colW;
+
+    // p5-p95 outer band
+    ctx.fillStyle = 'rgba(74,222,128,0.12)';
+    ctx.fillRect(cx, yIRE(p95), colW, yIRE(p5)-yIRE(p95));
+
+    // p25-p75 inner band
+    ctx.fillStyle = 'rgba(74,222,128,0.35)';
+    ctx.fillRect(cx, yIRE(p75), colW, yIRE(p25)-yIRE(p75));
+
+    // median line
+    const my = yIRE(p50);
+    ctx.fillStyle = 'rgba(74,222,128,0.9)';
+    ctx.fillRect(cx, my, colW, 1);
+  }
+
+  // 18% gray reference dot
+  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  ctx.font = '8px monospace';
+  ctx.fillText('18%', 2, yIRE(18)+3);
+}
+
+// ---------------------------------------------------------------------------
+// RGB Parade renderer
+// ---------------------------------------------------------------------------
+function renderParade(canvasId, shot) {
+  const canvas = document.getElementById(canvasId);
+  if(!canvas || !shot.paradeR) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  const channels = [
+    {data: shot.paradeR, col: 'rgba(239,68,68,',  label: 'R'},
+    {data: shot.paradeG, col: 'rgba(74,222,128,', label: 'G'},
+    {data: shot.paradeB, col: 'rgba(59,130,246,', label: 'B'},
+  ];
+
+  const secW  = Math.floor((W - 6) / 3);
+  const gap   = 3;
+
+  function yIRE(ire) { return Math.round(H - 2 - (ire / 100) * (H - 4)); }
+
+  channels.forEach(({data, col, label}, ci) => {
+    if(!data || !data.length) return;
+    const xBase = ci * (secW + gap);
+    const nCols = data.length;
+    const colW  = secW / nCols;
+
+    // section background separator
+    ctx.fillStyle = 'rgba(255,255,255,0.03)';
+    ctx.fillRect(xBase, 0, secW, H);
+
+    // grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 0.5;
+    [0, 50, 100].forEach(ire => {
+      const y = yIRE(ire);
+      ctx.beginPath(); ctx.moveTo(xBase, y); ctx.lineTo(xBase+secW, y); ctx.stroke();
+    });
+
+    // channel label
+    ctx.fillStyle = col + '0.5)';
+    ctx.font = '9px monospace';
+    ctx.fillText(label, xBase + 3, 10);
+
+    for(let c = 0; c < nCols; c++) {
+      const [p5, p25, p50, p75, p95] = data[c];
+      const cx = xBase + c * colW;
+
+      ctx.fillStyle = col + '0.12)';
+      ctx.fillRect(cx, yIRE(p95), colW, yIRE(p5)-yIRE(p95));
+
+      ctx.fillStyle = col + '0.40)';
+      ctx.fillRect(cx, yIRE(p75), colW, yIRE(p25)-yIRE(p75));
+
+      ctx.fillStyle = col + '0.9)';
+      ctx.fillRect(cx, yIRE(p50), colW, 1);
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Feedback stats + training export
 // ---------------------------------------------------------------------------
