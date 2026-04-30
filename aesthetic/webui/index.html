@@ -1194,117 +1194,122 @@ function renderCIEChart(canvasId, shot) {
 }
 
 // ---------------------------------------------------------------------------
-// Waveform monitor (luma) — point-cloud scope style, white traces
+// Waveform monitor (luma) — true density rendering from per-column histograms
 // ---------------------------------------------------------------------------
 function renderWaveform(canvasId, shot) {
   const canvas = document.getElementById(canvasId);
-  if(!canvas || !shot.waveform) return;
-  const ctx    = canvas.getContext('2d');
+  if(!canvas || !shot.waveform || !shot.waveform.length) return;
+  const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
 
-  // Subtle IRE grid
-  function yIRE(ire) { return Math.round((1 - ire / 100) * (H - 1)); }
-  ctx.strokeStyle = 'rgba(255,255,255,0.07)'; ctx.lineWidth = 1;
-  [0, 25, 50, 75, 100].forEach(ire => {
-    const y = yIRE(ire);
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-  });
-  // IRE labels — right side
-  ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.font = '8px monospace';
-  [100, 75, 50, 25, 0].forEach(ire => {
-    ctx.fillText(ire, W - 20, yIRE(ire) + (ire === 0 ? -2 : 3));
+  const IRE_LABELS = [0, 25, 50, 75, 100];
+  const labelW = 22;
+  const plotW  = W - labelW;
+
+  // IRE grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth   = 1;
+  IRE_LABELS.forEach(ire => {
+    const y = Math.round((1 - ire / 100) * (H - 1));
+    ctx.beginPath(); ctx.moveTo(labelW, y); ctx.lineTo(W, y); ctx.stroke();
   });
 
-  const bands = shot.waveform;
-  const nCols = bands.length;
-  const usableW = W - 22;
-  const colW    = usableW / nCols;
+  // IRE labels left side
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  ctx.font      = '8px monospace';
+  IRE_LABELS.forEach(ire => {
+    const y = Math.round((1 - ire / 100) * (H - 1));
+    ctx.fillText(ire === 100 ? '100' : (' ' + ire), 0, y + (ire === 0 ? -1 : 4));
+  });
 
-  // Render as vertical trace lines — thin, layered opacity = density illusion
+  const hist  = shot.waveform;   // 64 columns × 100 buckets, each 0-1 density
+  const nCols = hist.length;
+  const nBkts = hist[0] ? hist[0].length : 100;
+  const colW  = plotW / nCols;
+
   for(let c = 0; c < nCols; c++) {
-    const [p5, p25, p50, p75, p95] = bands[c];
-    const cx = Math.round(c * colW);
+    const buckets = hist[c];
+    if(!buckets) continue;
+    const cx = labelW + Math.round(c * colW);
     const cw = Math.max(1, Math.round(colW));
 
-    // outer extent — very faint
-    const y95 = yIRE(p95), y5 = yIRE(p5);
-    ctx.fillStyle = 'rgba(255,255,255,0.09)';
-    ctx.fillRect(cx, y95, cw, y5 - y95 + 1);
+    for(let b = 0; b < nBkts; b++) {
+      const density = buckets[b];
+      if(density < 0.01) continue;
 
-    // interquartile range — brighter
-    const y75 = yIRE(p75), y25 = yIRE(p25);
-    ctx.fillStyle = 'rgba(255,255,255,0.28)';
-    ctx.fillRect(cx, y75, cw, y25 - y75 + 1);
+      // Map bucket index to canvas y (bucket 0 = 0 IRE = bottom, 99 = 100 IRE = top)
+      const ire = (b + 0.5) / nBkts * 100;
+      const y   = Math.round((1 - ire / 100) * (H - 1));
 
-    // median — bright white pixel line
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    ctx.fillRect(cx, yIRE(p50), cw, 1);
+      // Opacity: non-linear to make bright clusters pop, dim tails fade
+      const alpha = Math.min(0.92, density * 0.6 + density * density * 0.5);
+      ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
+      ctx.fillRect(cx, y, cw, 1);
+    }
   }
 }
 
 // ---------------------------------------------------------------------------
-// RGB Parade — three-section scope, scatter/trace style
+// RGB Parade — three-section density scope from per-column histograms
 // ---------------------------------------------------------------------------
 function renderParade(canvasId, shot) {
   const canvas = document.getElementById(canvasId);
-  if(!canvas || !shot.paradeR) return;
+  if(!canvas || !shot.paradeR || !shot.paradeR.length) return;
   const ctx = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
 
   const channels = [
-    {data: shot.paradeR, r:220, g:40,  b:40},
-    {data: shot.paradeG, r:40,  g:200, b:80},
-    {data: shot.paradeB, r:50,  g:120, b:240},
+    {hist: shot.paradeR, r: 220, g: 50,  b: 50,  label: 'R'},
+    {hist: shot.paradeG, r: 50,  g: 210, b: 80,  label: 'G'},
+    {hist: shot.paradeB, r: 60,  g: 130, b: 245, label: 'B'},
   ];
-  const labels  = ['R','G','B'];
-  const gap     = 2;
-  const secW    = Math.floor((W - gap * 2) / 3);
 
-  function yIRE(ire) { return Math.round((1 - ire / 100) * (H - 1)); }
+  const gap  = 2;
+  const secW = Math.floor((W - gap * 2) / 3);
 
-  channels.forEach(({data, r, g, b}, ci) => {
-    if(!data || !data.length) return;
+  channels.forEach(({hist, r, g, b, label}, ci) => {
+    if(!hist || !hist.length) return;
     const xBase = ci * (secW + gap);
-    const nCols = data.length;
+    const nCols = hist.length;
+    const nBkts = hist[0] ? hist[0].length : 100;
     const colW  = secW / nCols;
 
-    // section separator
-    if(ci > 0) {
-      ctx.fillStyle = 'rgba(255,255,255,0.04)';
-      ctx.fillRect(xBase - gap, 0, gap, H);
-    }
+    // Subtle section bg
+    ctx.fillStyle = `rgba(${r},${g},${b},0.03)`;
+    ctx.fillRect(xBase, 0, secW, H);
 
-    // IRE grid within section
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;
+    // Grid lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth   = 1;
     [0, 25, 50, 75, 100].forEach(ire => {
-      const y = yIRE(ire);
+      const y = Math.round((1 - ire / 100) * (H - 1));
       ctx.beginPath(); ctx.moveTo(xBase, y); ctx.lineTo(xBase + secW, y); ctx.stroke();
     });
 
-    // channel label — top left of section
-    ctx.fillStyle = `rgba(${r},${g},${b},0.5)`;
-    ctx.font = 'bold 9px monospace';
-    ctx.fillText(labels[ci], xBase + 3, 11);
+    // Channel label
+    ctx.fillStyle = `rgba(${r},${g},${b},0.55)`;
+    ctx.font      = 'bold 9px monospace';
+    ctx.fillText(label, xBase + 3, 11);
 
-    // traces
+    // Density render
     for(let c = 0; c < nCols; c++) {
-      const [p5, p25, p50, p75, p95] = data[c];
+      const buckets = hist[c];
+      if(!buckets) continue;
       const cx = xBase + Math.round(c * colW);
       const cw = Math.max(1, Math.round(colW));
 
-      // outer extent
-      ctx.fillStyle = `rgba(${r},${g},${b},0.10)`;
-      ctx.fillRect(cx, yIRE(p95), cw, yIRE(p5) - yIRE(p95) + 1);
+      for(let bk = 0; bk < nBkts; bk++) {
+        const density = buckets[bk];
+        if(density < 0.01) continue;
 
-      // IQR
-      ctx.fillStyle = `rgba(${r},${g},${b},0.30)`;
-      ctx.fillRect(cx, yIRE(p75), cw, yIRE(p25) - yIRE(p75) + 1);
-
-      // median
-      ctx.fillStyle = `rgba(${r},${g},${b},0.85)`;
-      ctx.fillRect(cx, yIRE(p50), cw, 1);
+        const ire   = (bk + 0.5) / nBkts * 100;
+        const y     = Math.round((1 - ire / 100) * (H - 1));
+        const alpha = Math.min(0.90, density * 0.55 + density * density * 0.5);
+        ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
+        ctx.fillRect(cx, y, cw, 1);
+      }
     }
   });
 }

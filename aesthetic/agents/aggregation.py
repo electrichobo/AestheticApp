@@ -578,33 +578,43 @@ def _collect_gamut_data(frames: List[FrameMetrics]) -> Dict[str, Any]:
                      if _point_in_triangle(x, y, rx, ry, gx, gy, bx, by))
         gamut_coverage[gamut_name] = round(inside / len(xy_all) * 100.0, 1)
 
-    # waveform: average percentile bands across frames for each column
-    def _col_bands(stacked: List[np.ndarray]) -> list:
-        """For each of N_COLS columns, compute [p5,p25,p50,p75,p95] across all frame rows."""
+    # waveform: per-column pixel density histogram (100 IRE buckets)
+    # Each column stores 100 values (IRE 0-99), each 0.0-1.0 normalised density.
+    # This enables true point-cloud scope rendering in the UI.
+    N_BUCKETS = 100
+
+    def _col_histogram(stacked: List[np.ndarray]) -> list:
+        """
+        For each of N_COLS columns, compute a 100-bucket IRE histogram
+        averaged across all sampled frames. Returns list of N_COLS lists
+        of N_BUCKETS floats (0.0-1.0 normalised density).
+        """
         if not stacked:
             return []
-        arr = np.concatenate(stacked, axis=0)  # all rows from all frames, N_COLS wide
-        bands = []
+        arr = np.concatenate(stacked, axis=0)  # (total_rows, N_COLS)
+        result = []
         for c in range(N_COLS):
-            col = arr[:, c]
-            bands.append([
-                round(float(np.percentile(col, 5)),  1),
-                round(float(np.percentile(col, 25)), 1),
-                round(float(np.percentile(col, 50)), 1),
-                round(float(np.percentile(col, 75)), 1),
-                round(float(np.percentile(col, 95)), 1),
-            ])
-        return bands
+            col    = arr[:, c]
+            # clip to 0-100 IRE range, compute histogram
+            counts, _ = np.histogram(col, bins=N_BUCKETS, range=(0.0, 100.0))
+            peak = float(counts.max())
+            if peak > 0:
+                norm = (counts / peak).tolist()
+            else:
+                norm = [0.0] * N_BUCKETS
+            # Round to 3dp for compact JSON
+            result.append([round(v, 3) for v in norm])
+        return result
 
     return {
         "dominant_colours":  [[round(float(c[0]),4), round(float(c[1]),4), w]
                                for c, w in zip(centres8, weights8)],
         "per_frame_colours": per_frame_xy,
         "gamut_coverage":    gamut_coverage,
-        "waveform":          _col_bands(waveform_cols),
-        "parade_r":          _col_bands(parade_cols_r),
-        "parade_g":          _col_bands(parade_cols_g),
-        "parade_b":          _col_bands(parade_cols_b),
+        "waveform":          _col_histogram(waveform_cols),
+        "parade_r":          _col_histogram(parade_cols_r),
+        "parade_g":          _col_histogram(parade_cols_g),
+        "parade_b":          _col_histogram(parade_cols_b),
     }
 
 

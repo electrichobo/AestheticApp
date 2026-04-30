@@ -192,13 +192,20 @@ def _is_non_cinematic(
         v = d.get(key)
         return float(v) if v is not None else None
 
-    # 1. Pure black / near-black frame — histogram mean very low
     hist_mean = _v(exp_d, "histogram_mean")
-    if hist_mean is not None and hist_mean < 12.0:
-        flags += 3   # instant reject — pure black is never a hero shot
+    hist_std  = _v(exp_d, "histogram_std")
 
-    # 2. Near-uniform tone — histogram std very low (black, white, or flat bg)
-    hist_std = _v(exp_d, "histogram_std")
+    # 1. Pure black — instant reject regardless of other signals
+    if hist_mean is not None and hist_mean < 12.0:
+        return True
+
+    # 2. Very dark AND flat — dark frame that isn't pure black
+    #    (e.g. almost-black fade frame, underexposed title card)
+    if (hist_mean is not None and hist_mean < 30.0
+            and hist_std is not None and hist_std < 18.0):
+        flags += 2
+
+    # 3. Near-uniform tone — black, white, or flat bg
     if hist_std is not None and hist_std < hist_std_thresh:
         flags += 1
 
