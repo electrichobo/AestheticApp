@@ -1035,46 +1035,52 @@ function buildDetailPanel(s){
       </div>` : ''}
     </div>
 
-    <!-- Top row: ΔE + CIE -->
-    <div class="flex gap-4 text-xs mb-2">
+    <!-- Single row: ΔE text · CIE · Luma scope · RGB Parade — all inline, fixed widths -->
+    <div class="flex gap-3 text-xs items-start">
+      <!-- ΔE text — fills remaining space -->
       <div class="flex-1 min-w-0">
         <div class="text-gray-500 mb-1">ΔE2000 Colour Accuracy</div>
         <div class="mb-1">vs D65 neutral: <span class="${deC(deD)}">${deD}</span>
           &nbsp; vs Baseline: <span class="${deC(deB)}">${deB}</span></div>
         <div class="text-gray-600 leading-relaxed text-xs">ΔE &lt;2 = imperceptible &nbsp; 2–5 = subtle cast &nbsp; 5–10 = visible &nbsp; &gt;10 = strong</div>
       </div>
+
+      <!-- CIE 160×160 -->
       <div class="flex-shrink-0">
-        <div class="text-gray-500 mb-1 text-xs">CIE 1931 Chromaticity</div>
-        <div class="flex gap-2 items-start">
+        <div class="text-gray-500 mb-1 text-xs">CIE 1931</div>
+        <div class="flex gap-1.5 items-start">
           <canvas id="cie-${s.id}" width="160" height="160"
-            class="rounded border border-gray-700/50 bg-gray-900 flex-shrink-0"></canvas>
-          <div class="space-y-0.5 text-xs pt-1">
+            class="rounded border border-gray-700/50 bg-gray-900 flex-shrink-0"
+            style="width:160px;height:160px"></canvas>
+          <div class="space-y-0.5 text-xs pt-0.5">
             ${Object.entries(g).map(([k,v]) =>
-              `<div class="flex items-center gap-1.5">
+              `<div class="flex items-center gap-1">
                 <span class="${k==='srgb'?'text-red-400':k==='p3'?'text-green-400':'text-blue-400'}">■</span>
-                <span class="text-gray-500">${k==='srgb'?'sRGB':k==='p3'?'DCI-P3':'Rec.2020'}</span>
-                <span class="ml-1 tabular-nums ${k==='srgb'?'text-red-300':k==='p3'?'text-green-300':'text-blue-300'}">${v}%</span>
+                <span class="text-gray-500 text-xs">${k==='srgb'?'sRGB':k==='p3'?'P3':'2020'}</span>
+                <span class="tabular-nums text-xs ${k==='srgb'?'text-red-300':k==='p3'?'text-green-300':'text-blue-300'}">${v}%</span>
               </div>`
             ).join('')}
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- Bottom row: scopes full width -->
-    ${hasWaveform ? `
-    <div class="border-t border-gray-700/30 pt-2 grid grid-cols-2 gap-2">
-      <div>
-        <div class="text-gray-600 text-xs mb-0.5">Luma</div>
-        <canvas id="wf-${s.id}" width="400" height="80"
-          class="rounded border border-gray-700/40 bg-gray-950 block w-full"></canvas>
+      <!-- Luma scope 160×160 — matches CIE -->
+      ${hasWaveform ? `
+      <div class="flex-shrink-0">
+        <div class="text-gray-600 text-xs mb-1">Luma</div>
+        <canvas id="wf-${s.id}" width="320" height="160"
+          class="rounded border border-gray-700/40 bg-gray-950 block"
+          style="width:160px;height:160px"></canvas>
       </div>
-      <div>
-        <div class="text-gray-600 text-xs mb-0.5">RGB Parade</div>
-        <canvas id="par-${s.id}" width="400" height="80"
-          class="rounded border border-gray-700/40 bg-gray-950 block w-full"></canvas>
-      </div>
-    </div>` : ''}
+
+      <!-- RGB Parade 160×160 — matches CIE -->
+      <div class="flex-shrink-0">
+        <div class="text-gray-600 text-xs mb-1">RGB Parade</div>
+        <canvas id="par-${s.id}" width="320" height="160"
+          class="rounded border border-gray-700/40 bg-gray-950 block"
+          style="width:160px;height:160px"></canvas>
+      </div>` : ''}
+    </div>
   </div>`;
 
   const catSections = cats.map(cat => {
