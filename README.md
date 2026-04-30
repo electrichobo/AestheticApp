@@ -336,6 +336,8 @@ Yes. Processing time on a GPU is significant — plan for 30–60 minutes per fe
 - UI explainability: why a shot ranked highly, which sequence it belongs to, what style family it was scored against
 - Annotation tool for transition classifier training data
 
+
+### IMPORTANT - revisit waveform scope rendering prior to packaging.
 ---
 
 ## Contributing
