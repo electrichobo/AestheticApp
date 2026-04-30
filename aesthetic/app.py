@@ -27,6 +27,13 @@ def _setup_bundle_env() -> None:
 def main() -> None:
     _setup_bundle_env()
 
+    # Print startup info — visible in console window during debugging
+    frozen = getattr(sys, "frozen", False)
+    meipass = getattr(sys, "_MEIPASS", None)
+    print(f"[app] frozen={frozen}, _MEIPASS={meipass}")
+    print(f"[app] Python {sys.version}")
+    print(f"[app] executable: {sys.executable}")
+
     import webview
 
     if getattr(sys, "frozen", False):
@@ -49,11 +56,25 @@ def main() -> None:
         html_url,
         width=1280,
         height=860,
+        min_size=(900, 600),
         resizable=True,
         js_api=api,
     )
     api._window = window
-    webview.start(http_server=frozen)
+
+    start_kwargs: dict = {}
+    if frozen:
+        # Bundle: use EdgeChromium (WebView2) explicitly for reliable JS bridge
+        # http_server serves files so WebView2 security allows pywebview API calls
+        start_kwargs["gui"]         = "edgechromium"
+        start_kwargs["http_server"] = True
+
+    try:
+        webview.start(**start_kwargs)
+    except Exception as _e:
+        # EdgeChromium not available — fall back to default
+        print(f"[app] edgechromium start failed ({_e}), retrying with default GUI")
+        webview.start(http_server=frozen)
     # Ensure process exits cleanly — pywebview can leave threads running
     # on Windows which prevents the terminal from releasing
     import os as _os
