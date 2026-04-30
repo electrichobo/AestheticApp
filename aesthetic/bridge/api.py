@@ -1148,6 +1148,13 @@ class AestheticAPI:
             for scene_id, frame_cls_list in frame_classifications.items():
                 shot_classifications[scene_id] = classify_scene_from_shots(frame_cls_list)
 
+            # Rebuild scene_candidate_map with post-inference FrameMetrics
+            # (the map was built before inference ran — references are stale)
+            from collections import defaultdict as _dd3
+            scene_candidate_map = _dd3(list)
+            for fi, fm in enumerate(all_frame_metrics):
+                scene_candidate_map[candidates[fi].scene_id].append(fm)
+
             # --- stage 6: aggregation ---
             self._push_progress(job_id, "Aggregating shot scores…", 78)
             from ..agents.aggregation import aggregate_shot
