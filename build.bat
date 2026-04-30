@@ -58,8 +58,3 @@ for /f %%i in ('powershell -command "(Get-ChildItem dist\AESTHETIC -Recurse | Me
 echo.
 echo To run:  dist\AESTHETIC\AESTHETIC.exe
 echo To distribute: zip dist\AESTHETIC\ folder
-
-REM Overlay source .py files so small fixes can be hotpatched without full rebuild
-echo Copying source files for hotpatch capability...
-xcopy /s /y /q "aesthetic" "dist\AESTHETIC\_internalesthetic" >nul 2>&1
-echo Done.
