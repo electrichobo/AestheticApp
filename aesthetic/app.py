@@ -34,8 +34,11 @@ def main() -> None:
     print(f"[app] Python {sys.version}")
     print(f"[app] executable: {sys.executable}")
 
+    print("[app] importing webview...")
     import webview
+    print(f"[app] webview version: {webview.__version__}")
 
+    print("[app] importing AestheticAPI...")
     if getattr(sys, "frozen", False):
         from aesthetic.bridge.api import AestheticAPI
         from aesthetic.config import WEB_DIR
@@ -46,11 +49,23 @@ def main() -> None:
     APP_NAME = "AESTHETIC"
     frozen   = getattr(sys, "frozen", False)
 
-    # Dev: file:// so local video preview works natively
-    # Bundle: string path + http_server=True for reliable WebView2 bridge init
-    html_url = str(WEB_DIR / "index.html") if frozen else (WEB_DIR / "index.html").as_uri()
+    print(f"[app] WEB_DIR: {WEB_DIR}")
+    print(f"[app] WEB_DIR exists: {WEB_DIR.exists()}")
 
-    api    = AestheticAPI()
+    html_url = str(WEB_DIR / "index.html") if frozen else (WEB_DIR / "index.html").as_uri()
+    print(f"[app] html_url: {html_url}")
+
+    print("[app] instantiating AestheticAPI...")
+    try:
+        api = AestheticAPI()
+        print("[app] AestheticAPI ready")
+    except Exception as _api_exc:
+        import traceback
+        print(f"[app] AestheticAPI FAILED: {_api_exc}")
+        traceback.print_exc()
+        input("Press Enter to exit...")
+        return
+
     window = webview.create_window(
         APP_NAME,
         html_url,
