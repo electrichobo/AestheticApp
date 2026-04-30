@@ -1290,6 +1290,17 @@ class AestheticAPI:
                 baseline_version=self._baseline.get_summary().get("active", {}).get("version", 0),
                 seed=seed,
             )
+            # --- stage 8: shot clustering ---
+            self._push_progress(job_id, "Clustering shots by visual similarity…", 92)
+            try:
+                from ..agents.scene_clusters import cluster_shots, attach_clusters_to_shots
+                cluster_result = cluster_shots(selected, cfg)
+                selected = attach_clusters_to_shots(selected, cluster_result)
+                print(f"[bridge] {cluster_result.n_clusters} visual clusters")
+            except Exception as _ce:
+                print(f"[bridge] clustering skipped: {_ce}")
+                cluster_result = None
+
             export_clips = bool(cfg.get("export", {}).get("export_clips", False))
 
             # Build maps needed for hero window extraction
@@ -1314,9 +1325,24 @@ class AestheticAPI:
             # build UI-friendly shot list
             ui_shots = _build_ui_shots(selected)
 
+            # Build cluster summary for UI
+            ui_clusters = []
+            if cluster_result:
+                for c in cluster_result.clusters:
+                    ui_clusters.append({
+                        "cluster_id":    c.cluster_id,
+                        "shot_ids":      c.shot_ids,
+                        "representative":c.representative,
+                        "label":         c.label,
+                        "coherence":     c.coherence,
+                        "mean_score":    c.mean_score,
+                        "size":          len(c.shot_ids),
+                    })
+
             return {
                 "ok":            True,
                 "shots":         ui_shots,
+                "clusters":      ui_clusters,
                 "scene_count":   len(scenes),
                 "selected_count":len(selected),
                 "output_dir":    str(OUTPUTS_DIR / job_id),
@@ -1443,5 +1469,7 @@ def _build_ui_shots(selected: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "paradeG":          s.get("parade_g"),
             "paradeB":          s.get("parade_b"),
             "skinToneDetected": s.get("skin_tone_detected", False),
+            "clusterId":        s.get("cluster_id"),
+            "isRepresentative": s.get("is_representative", False),
         })
     return ui_shots

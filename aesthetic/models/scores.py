@@ -347,6 +347,7 @@ class ShotScore(BaseModel):
     # colour analysis
     delta_e_d65:        Optional[float] = None
     delta_e_baseline:   Optional[float] = None
+    mean_embedding:     Optional[List[float]]       = None   # mean SigLIP embedding for clustering
     gamut_coverage:     Optional[Dict[str, float]] = None
     dominant_colours:   Optional[List[List[float]]] = None
     per_frame_colours:  Optional[List[List[List[float]]]] = None  # per-frame CIE clusters

@@ -613,6 +613,7 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
     loadFeedbackForJob(currentJobId);
     renderResults(r);
     renderMatrix(r.shots);
+    if(r.clusters && r.clusters.length > 1) renderClusters(r.clusters, r.shots);
     renderDownloads(r);
     showTab('analysis');
     setProgress('Complete', 100);
@@ -641,6 +642,56 @@ document.getElementById('exportBtn').addEventListener('click', async () => {
 // ---------------------------------------------------------------------------
 // Results
 // ---------------------------------------------------------------------------
+// Cluster colours — distinct hues for up to 12 clusters
+const CLUSTER_HUES = [210, 30, 150, 0, 270, 60, 330, 90, 180, 45, 300, 120];
+function clusterColor(cid, alpha) {
+  const h = CLUSTER_HUES[cid % CLUSTER_HUES.length];
+  return `hsla(${h},70%,65%,${alpha})`;
+}
+
+// ---------------------------------------------------------------------------
+// Cluster summary panel
+// ---------------------------------------------------------------------------
+function renderClusters(clusters, shots) {
+  // Remove any existing panel
+  const existing = document.getElementById('clusterPanel');
+  if(existing) existing.remove();
+
+  const container = document.getElementById('results');
+  if(!container) return;
+
+  const shotMap = {};
+  (shots || []).forEach(s => shotMap[s.shot_id] = s);
+
+  const panel = document.createElement('div');
+  panel.id = 'clusterPanel';
+  panel.className = 'mb-4 p-3 bg-gray-800/60 rounded border border-gray-700/50';
+
+  const rows = clusters.map(c => {
+    const rep  = shotMap[c.representative];
+    const thumb = rep && rep.hero_frame ? `<img src="file://${rep.hero_frame}" class="w-12 h-8 object-cover rounded flex-shrink-0" onerror="this.style.display='none'">` : '';
+    const color = clusterColor(c.cluster_id, 1);
+    const bg    = clusterColor(c.cluster_id, 0.15);
+    return `<div class="flex items-center gap-2 py-1.5 px-2 rounded" style="background:${bg}">
+      ${thumb}
+      <div class="flex-1 min-w-0">
+        <div class="text-xs font-medium" style="color:${color}">C${c.cluster_id+1} · ${c.label}</div>
+        <div class="text-xs text-gray-500">${c.size} shot${c.size!==1?'s':''} · avg ${c.mean_score.toFixed(1)} · coherence ${(c.coherence*100).toFixed(0)}%</div>
+      </div>
+      <div class="text-xs text-gray-600 flex-shrink-0">★ best: ${c.representative}</div>
+    </div>`;
+  }).join('');
+
+  panel.innerHTML = `
+    <div class="flex items-center justify-between mb-2">
+      <span class="text-xs font-semibold text-gray-300 uppercase tracking-wide">Visual Clusters</span>
+      <span class="text-xs text-gray-500">${clusters.length} groups · colour-coded on cards</span>
+    </div>
+    <div class="space-y-1">${rows}</div>`;
+
+  container.insertBefore(panel, container.firstChild);
+}
+
 function renderResults(r){
   document.getElementById('resultsPlaceholder').style.display = 'none';
   const stats = document.getElementById('analysisStats');
@@ -721,7 +772,10 @@ function makeShotCard(shot){
         <div class="flex items-start justify-between gap-2">
           <div class="min-w-0">
             <div class="text-xs text-gray-400 font-mono">${fmt(shot.start)} — ${fmt(shot.end)}</div>
-            <div class="flex flex-wrap gap-1 mt-1">${tags}</div>
+            <div class="flex flex-wrap gap-1 mt-1">
+              ${tags}
+              ${shot.clusterId != null ? `<span class="px-1.5 py-0.5 rounded text-xs font-medium" style="background:${clusterColor(shot.clusterId,0.25)};color:${clusterColor(shot.clusterId,1)}">C${shot.clusterId+1}${shot.isRepresentative?' ★':''}</span>` : ''}
+            </div>
             ${pillarsHtml}
           </div>
           <div class="flex-shrink-0 flex items-start gap-2">

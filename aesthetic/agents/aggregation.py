@@ -191,6 +191,7 @@ def aggregate_shot(
         temporal_variance=temporal_variance,
         frame_count=len(frames),
         metric_detail=metric_detail,
+        mean_embedding=_compute_mean_embedding(frames),
         gamut_coverage=gamut_data.get("gamut_coverage"),
         dominant_colours=gamut_data.get("dominant_colours"),
         per_frame_colours=gamut_data.get("per_frame_colours"),
@@ -484,6 +485,28 @@ def _kmeans_xy(xy_pts: np.ndarray, k: int = 4, seed: int = 42) -> tuple:
     total   = max(1, sum(sizes))
     weights = [round(s / total, 3) for s in sizes]
     return centres, weights
+
+
+def _compute_mean_embedding(frames: List[FrameMetrics]) -> Optional[List[float]]:
+    """
+    Compute the mean SigLIP embedding across all frames in a shot.
+    Used for inter-shot visual similarity clustering.
+    Returns None if no embeddings are available.
+    """
+    embeddings = [
+        f.inference.clip_embedding
+        for f in frames
+        if f.inference and f.inference.clip_embedding
+    ]
+    if not embeddings:
+        return None
+    arr  = np.array(embeddings, dtype=np.float32)
+    mean = arr.mean(axis=0)
+    # L2-normalise so cosine distance = euclidean distance on unit sphere
+    norm = float(np.linalg.norm(mean))
+    if norm > 1e-8:
+        mean = mean / norm
+    return mean.tolist()
 
 
 def _collect_gamut_data(frames: List[FrameMetrics]) -> Dict[str, Any]:

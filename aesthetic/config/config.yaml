@@ -56,6 +56,12 @@ category_weights:
   quality:     0.10
   narrative:   0.08
 
+# Shot clustering
+clustering:
+  distance_threshold: 0.35  # cosine distance cutoff — lower = tighter, more clusters
+  palette_weight:     0.15  # weight of palette distance vs embedding distance
+  semantic_bonus:     0.08  # distance reduction for matching scene_type / shot_scale
+
 # Hero clip extraction
 clip_export:
   handle_sec:  4.0    # handle length added each side of the best window (seconds)
