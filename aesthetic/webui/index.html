@@ -930,42 +930,46 @@ function buildDetailPanel(s){
   const hasWaveform = s.waveform && s.waveform.length > 0;
   const colourSection = `<div class="mb-3 p-3 bg-gray-800/60 rounded border border-gray-700/50">
     <div class="text-xs font-semibold text-pink-400 uppercase tracking-wide mb-2">Colour Analysis${skin}</div>
-    <div class="grid grid-cols-2 gap-4 text-xs mb-3">
-      <div>
+
+    <div class="flex gap-4 text-xs mb-3">
+      <div class="flex-1 min-w-0">
         <div class="text-gray-500 mb-1">ΔE2000 Colour Accuracy</div>
         <div class="mb-1">vs D65 neutral: <span class="${deC(deD)}">${deD}</span>
           &nbsp; vs Baseline: <span class="${deC(deB)}">${deB}</span></div>
-        <div class="text-gray-600 leading-relaxed">ΔE &lt;2 = imperceptible &nbsp; 2–5 = subtle cast &nbsp; 5–10 = visible &nbsp; &gt;10 = strong</div>
+        <div class="text-gray-600 leading-relaxed text-xs">ΔE &lt;2 = imperceptible &nbsp; 2–5 = subtle cast &nbsp; 5–10 = visible &nbsp; &gt;10 = strong</div>
       </div>
-      <div>
-        <div class="text-gray-500 mb-1.5">CIE 1931 Chromaticity</div>
-        <canvas id="cie-${s.id}" width="180" height="180"
-          class="rounded border border-gray-700/50 bg-gray-900"></canvas>
-        <div class="mt-1 space-y-0.5 text-xs">
-          ${Object.entries(g).map(([k,v]) =>
-            `<div class="flex items-center gap-1.5">
-              <span class="${k==='srgb'?'text-red-400':k==='p3'?'text-green-400':'text-blue-400'}">■</span>
-              <span class="text-gray-500">${k==='srgb'?'sRGB':k==='p3'?'DCI-P3':'Rec.2020'}</span>
-              <span class="ml-auto ${k==='srgb'?'text-red-300':k==='p3'?'text-green-300':'text-blue-300'}">${v}%</span>
-            </div>`
-          ).join('')}
+      <div class="flex-shrink-0">
+        <div class="text-gray-500 mb-1 text-xs">CIE 1931 Chromaticity</div>
+        <div class="flex gap-3 items-start">
+          <canvas id="cie-${s.id}" width="160" height="160"
+            class="rounded border border-gray-700/50 bg-gray-900 flex-shrink-0"></canvas>
+          <div class="space-y-0.5 text-xs pt-1">
+            ${Object.entries(g).map(([k,v]) =>
+              `<div class="flex items-center gap-1.5">
+                <span class="${k==='srgb'?'text-red-400':k==='p3'?'text-green-400':'text-blue-400'}">■</span>
+                <span class="text-gray-500">${k==='srgb'?'sRGB':k==='p3'?'DCI-P3':'Rec.2020'}</span>
+                <span class="ml-2 tabular-nums ${k==='srgb'?'text-red-300':k==='p3'?'text-green-300':'text-blue-300'}">${v}%</span>
+              </div>`
+            ).join('')}
+          </div>
         </div>
       </div>
     </div>
+
     ${hasWaveform ? `
-    <div class="border-t border-gray-700/40 pt-3 mt-1">
-      <div class="flex items-center gap-4 mb-1.5">
-        <span class="text-gray-500 text-xs">Waveform (luma)</span>
-        <span class="text-gray-500 text-xs ml-auto">RGB Parade</span>
+    <div class="border-t border-gray-700/40 pt-2 space-y-1.5">
+      <div>
+        <div class="text-gray-600 text-xs mb-1">Luma Waveform</div>
+        <canvas id="wf-${s.id}" width="800" height="80" style="width:100%;height:80px"
+          class="rounded bg-gray-950 block"></canvas>
       </div>
-      <div class="flex gap-3">
-        <canvas id="wf-${s.id}" width="280" height="100"
-          class="rounded border border-gray-700/50 bg-gray-950 flex-shrink-0"></canvas>
-        <canvas id="par-${s.id}" width="280" height="100"
-          class="rounded border border-gray-700/50 bg-gray-950 flex-1"></canvas>
+      <div>
+        <div class="text-gray-600 text-xs mb-1">RGB Parade</div>
+        <canvas id="par-${s.id}" width="800" height="80" style="width:100%;height:80px"
+          class="rounded bg-gray-950 block"></canvas>
       </div>
-      <div class="flex justify-between mt-1 text-gray-700 text-xs">
-        <span>0 IRE</span><span>50 IRE</span><span>100 IRE</span>
+      <div class="flex justify-between text-gray-700 text-xs px-1">
+        <span>0</span><span>25</span><span>50 IRE</span><span>75</span><span>100</span>
       </div>
     </div>` : ''}
   </div>`;
@@ -1128,60 +1132,57 @@ function renderCIEChart(canvasId, shot) {
 }
 
 // ---------------------------------------------------------------------------
-// Waveform monitor renderer (luma, 0-100 IRE)
+// Waveform monitor (luma) — point-cloud scope style, white traces
 // ---------------------------------------------------------------------------
 function renderWaveform(canvasId, shot) {
   const canvas = document.getElementById(canvasId);
   if(!canvas || !shot.waveform) return;
-  const ctx = canvas.getContext('2d');
+  const ctx    = canvas.getContext('2d');
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
 
-  // IRE grid lines
-  function yIRE(ire) { return Math.round(H - 2 - (ire / 100) * (H - 4)); }
-  ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 0.5;
-  [0, 18, 50, 75, 100].forEach(ire => {
+  // Subtle IRE grid
+  function yIRE(ire) { return Math.round((1 - ire / 100) * (H - 1)); }
+  ctx.strokeStyle = 'rgba(255,255,255,0.07)'; ctx.lineWidth = 1;
+  [0, 25, 50, 75, 100].forEach(ire => {
     const y = yIRE(ire);
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
   });
-  // IRE labels
-  ctx.fillStyle = 'rgba(255,255,255,0.2)'; ctx.font = '8px monospace';
-  ctx.fillText('100', 2, yIRE(100)+8);
-  ctx.fillText(' 50', 2, yIRE(50)+4);
-  ctx.fillText('  0', 2, yIRE(0));
+  // IRE labels — right side
+  ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.font = '8px monospace';
+  [100, 75, 50, 25, 0].forEach(ire => {
+    ctx.fillText(ire, W - 20, yIRE(ire) + (ire === 0 ? -2 : 3));
+  });
 
   const bands = shot.waveform;
   const nCols = bands.length;
-  const colW  = (W - 30) / nCols;
-  const xOff  = 26;
+  const usableW = W - 22;
+  const colW    = usableW / nCols;
 
-  // draw p25-p75 band (fill), p5-p95 band (thin), p50 line
+  // Render as vertical trace lines — thin, layered opacity = density illusion
   for(let c = 0; c < nCols; c++) {
     const [p5, p25, p50, p75, p95] = bands[c];
-    const cx = xOff + c * colW;
+    const cx = Math.round(c * colW);
+    const cw = Math.max(1, Math.round(colW));
 
-    // p5-p95 outer band
-    ctx.fillStyle = 'rgba(74,222,128,0.12)';
-    ctx.fillRect(cx, yIRE(p95), colW, yIRE(p5)-yIRE(p95));
+    // outer extent — very faint
+    const y95 = yIRE(p95), y5 = yIRE(p5);
+    ctx.fillStyle = 'rgba(255,255,255,0.09)';
+    ctx.fillRect(cx, y95, cw, y5 - y95 + 1);
 
-    // p25-p75 inner band
-    ctx.fillStyle = 'rgba(74,222,128,0.35)';
-    ctx.fillRect(cx, yIRE(p75), colW, yIRE(p25)-yIRE(p75));
+    // interquartile range — brighter
+    const y75 = yIRE(p75), y25 = yIRE(p25);
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    ctx.fillRect(cx, y75, cw, y25 - y75 + 1);
 
-    // median line
-    const my = yIRE(p50);
-    ctx.fillStyle = 'rgba(74,222,128,0.9)';
-    ctx.fillRect(cx, my, colW, 1);
+    // median — bright white pixel line
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillRect(cx, yIRE(p50), cw, 1);
   }
-
-  // 18% gray reference dot
-  ctx.fillStyle = 'rgba(255,255,255,0.15)';
-  ctx.font = '8px monospace';
-  ctx.fillText('18%', 2, yIRE(18)+3);
 }
 
 // ---------------------------------------------------------------------------
-// RGB Parade renderer
+// RGB Parade — three-section scope, scatter/trace style
 // ---------------------------------------------------------------------------
 function renderParade(canvasId, shot) {
   const canvas = document.getElementById(canvasId);
@@ -1191,50 +1192,57 @@ function renderParade(canvasId, shot) {
   ctx.clearRect(0, 0, W, H);
 
   const channels = [
-    {data: shot.paradeR, col: 'rgba(239,68,68,',  label: 'R'},
-    {data: shot.paradeG, col: 'rgba(74,222,128,', label: 'G'},
-    {data: shot.paradeB, col: 'rgba(59,130,246,', label: 'B'},
+    {data: shot.paradeR, r:220, g:40,  b:40},
+    {data: shot.paradeG, r:40,  g:200, b:80},
+    {data: shot.paradeB, r:50,  g:120, b:240},
   ];
+  const labels  = ['R','G','B'];
+  const gap     = 2;
+  const secW    = Math.floor((W - gap * 2) / 3);
 
-  const secW  = Math.floor((W - 6) / 3);
-  const gap   = 3;
+  function yIRE(ire) { return Math.round((1 - ire / 100) * (H - 1)); }
 
-  function yIRE(ire) { return Math.round(H - 2 - (ire / 100) * (H - 4)); }
-
-  channels.forEach(({data, col, label}, ci) => {
+  channels.forEach(({data, r, g, b}, ci) => {
     if(!data || !data.length) return;
     const xBase = ci * (secW + gap);
     const nCols = data.length;
     const colW  = secW / nCols;
 
-    // section background separator
-    ctx.fillStyle = 'rgba(255,255,255,0.03)';
-    ctx.fillRect(xBase, 0, secW, H);
+    // section separator
+    if(ci > 0) {
+      ctx.fillStyle = 'rgba(255,255,255,0.04)';
+      ctx.fillRect(xBase - gap, 0, gap, H);
+    }
 
-    // grid
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 0.5;
-    [0, 50, 100].forEach(ire => {
+    // IRE grid within section
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;
+    [0, 25, 50, 75, 100].forEach(ire => {
       const y = yIRE(ire);
-      ctx.beginPath(); ctx.moveTo(xBase, y); ctx.lineTo(xBase+secW, y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(xBase, y); ctx.lineTo(xBase + secW, y); ctx.stroke();
     });
 
-    // channel label
-    ctx.fillStyle = col + '0.5)';
-    ctx.font = '9px monospace';
-    ctx.fillText(label, xBase + 3, 10);
+    // channel label — top left of section
+    ctx.fillStyle = `rgba(${r},${g},${b},0.5)`;
+    ctx.font = 'bold 9px monospace';
+    ctx.fillText(labels[ci], xBase + 3, 11);
 
+    // traces
     for(let c = 0; c < nCols; c++) {
       const [p5, p25, p50, p75, p95] = data[c];
-      const cx = xBase + c * colW;
+      const cx = xBase + Math.round(c * colW);
+      const cw = Math.max(1, Math.round(colW));
 
-      ctx.fillStyle = col + '0.12)';
-      ctx.fillRect(cx, yIRE(p95), colW, yIRE(p5)-yIRE(p95));
+      // outer extent
+      ctx.fillStyle = `rgba(${r},${g},${b},0.10)`;
+      ctx.fillRect(cx, yIRE(p95), cw, yIRE(p5) - yIRE(p95) + 1);
 
-      ctx.fillStyle = col + '0.40)';
-      ctx.fillRect(cx, yIRE(p75), colW, yIRE(p25)-yIRE(p75));
+      // IQR
+      ctx.fillStyle = `rgba(${r},${g},${b},0.30)`;
+      ctx.fillRect(cx, yIRE(p75), cw, yIRE(p25) - yIRE(p75) + 1);
 
-      ctx.fillStyle = col + '0.9)';
-      ctx.fillRect(cx, yIRE(p50), colW, 1);
+      // median
+      ctx.fillStyle = `rgba(${r},${g},${b},0.85)`;
+      ctx.fillRect(cx, yIRE(p50), cw, 1);
     }
   });
 }
