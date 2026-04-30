@@ -129,14 +129,35 @@ def compute_stratified_similarity(
         global_score = _flat_similarity(embedding, data_dir)
 
         # confidence: how well the frame fits the nearest cluster
-        # (centroid similarity normalised to 0-1)
         confidence = round((best_centroid_sim + 1.0) / 2.0, 3)
+
+        # percentile rank within style family
+        # uses stored sim_stats from build time — no need to reload all embeddings
+        cluster_percentile = None
+        sim_stats = cluster.get("sim_stats")
+        if sim_stats:
+            # raw cosine similarity of candidate vs centroid
+            raw_sim = best_centroid_sim
+            # map to percentile using stored distribution
+            p10 = sim_stats.get("p10", 0)
+            p25 = sim_stats.get("p25", 0)
+            p50 = sim_stats.get("p50", 0)
+            p75 = sim_stats.get("p75", 0)
+            p90 = sim_stats.get("p90", 1)
+            if   raw_sim >= p90: pct = 90 + (raw_sim - p90) / max(1 - p90, 0.01) * 10
+            elif raw_sim >= p75: pct = 75 + (raw_sim - p75) / max(p90 - p75, 0.01) * 15
+            elif raw_sim >= p50: pct = 50 + (raw_sim - p50) / max(p75 - p50, 0.01) * 25
+            elif raw_sim >= p25: pct = 25 + (raw_sim - p25) / max(p50 - p25, 0.01) * 25
+            elif raw_sim >= p10: pct = 10 + (raw_sim - p10) / max(p25 - p10, 0.01) * 15
+            else:                pct = raw_sim / max(p10, 0.01) * 10
+            cluster_percentile = round(float(np.clip(pct, 0, 100)), 1)
 
         return {
             "score":              score_100,
-            "cluster_label":      cluster.get("label", f"style_{best_cluster_id}"),
+            "cluster_label":      cluster.get("label", f"Style Family {best_cluster_id + 1}"),
             "cluster_id":         best_cluster_id,
             "cluster_confidence": confidence,
+            "cluster_percentile": cluster_percentile,
             "global_score":       global_score,
         }
 
@@ -206,43 +227,70 @@ def _build_cluster_index(
 ) -> Optional[Dict[str, Any]]:
     """
     Build the cluster index from scratch using k-means on CLIP embeddings.
+    Enriches each cluster with:
+      - Visual statistics from sampled source images → meaningful style label
+      - Intra-cluster similarity distribution → percentile scoring at inference
     """
-    from .baseline_trainer import _build_embeddings_index
+    from .baseline_trainer import _build_embeddings_index, _build_embeddings_index_with_sources
 
     print(f"[stratification] building cluster index for baseline v{baseline_version}…")
 
-    raw_embeddings = _build_embeddings_index(data_dir)
-    if len(raw_embeddings) < N_CLUSTERS * MIN_CLUSTER_SIZE:
-        print(f"[stratification] corpus too small to cluster ({len(raw_embeddings)} embeddings)")
+    # Load embeddings with source metadata for visual analysis
+    records = _build_embeddings_index_with_sources(data_dir)
+    if len(records) < N_CLUSTERS * MIN_CLUSTER_SIZE:
+        print(f"[stratification] corpus too small to cluster ({len(records)} embeddings)")
         return None
 
-    # normalise all embeddings
+    raw_embeddings = [r["embedding"] for r in records]
     matrix = np.array(raw_embeddings, dtype=np.float32)
     norms  = np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-8
     matrix = matrix / norms
 
-    # k-means clustering
     centroids, labels = _kmeans(matrix, N_CLUSTERS, n_iter=50)
 
-    # build cluster records
     clusters = []
     for cid in range(N_CLUSTERS):
         member_indices = np.where(labels == cid)[0]
         if len(member_indices) < MIN_CLUSTER_SIZE:
-            # too small — will be handled by merging below
             continue
 
-        member_embs = matrix[member_indices].tolist()
-        centroid    = centroids[cid].tolist()
-        label       = _auto_label_cluster(cid, len(member_indices))
+        member_embs     = matrix[member_indices].tolist()
+        member_records  = [records[i] for i in member_indices]
+        centroid        = centroids[cid].tolist()
+        centroid_vec    = np.array(centroid, dtype=np.float32)
+
+        # Intra-cluster similarity distribution for percentile scoring
+        sims = [float(np.dot(np.array(e, dtype=np.float32), centroid_vec))
+                for e in member_embs]
+        sim_arr = np.array(sims)
+        sim_stats = {
+            "mean": round(float(sim_arr.mean()), 4),
+            "std":  round(float(sim_arr.std()),  4),
+            "p10":  round(float(np.percentile(sim_arr, 10)), 4),
+            "p25":  round(float(np.percentile(sim_arr, 25)), 4),
+            "p50":  round(float(np.percentile(sim_arr, 50)), 4),
+            "p75":  round(float(np.percentile(sim_arr, 75)), 4),
+            "p90":  round(float(np.percentile(sim_arr, 90)), 4),
+        }
+
+        # Visual analysis → meaningful style label
+        try:
+            vis_stats = _analyse_cluster_visuals(member_embs, member_records, data_dir)
+            label     = _label_from_visual_stats(vis_stats)
+        except Exception as _le:
+            vis_stats = {}
+            label     = _auto_label_cluster(cid, len(member_indices))
 
         clusters.append({
-            "id":         cid,
-            "label":      label,
-            "size":       len(member_indices),
-            "centroid":   centroid,
-            "embeddings": member_embs,
+            "id":          cid,
+            "label":       label,
+            "size":        len(member_indices),
+            "centroid":    centroid,
+            "embeddings":  member_embs,
+            "sim_stats":   sim_stats,
+            "vis_stats":   vis_stats,
         })
+        print(f"[stratification]   cluster {cid}: '{label}' ({len(member_indices)} members)")
 
     if not clusters:
         return None
@@ -250,20 +298,13 @@ def _build_cluster_index(
     index = {
         "baseline_version": baseline_version,
         "n_clusters":       len(clusters),
-        "total_embeddings": len(raw_embeddings),
+        "total_embeddings": len(records),
         "clusters":         clusters,
     }
 
-    # save to disk
     try:
-        # store without member embeddings in the summary — embeddings stored separately
-        summary = {k: v for k, v in index.items() if k != "clusters"}
-        summary["clusters"] = [
-            {k: v for k, v in c.items() if k != "embeddings"}
-            for c in clusters
-        ]
         index_path.write_text(json.dumps(index, indent=2), encoding="utf-8")
-        print(f"[stratification] built {len(clusters)} clusters from {len(raw_embeddings)} embeddings")
+        print(f"[stratification] built {len(clusters)} clusters from {len(records)} embeddings")
     except Exception as exc:
         print(f"[stratification] could not save index: {exc}")
 
@@ -321,25 +362,141 @@ def _kmeans(
 
 
 def _auto_label_cluster(cluster_id: int, size: int) -> str:
-    """
-    Generate a descriptive label for a cluster.
-    Labels are generic style identifiers — they will be enriched
-    with visual inspection once real corpus data is available.
-    The numbers ensure uniqueness; descriptive names come from
-    manual review of cluster members.
-    """
+    """Fallback generic label — used when visual analysis isn't available."""
     style_names = [
-        "high-contrast dramatic",
-        "naturalistic warm",
-        "desaturated cold",
-        "bright cinematic",
-        "dark atmospheric",
-        "saturated vivid",
-        "muted period",
-        "neutral technical",
+        "Dramatic High-Contrast", "Warm Naturalistic", "Cold Desaturated",
+        "Bright Cinematic",       "Dark Atmospheric",  "Vivid Saturated",
+        "Muted Period",           "Neutral Technical",
     ]
-    name = style_names[cluster_id % len(style_names)]
-    return f"{name} (n={size})"
+    return style_names[cluster_id % len(style_names)]
+
+
+def _analyse_cluster_visuals(
+    member_embeddings: List[List[float]],
+    embedding_records: List[Dict],
+    data_dir: Path,
+) -> Dict[str, Any]:
+    """
+    Compute visual statistics for a cluster by sampling the source images.
+    Returns a stats dict used for labelling and percentile scoring.
+
+    embedding_records: list of {"source": filename, "embedding": [...]}
+    data_dir: root data dir — source images are in baseline/sources/ or
+              searched recursively under baseline/
+    """
+    import cv2
+
+    stats = {
+        "mean_luma":   [],
+        "mean_sat":    [],
+        "mean_dr":     [],   # dynamic range proxy
+        "mean_temp":   [],   # colour temperature proxy (B/R ratio)
+        "contrast":    [],
+    }
+
+    # Find source image directory
+    source_dirs = [
+        data_dir / "baseline" / "sources",
+        data_dir / "baseline",
+    ]
+
+    # Sample up to 20 images per cluster for speed
+    sample = embedding_records[:20]
+
+    for rec in sample:
+        src_name = rec.get("source", "")
+        img_path = None
+        for sdir in source_dirs:
+            candidate = sdir / src_name
+            if candidate.exists():
+                img_path = candidate
+                break
+        if img_path is None:
+            continue
+
+        try:
+            img  = cv2.imread(str(img_path))
+            if img is None:
+                continue
+            small = cv2.resize(img, (64, 36), interpolation=cv2.INTER_AREA)
+            gray  = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(float)
+            hsv   = cv2.cvtColor(small, cv2.COLOR_BGR2HSV).astype(float)
+
+            stats["mean_luma"].append(float(gray.mean()))
+            stats["mean_sat"].append(float(hsv[:,:,1].mean()))
+            # DR: p95 - p5 of luma
+            flat = gray.flatten()
+            stats["mean_dr"].append(float(np.percentile(flat, 95) - np.percentile(flat, 5)))
+            # Colour temp: blue/red ratio (higher = cooler)
+            b_mean = float(small[:,:,0].mean()) + 1
+            r_mean = float(small[:,:,2].mean()) + 1
+            stats["mean_temp"].append(b_mean / r_mean)
+            # Contrast: std of luma
+            stats["contrast"].append(float(gray.std()))
+        except Exception:
+            continue
+
+    # Reduce to means
+    result = {}
+    for k, vals in stats.items():
+        result[k] = float(np.mean(vals)) if vals else None
+    return result
+
+
+def _label_from_visual_stats(stats: Dict[str, Any]) -> str:
+    """
+    Map visual statistics to a cinematographic style family name.
+    Uses a simple rule-based classifier on luma, saturation, DR, temp.
+    """
+    luma    = stats.get("mean_luma")
+    sat     = stats.get("mean_sat")
+    dr      = stats.get("mean_dr")
+    temp    = stats.get("mean_temp")
+    contrast= stats.get("contrast")
+
+    if luma is None:
+        return "Visual Family"
+
+    # Key/fill and tonal character
+    is_dark   = luma < 80
+    is_bright = luma > 160
+    is_mid    = not is_dark and not is_bright
+
+    # Saturation character
+    is_desat  = sat is not None and sat < 40
+    is_vivid  = sat is not None and sat > 100
+
+    # Colour temperature
+    is_cool   = temp is not None and temp > 1.15
+    is_warm   = temp is not None and temp < 0.88
+
+    # Contrast/DR
+    is_hicon  = (contrast is not None and contrast > 55) or (dr is not None and dr > 160)
+    is_locon  = (contrast is not None and contrast < 28) or (dr is not None and dr < 80)
+
+    # Decision tree — most specific first
+    if is_dark and is_desat and is_cool:   return "Neo-Noir / Thriller"
+    if is_dark and is_hicon:               return "Chiaroscuro Dramatic"
+    if is_dark and is_warm:                return "Candlelit / Intimate"
+    if is_dark and is_desat:               return "Dark Atmospheric"
+    if is_dark:                            return "Dark Cinematic"
+
+    if is_bright and is_vivid:             return "Vibrant High-Key"
+    if is_bright and is_desat:             return "Bleached / Overexposed"
+    if is_bright and is_warm:              return "Golden Hour Naturalistic"
+    if is_bright:                          return "Bright Cinematic"
+
+    if is_mid and is_desat and is_cool:    return "Cold Desaturated Realist"
+    if is_mid and is_desat:                return "Muted Naturalistic"
+    if is_mid and is_vivid and is_warm:    return "Warm Vivid"
+    if is_mid and is_vivid:                return "Saturated Cinematic"
+    if is_mid and is_hicon and is_warm:    return "Prestige Naturalism"
+    if is_mid and is_hicon:                return "High-Contrast Dramatic"
+    if is_mid and is_locon:                return "Soft / Diffuse"
+    if is_mid and is_warm:                 return "Warm Naturalistic"
+    if is_mid and is_cool:                 return "Cool Cinematic"
+
+    return "Balanced Cinematic"
 
 
 # ---------------------------------------------------------------------------

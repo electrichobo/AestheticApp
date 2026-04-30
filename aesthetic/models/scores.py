@@ -348,6 +348,8 @@ class ShotScore(BaseModel):
     delta_e_d65:        Optional[float] = None
     delta_e_baseline:   Optional[float] = None
     mean_embedding:     Optional[List[float]]       = None   # mean SigLIP embedding for clustering
+    style_family:       Optional[str]               = None   # style cluster label (Phase 4)
+    cluster_percentile: Optional[float]             = None   # 0-100: percentile within style family
     gamut_coverage:     Optional[Dict[str, float]] = None
     dominant_colours:   Optional[List[List[float]]] = None
     per_frame_colours:  Optional[List[List[List[float]]]] = None  # per-frame CIE clusters

@@ -1034,6 +1034,31 @@ def clean_stale_embeddings(data_dir: Path) -> Dict[str, Any]:
     return {"deleted": deleted, "kept": len(dim_files.get(dominant, [])), "dominant_dim": dominant}
 
 
+def _build_embeddings_index_with_sources(data_dir: Path) -> List[Dict]:
+    """
+    Load baseline embeddings as full records (embedding + source metadata).
+    Used by stratification for visual cluster labelling.
+    """
+    embeddings_dir = data_dir / "baseline" / "embeddings"
+    if not embeddings_dir.exists():
+        return []
+
+    records = []
+    for p in embeddings_dir.glob("*.json"):
+        try:
+            rec = json.loads(p.read_text(encoding="utf-8"))
+            emb = rec.get("embedding")
+            if emb:
+                records.append({
+                    "embedding": emb,
+                    "source":    rec.get("source", p.stem),
+                    "model":     rec.get("model", ""),
+                })
+        except Exception:
+            continue
+    return records
+
+
 def _build_embeddings_index(data_dir: Path) -> List[List[float]]:
     """
     Load baseline embeddings into a session-level cache.

@@ -1212,10 +1212,13 @@ class AestheticAPI:
                         sim = sim_result.get("score")
                         if sim is not None:
                             score.baseline_similarity_score = sim
-                            score.creative_total = round(sim, 2)
-                            # store cluster info for manifest and UI
+                            score.creative_total            = round(sim, 2)
+                            score.style_family              = sim_result.get("cluster_label")
+                            score.cluster_percentile        = sim_result.get("cluster_percentile")
+                            pct_str = (f" · {sim_result['cluster_percentile']:.0f}th percentile"
+                                       if sim_result.get("cluster_percentile") is not None else "")
                             score.rationale = (
-                                f"Style cluster: {sim_result.get('cluster_label', 'unknown')} "
+                                f"Style: {sim_result.get('cluster_label', 'unknown')}{pct_str} "
                                 f"(confidence: {sim_result.get('cluster_confidence', 0):.0%})"
                             ) if not score.rationale else score.rationale
                         break
@@ -1471,5 +1474,7 @@ def _build_ui_shots(selected: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "skinToneDetected": s.get("skin_tone_detected", False),
             "clusterId":        s.get("cluster_id"),
             "isRepresentative": s.get("is_representative", False),
+            "styleFamily":      s.get("style_family"),
+            "clusterPct":       s.get("cluster_percentile"),
         })
     return ui_shots
