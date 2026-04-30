@@ -175,37 +175,49 @@ def _is_non_cinematic(
     saturation_thresh: float,
 ) -> bool:
     """
-    Return True if the shot looks like a title card, logo, or static graphic.
-    Uses a points system — needs at least 3 of 5 signals to flag.
-    This avoids false positives on intentionally minimal cinematography
-    (e.g. a desaturated fog shot should not be filtered).
+    Return True if the shot looks like a title card, logo, black frame,
+    or static graphic. Uses a points system — needs at least 3 of 6 signals.
+    Avoids false positives on intentionally minimal cinematography.
     """
     flags = 0
 
-    # low color entropy — few distinct hues (title card background)
-    entropy = _get_metric(score, "color", "palette_entropy")
-    if entropy is not None and entropy < entropy_thresh:
-        flags += 1
+    # 1. Pure black / near-black frame — histogram mean very low
+    hist_mean = score.exposure.histogram_mean if score.exposure else None
+    if hist_mean is not None and hist_mean < 12.0:
+        flags += 3   # instant reject — pure black is never a hero shot
 
-    # sparse content — little happening in the frame
-    occupancy = _get_metric(score, "composition", "occupancy_map_score")
-    if occupancy is not None and occupancy < occupancy_thresh:
-        flags += 1
-
-    # flat image — no depth separation
-    depth = _get_metric(score, "composition", "depth_separation")
-    if depth is not None and depth < depth_thresh:
-        flags += 1
-
-    # near-uniform tone — black or white background
-    # we use exposure technical as a proxy — very high or very low = flat bg
-    hist_std = score.exposure.technical
+    # 2. Near-uniform tone — histogram std very low (black, white, or flat bg)
+    hist_std = score.exposure.histogram_std if score.exposure else None
     if hist_std is not None and hist_std < hist_std_thresh:
         flags += 1
 
-    # desaturated — logo or credit roll
-    saturation = _get_metric(score, "color", "saturation_mean")
+    # 3. Low colour entropy — few distinct hues (title card background)
+    entropy = score.color.palette_entropy if score.color else None
+    if entropy is not None and entropy < entropy_thresh:
+        flags += 1
+
+    # 4. Desaturated — logo or credit roll (but not a stylised grade)
+    saturation = score.color.saturation_mean if score.color else None
     if saturation is not None and saturation < saturation_thresh:
+        flags += 1
+
+    # 5. Sparse content — little happening in the frame
+    #    metric_detail carries the raw values; fall back gracefully
+    detail = score.metric_detail or {}
+    comp_detail = detail.get("composition", {})
+    occupancy = comp_detail.get("occupancy_map_score")
+    if occupancy is not None and float(occupancy) < occupancy_thresh:
+        flags += 1
+
+    # 6. Flat image — no depth
+    depth = comp_detail.get("depth_separation")
+    if depth is not None and float(depth) < depth_thresh:
+        flags += 1
+
+    # 7. High sharpness + low saturation = text/graphics on plain background
+    sharp = score.quality.sharpness_laplacian if score.quality else None
+    if (sharp is not None and sharp > 800
+            and saturation is not None and saturation < saturation_thresh * 2):
         flags += 1
 
     return flags >= 3
