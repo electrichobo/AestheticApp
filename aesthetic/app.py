@@ -36,7 +36,6 @@ def main() -> None:
 
     print("[app] importing webview...")
     import webview
-    print(f"[app] webview version: {webview.__version__}")
 
     print("[app] importing AestheticAPI...")
     if getattr(sys, "frozen", False):
