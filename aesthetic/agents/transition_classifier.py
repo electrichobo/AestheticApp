@@ -163,9 +163,12 @@ def extract_features_from_clip(video_path: str, n_frames: int = N_FRAMES) -> Opt
 
     # Luma monotonicity confidence: strong ramp = fade
     luma_range  = float(luma.max() - luma.min())
-    luma_mono   = float(np.corrcoef(np.arange(len(luma)), luma)[0, 1]
-                        if len(luma) > 2 else 0.0)
-    luma_mono   = 0.0 if np.isnan(luma_mono) else luma_mono
+    if len(luma) > 2 and luma.std() > 1e-8:
+        with np.errstate(invalid='ignore', divide='ignore'):
+            _corr = np.corrcoef(np.arange(len(luma)), luma)[0, 1]
+        luma_mono = 0.0 if np.isnan(_corr) else float(_corr)
+    else:
+        luma_mono = 0.0
 
     # Single-frame spike vs gradual: kurtosis of diff curve
     diff_kurt   = float(_safe_kurtosis(diffs))
@@ -290,7 +293,10 @@ def train(
         verbose=-1,
     )
     skf    = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    scores = cross_val_score(clf_cv, X, y, cv=skf, scoring="accuracy")
+    import pandas as pd
+    feature_names = [f"f{i:03d}" for i in range(X.shape[1])]
+    X_df_cv = pd.DataFrame(X, columns=feature_names)
+    scores = cross_val_score(clf_cv, X_df_cv, y, cv=skf, scoring="accuracy")
     if verbose:
         print(f"[transition] 5-fold CV accuracy: {scores.mean():.3f} ± {scores.std():.3f}")
 
@@ -305,7 +311,10 @@ def train(
         random_state=42,
         verbose=-1,
     )
-    clf.fit(X, y)
+    import pandas as pd
+    feature_names = [f"f{i:03d}" for i in range(X.shape[1])]
+    X_df = pd.DataFrame(X, columns=feature_names)
+    clf.fit(X_df, y)
 
     # Save
     if output_dir is None:
@@ -340,24 +349,42 @@ def train(
 _MODEL_CACHE: dict = {}  # path → payload
 
 
+def _bundled_model_path() -> Path:
+    """Path to the model bundled with the source tree (ships with the app)."""
+    return Path(__file__).resolve().parent.parent / "data" / MODEL_FILENAME
+
+
 def load_model(model_path: str) -> Optional[dict]:
-    """Load and cache the trained model payload."""
+    """
+    Load and cache the trained model payload.
+
+    Search order:
+      1. The path provided (usually user data dir)
+      2. The bundled model in the source/package tree (ships with the app)
+
+    This means a user-retrained model takes precedence over the bundled one,
+    but the app works out of the box even without user training.
+    """
     global _MODEL_CACHE
-    if model_path in _MODEL_CACHE:
-        return _MODEL_CACHE[model_path]
-    p = Path(model_path)
-    if not p.exists():
-        return None
-    try:
-        with open(p, "rb") as f:
-            payload = pickle.load(f)
-        _MODEL_CACHE[model_path] = payload
-        print(f"[transition] model loaded ({payload.get('cv_accuracy',0)*100:.1f}% CV acc, "
-              f"{payload.get('n_samples',0)} training samples)")
-        return payload
-    except Exception as e:
-        print(f"[transition] model load failed: {e}")
-        return None
+
+    # Try the provided path first, then fall back to bundled
+    candidates = [Path(model_path), _bundled_model_path()]
+    for p in candidates:
+        if str(p) in _MODEL_CACHE:
+            return _MODEL_CACHE[str(p)]
+        if p.exists():
+            try:
+                with open(p, "rb") as f:
+                    payload = pickle.load(f)
+                source = "bundled" if p == _bundled_model_path() else "user-trained"
+                _MODEL_CACHE[str(p)] = payload
+                print(f"[transition] model loaded ({source}, "
+                      f"{payload.get('cv_accuracy',0)*100:.1f}% CV acc, "
+                      f"{payload.get('n_samples',0)} samples)")
+                return payload
+            except Exception as e:
+                print(f"[transition] model load failed ({p}): {e}")
+    return None
 
 
 def classify_boundary(
@@ -434,7 +461,9 @@ def classify_boundary(
         return "hard_cut", 0.0
 
     try:
-        proba  = clf.predict_proba(feats.reshape(1, -1))[0]
+        import pandas as pd
+        feat_names = [f"f{i:03d}" for i in range(len(feats))]
+        proba  = clf.predict_proba(pd.DataFrame(feats.reshape(1, -1), columns=feat_names))[0]
         best   = int(np.argmax(proba))
         conf   = float(proba[best])
         label  = classes[best] if best < len(classes) else "hard_cut"
@@ -512,7 +541,9 @@ def classify_boundaries_batch(
             continue
 
         try:
-            proba  = clf.predict_proba(feats.reshape(1, -1))[0]
+            import pandas as pd
+            feat_names = [f"f{i:03d}" for i in range(len(feats))]
+            proba  = clf.predict_proba(pd.DataFrame(feats.reshape(1, -1), columns=feat_names))[0]
             best   = int(np.argmax(proba))
             conf   = float(proba[best])
             label  = classes[best] if best < len(classes) else "hard_cut"
