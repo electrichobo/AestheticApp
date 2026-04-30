@@ -286,6 +286,7 @@ def _ffmpeg_trim(
             capture_output=True,
             text=True,
             timeout=120,
+            creationflags=(subprocess.CREATE_NO_WINDOW if __import__('sys').platform == 'win32' else 0),
         )
         return result.returncode == 0 and out_path.exists()
     except Exception:
