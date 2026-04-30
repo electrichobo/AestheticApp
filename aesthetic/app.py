@@ -77,19 +77,24 @@ def main() -> None:
     )
     api._window = window
 
-    start_kwargs: dict = {}
     if frozen:
-        # Bundle: use EdgeChromium (WebView2) explicitly for reliable JS bridge
-        # http_server serves files so WebView2 security allows pywebview API calls
-        start_kwargs["gui"]         = "edgechromium"
-        start_kwargs["http_server"] = True
-
-    try:
-        webview.start(**start_kwargs)
-    except Exception as _e:
-        # EdgeChromium not available — fall back to default
-        print(f"[app] edgechromium start failed ({_e}), retrying with default GUI")
-        webview.start(http_server=frozen)
+        print("[app] starting webview (bundle mode)...")
+        # Try edgechromium without http_server first — most reliable for JS bridge
+        # http_server can cause bridge injection timing issues in some environments
+        try:
+            print("[app] attempting edgechromium without http_server...")
+            webview.start(gui="edgechromium")
+        except Exception as _e1:
+            print(f"[app] attempt 1 failed: {_e1}")
+            try:
+                print("[app] attempting edgechromium with http_server...")
+                webview.start(gui="edgechromium", http_server=True)
+            except Exception as _e2:
+                print(f"[app] attempt 2 failed: {_e2}")
+                print("[app] falling back to default GUI...")
+                webview.start()
+    else:
+        webview.start()
     # Ensure process exits cleanly — pywebview can leave threads running
     # on Windows which prevents the terminal from releasing
     import os as _os

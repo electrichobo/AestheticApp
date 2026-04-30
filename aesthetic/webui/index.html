@@ -406,14 +406,22 @@ function initBridge() {
 window.addEventListener('pywebviewready', initBridge);
 
 // fallback poll — some pywebview versions don't fire the event reliably
+// Extended timeout for bundled app cold-start
 let _bridgeCheckCount = 0;
 const _bridgePoll = setInterval(() => {
   _bridgeCheckCount++;
   if(typeof window.pywebview !== 'undefined' && window.pywebview.api) {
     clearInterval(_bridgePoll);
     if(!hasBridge) initBridge();
+    return;
   }
-  if(_bridgeCheckCount > 20) clearInterval(_bridgePoll); // stop after 10s
+  // update status with attempt count so user knows it's working
+  const el = document.getElementById('bridgeStatus');
+  if(el && !hasBridge) el.textContent = `connecting… (${_bridgeCheckCount})`;
+  if(_bridgeCheckCount > 120) {  // 60 seconds
+    clearInterval(_bridgePoll);
+    if(el) el.textContent = 'bridge timeout — try restarting';
+  }
 }, 500);
 
 // ---------------------------------------------------------------------------
