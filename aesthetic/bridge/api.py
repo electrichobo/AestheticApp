@@ -830,22 +830,6 @@ class AestheticAPI:
         if not job_dir.exists():
             return {"ok": False, "error": f"job not found: {job_id}"}
         manifest = _read_json(job_dir / "manifest.json")
-
-        # --- Runtime preset (safe — always assigns _preset even if import fails) ---
-        try:
-            from ..agents.model_utils import resolve_preset, PRESETS
-            _preset = resolve_preset(preset)
-        except Exception as _preset_exc:
-            print(f"[bridge] preset resolution failed: {_preset_exc} — using balanced defaults")
-            _preset = {
-                "name": "balanced", "description": "balanced (fallback)",
-                "per_scene_candidates": 9, "per_scene_keep_pct": 0.40,
-                "shortlist_pct": 0.25, "midas_enabled": True,
-                "yolo_enabled": True, "clip_enabled": True,
-                "subject_metrics": True, "top_k_multiplier": 1.0,
-            }
-        preset_name = _preset["name"]
-        self._push_progress(job_id, f"Runtime preset: {preset_name} — {_preset['description']}", 2)
         if not manifest:
             return {"ok": False, "error": "manifest missing"}
         return {
@@ -883,6 +867,21 @@ class AestheticAPI:
         source_file = manifest.get("source_file", "")
         cfg         = self._cfg
         seed        = cfg.get("runtime", {}).get("seed", 42)
+
+        # --- Runtime preset (always assigned before any stage references it) ---
+        try:
+            from ..agents.model_utils import resolve_preset
+            _preset = resolve_preset(preset)
+        except Exception as _preset_exc:
+            print(f"[bridge] preset resolution failed: {_preset_exc} — using balanced defaults")
+            _preset = {
+                "name": "balanced", "description": "balanced (fallback)",
+                "per_scene_candidates": 9, "per_scene_keep_pct": 0.40,
+                "shortlist_pct": 0.25, "midas_enabled": True,
+                "yolo_enabled": True, "clip_enabled": True,
+                "subject_metrics": True, "top_k_multiplier": 1.0,
+            }
+        self._push_progress(job_id, f"Runtime preset: {_preset['name']} — {_preset['description']}", 2)
 
         try:
             # --- stage 1: ingest ---
