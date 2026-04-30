@@ -1282,8 +1282,21 @@ class AestheticAPI:
                 seed=seed,
             )
             export_clips = bool(cfg.get("export", {}).get("export_clips", False))
-            manifest_out = export_job(job_model, selected, job_dir, cfg,
-                                      export_clips=export_clips)
+
+            # Build maps needed for hero window extraction
+            _scenes_map      = {s.scene_id: s for s in scenes}
+            _shot_frames_map = {}
+            for _shot in selected:
+                _sid = _shot.shot_id
+                _scid= _shot.scene_id
+                _shot_frames_map[_sid] = scene_candidate_map.get(_scid, [])
+
+            manifest_out = export_job(
+                job_model, selected, job_dir, cfg,
+                export_clips=export_clips,
+                shot_frames_map=_shot_frames_map,
+                scenes_map=_scenes_map,
+            )
 
             self._push_progress(job_id, "Analysis complete", 100)
 

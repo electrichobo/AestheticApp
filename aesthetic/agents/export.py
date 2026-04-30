@@ -35,11 +35,13 @@ from ..models.scores import Manifest
 # ---------------------------------------------------------------------------
 
 def export_job(
-    job:          Job,
-    selected_shots: List[Dict[str, Any]],
-    job_dir:      Path,
-    config:       Dict[str, Any],
-    export_clips: bool = False,
+    job:              Job,
+    selected_shots:   List[Dict[str, Any]],
+    job_dir:          Path,
+    config:           Dict[str, Any],
+    export_clips:     bool = False,
+    shot_frames_map:  Optional[Dict[str, List]] = None,
+    scenes_map:       Optional[Dict[int, Any]]  = None,
 ) -> Manifest:
     """
     Run the full export pipeline for a completed job.
@@ -77,12 +79,27 @@ def export_job(
     t0 = time.time()
     clip_paths = {}
     if export_clips:
-        clip_paths = _export_hero_clips(
-            selected_shots,
-            job.source_file,
-            clips_dir,
-            warnings,
-        )
+        if shot_frames_map and scenes_map:
+            # Use hero window extraction: find best sub-window per shot
+            from .hero_clip import extract_hero_clips_batch
+            shot_dicts = [dict(s) if hasattr(s, 'items') else s for s in selected_shots]
+            clip_results = extract_hero_clips_batch(
+                shots_data=shot_dicts,
+                frames_map=shot_frames_map,
+                scenes_map=scenes_map,
+                source_file=job.source_file,
+                out_dir=clips_dir,
+                config=config,
+            )
+            clip_paths = {k: v for k, v in clip_results.items() if v is not None}
+        else:
+            # Fallback: simple trim of full scene duration
+            clip_paths = _export_hero_clips(
+                selected_shots,
+                job.source_file,
+                clips_dir,
+                warnings,
+            )
     timing["hero_clips"] = round(time.time() - t0, 2)
 
     # --- EDL and CSV timecode list ---

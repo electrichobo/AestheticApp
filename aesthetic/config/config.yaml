@@ -56,6 +56,12 @@ category_weights:
   quality:     0.10
   narrative:   0.08
 
+# Hero clip extraction
+clip_export:
+  handle_sec:  4.0    # handle length added each side of the best window (seconds)
+  min_dur:     2.0    # minimum window duration (seconds)
+  max_dur:     6.0    # maximum window duration (seconds)
+
 # Feature flags
 features:
   qc_pack_enabled:        false   # enables VMAF/PSNR/SSIM (requires reference video)
