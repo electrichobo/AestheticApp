@@ -181,41 +181,49 @@ def _is_non_cinematic(
     """
     flags = 0
 
+    # Pull raw metric values from metric_detail dict (CategoryScore only has T/C/S)
+    detail   = score.metric_detail or {}
+    exp_d    = detail.get("exposure", {})
+    col_d    = detail.get("color", {})
+    comp_d   = detail.get("composition", {})
+    qual_d   = detail.get("quality", {})
+
+    def _v(d, key):
+        v = d.get(key)
+        return float(v) if v is not None else None
+
     # 1. Pure black / near-black frame — histogram mean very low
-    hist_mean = score.exposure.histogram_mean if score.exposure else None
+    hist_mean = _v(exp_d, "histogram_mean")
     if hist_mean is not None and hist_mean < 12.0:
         flags += 3   # instant reject — pure black is never a hero shot
 
     # 2. Near-uniform tone — histogram std very low (black, white, or flat bg)
-    hist_std = score.exposure.histogram_std if score.exposure else None
+    hist_std = _v(exp_d, "histogram_std")
     if hist_std is not None and hist_std < hist_std_thresh:
         flags += 1
 
     # 3. Low colour entropy — few distinct hues (title card background)
-    entropy = score.color.palette_entropy if score.color else None
+    entropy = _v(col_d, "palette_entropy")
     if entropy is not None and entropy < entropy_thresh:
         flags += 1
 
     # 4. Desaturated — logo or credit roll (but not a stylised grade)
-    saturation = score.color.saturation_mean if score.color else None
+    saturation = _v(col_d, "saturation_mean")
     if saturation is not None and saturation < saturation_thresh:
         flags += 1
 
-    # 5. Sparse content — little happening in the frame
-    #    metric_detail carries the raw values; fall back gracefully
-    detail = score.metric_detail or {}
-    comp_detail = detail.get("composition", {})
-    occupancy = comp_detail.get("occupancy_map_score")
-    if occupancy is not None and float(occupancy) < occupancy_thresh:
+    # 5. Sparse content
+    occupancy = _v(comp_d, "occupancy_map_score")
+    if occupancy is not None and occupancy < occupancy_thresh:
         flags += 1
 
     # 6. Flat image — no depth
-    depth = comp_detail.get("depth_separation")
-    if depth is not None and float(depth) < depth_thresh:
+    depth = _v(comp_d, "depth_separation")
+    if depth is not None and depth < depth_thresh:
         flags += 1
 
     # 7. High sharpness + low saturation = text/graphics on plain background
-    sharp = score.quality.sharpness_laplacian if score.quality else None
+    sharp = _v(qual_d, "sharpness_laplacian")
     if (sharp is not None and sharp > 800
             and saturation is not None and saturation < saturation_thresh * 2):
         flags += 1
