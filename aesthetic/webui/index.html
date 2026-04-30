@@ -1005,16 +1005,19 @@ function buildDetailPanel(s){
       </div>` : ''}
     </div>
 
-    <div class="flex gap-4 text-xs mb-3">
+    <div class="flex gap-4 text-xs">
+      <!-- ΔE info -->
       <div class="flex-1 min-w-0">
         <div class="text-gray-500 mb-1">ΔE2000 Colour Accuracy</div>
         <div class="mb-1">vs D65 neutral: <span class="${deC(deD)}">${deD}</span>
           &nbsp; vs Baseline: <span class="${deC(deB)}">${deB}</span></div>
         <div class="text-gray-600 leading-relaxed text-xs">ΔE &lt;2 = imperceptible &nbsp; 2–5 = subtle cast &nbsp; 5–10 = visible &nbsp; &gt;10 = strong</div>
       </div>
+
+      <!-- CIE chart -->
       <div class="flex-shrink-0">
         <div class="text-gray-500 mb-1 text-xs">CIE 1931 Chromaticity</div>
-        <div class="flex gap-3 items-start">
+        <div class="flex gap-2 items-start">
           <canvas id="cie-${s.id}" width="160" height="160"
             class="rounded border border-gray-700/50 bg-gray-900 flex-shrink-0"></canvas>
           <div class="space-y-0.5 text-xs pt-1">
@@ -1022,30 +1025,28 @@ function buildDetailPanel(s){
               `<div class="flex items-center gap-1.5">
                 <span class="${k==='srgb'?'text-red-400':k==='p3'?'text-green-400':'text-blue-400'}">■</span>
                 <span class="text-gray-500">${k==='srgb'?'sRGB':k==='p3'?'DCI-P3':'Rec.2020'}</span>
-                <span class="ml-2 tabular-nums ${k==='srgb'?'text-red-300':k==='p3'?'text-green-300':'text-blue-300'}">${v}%</span>
+                <span class="ml-1 tabular-nums ${k==='srgb'?'text-red-300':k==='p3'?'text-green-300':'text-blue-300'}">${v}%</span>
               </div>`
             ).join('')}
           </div>
         </div>
       </div>
-    </div>
 
-    ${hasWaveform ? `
-    <div class="border-t border-gray-700/40 pt-2 space-y-1.5">
-      <div>
-        <div class="text-gray-600 text-xs mb-1">Luma Waveform</div>
-        <canvas id="wf-${s.id}" width="800" height="80" style="width:100%;height:80px"
-          class="rounded bg-gray-950 block"></canvas>
-      </div>
-      <div>
-        <div class="text-gray-600 text-xs mb-1">RGB Parade</div>
-        <canvas id="par-${s.id}" width="800" height="80" style="width:100%;height:80px"
-          class="rounded bg-gray-950 block"></canvas>
-      </div>
-      <div class="flex justify-between text-gray-700 text-xs px-1">
-        <span>0</span><span>25</span><span>50 IRE</span><span>75</span><span>100</span>
-      </div>
-    </div>` : ''}
+      <!-- Scopes: stacked waveform + parade, same height as CIE -->
+      ${hasWaveform ? `
+      <div class="flex-shrink-0 space-y-1">
+        <div>
+          <div class="text-gray-600 text-xs mb-0.5">Luma</div>
+          <canvas id="wf-${s.id}" width="280" height="76"
+            class="rounded border border-gray-700/40 bg-gray-950 block"></canvas>
+        </div>
+        <div>
+          <div class="text-gray-600 text-xs mb-0.5">RGB Parade</div>
+          <canvas id="par-${s.id}" width="280" height="76"
+            class="rounded border border-gray-700/40 bg-gray-950 block"></canvas>
+        </div>
+      </div>` : ''}
+    </div>
   </div>`;
 
   const catSections = cats.map(cat => {
@@ -1254,8 +1255,8 @@ function renderWaveform(canvasId, shot) {
       const ire = (b + 0.5) / nBkts * 100;
       const y   = Math.round((1 - ire / 100) * (H - 1));
 
-      // Opacity: non-linear to make bright clusters pop, dim tails fade
-      const alpha = Math.min(0.92, density * 0.6 + density * density * 0.5);
+      // Opacity: sqrt curve brightens dim traces, caps at near-opaque
+      const alpha = Math.min(0.95, Math.pow(density, 0.45) * 0.85);
       ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
       ctx.fillRect(cx, y, cw, 1);
     }
@@ -1318,7 +1319,7 @@ function renderParade(canvasId, shot) {
 
         const ire   = (bk + 0.5) / nBkts * 100;
         const y     = Math.round((1 - ire / 100) * (H - 1));
-        const alpha = Math.min(0.90, density * 0.55 + density * density * 0.5);
+        const alpha = Math.min(0.92, Math.pow(density, 0.45) * 0.85);
         ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
         ctx.fillRect(cx, y, cw, 1);
       }
