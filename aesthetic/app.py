@@ -64,9 +64,8 @@ def main() -> None:
     api._window = window
 
     print("[app] starting webview with http_server=True...")
-    # http_server=True is required for pywebview to inject window.pywebview
-    # on Windows with the EdgeChromium (WebView2) backend
-    webview.start(http_server=True)
+    # debug=True opens DevTools — remove for release build
+    webview.start(http_server=True, debug=True)
 
     import os as _os
     _os._exit(0)
