@@ -873,6 +873,11 @@ def _compute_emotion(frame_path: str, sm: "SubjectMetrics") -> None:
     Only runs if a face was already detected (lead_room or catchlight hint).
     """
     try:
+        # Suppress TF/DeepFace subprocess windows on Windows
+        import os as _os
+        _os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+        _os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+        _os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")  # force CPU for DeepFace
         from deepface import DeepFace
         import numpy as np
         result = DeepFace.analyze(
