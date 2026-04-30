@@ -193,3 +193,92 @@ def reset_device_cache() -> None:
     global _device, _selected_model
     _device = None
     _selected_model = None
+
+# ---------------------------------------------------------------------------
+# Runtime preset detection
+# ---------------------------------------------------------------------------
+
+def detect_preset() -> str:
+    """
+    Silently detect the appropriate runtime preset for this machine.
+
+    Returns one of: 'fast', 'balanced', 'precision'
+
+    Logic:
+      - CUDA with ≥8GB VRAM  → balanced
+      - CUDA with <8GB VRAM  → fast
+      - MPS (Apple Silicon)  → balanced (unified memory)
+      - CPU only             → fast
+
+    This is the automatic default. Users can override via the UI preset
+    dropdown — 'auto' always defers to this function.
+    """
+    try:
+        import torch
+        if torch.cuda.is_available():
+            vram = torch.cuda.get_device_properties(0).total_memory
+            vram_gb = vram / (1024 ** 3)
+            preset = "balanced" if vram_gb >= 8 else "fast"
+            print(f"[model_utils] preset auto-detected: {preset} "
+                  f"(CUDA, {vram_gb:.1f}GB VRAM)")
+            return preset
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            print("[model_utils] preset auto-detected: balanced (MPS)")
+            return "balanced"
+    except Exception:
+        pass
+    print("[model_utils] preset auto-detected: fast (CPU only)")
+    return "fast"
+
+
+# Preset definitions — all values override config.yaml defaults when active
+PRESETS: dict = {
+    "fast": {
+        "description":        "Fastest pass — reduced sampling, no depth analysis",
+        "per_scene_candidates": 5,
+        "per_scene_keep_pct":   0.35,
+        "shortlist_pct":        0.15,
+        "midas_enabled":        False,
+        "yolo_enabled":         True,
+        "clip_enabled":         True,
+        "subject_metrics":      False,   # skip SigLIP zero-shot per frame
+        "top_k_multiplier":     1.0,
+    },
+    "balanced": {
+        "description":        "Default — full pipeline, standard sampling",
+        "per_scene_candidates": 9,
+        "per_scene_keep_pct":   0.40,
+        "shortlist_pct":        0.25,
+        "midas_enabled":        True,
+        "yolo_enabled":         True,
+        "clip_enabled":         True,
+        "subject_metrics":      True,
+        "top_k_multiplier":     1.0,
+    },
+    "precision": {
+        "description":        "Maximum quality — dense sampling, full depth analysis",
+        "per_scene_candidates": 15,
+        "per_scene_keep_pct":   0.50,
+        "shortlist_pct":        0.40,
+        "midas_enabled":        True,
+        "yolo_enabled":         True,
+        "clip_enabled":         True,
+        "subject_metrics":      True,
+        "top_k_multiplier":     1.5,    # allows selecting more shots
+    },
+}
+
+
+def resolve_preset(user_choice: str = "auto") -> dict:
+    """
+    Resolve a user preset choice to a settings dict.
+    'auto' → detect_preset() → look up PRESETS.
+    Any named preset overrides auto-detection.
+    Returns the preset dict merged — caller applies to config.
+    """
+    if user_choice == "auto" or user_choice not in PRESETS:
+        name = detect_preset()
+    else:
+        name = user_choice
+    result = {"name": name, **PRESETS[name]}
+    return result

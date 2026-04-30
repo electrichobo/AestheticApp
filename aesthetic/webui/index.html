@@ -87,6 +87,18 @@
         <div class="flex justify-between text-xs text-gray-500"><span>Fewer scenes</span><span>More scenes</span></div>
       </div>
 
+      <!-- Runtime Preset -->
+      <div class="space-y-1.5">
+        <label class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Quality Preset</label>
+        <select id="presetSelect"
+          class="w-full bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-xs text-gray-200 cursor-pointer">
+          <option value="auto">Auto (recommended)</option>
+          <option value="fast">Fast — reduced sampling, no depth</option>
+          <option value="balanced">Balanced — full pipeline</option>
+          <option value="precision">Precision — dense sampling</option>
+        </select>
+      </div>
+
       <!-- Actions -->
       <div class="space-y-2">
         <button id="createJobBtn"
@@ -568,7 +580,8 @@ document.getElementById('analyzeBtn').addEventListener('click', async () => {
     log(`⚠ BASELINE MISMATCH: stored embeddings are ${compatR.stored_dim}-dim but current model (${compatR.current_model}) produces ${compatR.current_dim}-dim. Creative pillar scores will be empty. Rebuild the baseline in the Baseline tab.`);
   }
 
-  const r    = await window.pywebview.api.analyze(currentJobId, sens);
+  const preset = document.getElementById('presetSelect')?.value || 'auto';
+  const r    = await window.pywebview.api.analyze(currentJobId, sens, preset);
 
   clearInterval(pollInterval);
   document.getElementById('analyzeBtn').disabled = false;

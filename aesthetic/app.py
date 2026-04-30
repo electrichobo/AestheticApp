@@ -3,6 +3,9 @@
 # Boot shell only. Opens the pywebview window and hands it AestheticAPI.
 # All business logic lives in aesthetic/bridge/api.py.
 #
+import os
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")   # suppress TF info/warning noise
 # Works in three contexts:
 #   - Development: python -m aesthetic.app  (file:// URI, video preview works)
 #   - PyInstaller bundle: AESTHETIC.exe     (http_server, bridge init reliable)

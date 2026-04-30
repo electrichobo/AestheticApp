@@ -782,6 +782,12 @@ class AestheticAPI:
         if not job_dir.exists():
             return {"ok": False, "error": f"job not found: {job_id}"}
         manifest = _read_json(job_dir / "manifest.json")
+
+        # --- Runtime preset ---
+        from ..agents.model_utils import resolve_preset
+        _preset = resolve_preset(preset)
+        preset_name = _preset["name"]
+        self._push_progress(job_id, f"Runtime preset: {preset_name} — {_preset['description']}", 2)
         if not manifest:
             return {"ok": False, "error": "manifest missing"}
         return {
@@ -803,7 +809,7 @@ class AestheticAPI:
     # Analysis — real pipeline
     # -----------------------------------------------------------------------
 
-    def analyze(self, job_id: str, sensitivity: int = 50) -> Dict[str, Any]:
+    def analyze(self, job_id: str, sensitivity: int = 50, preset: str = "auto") -> Dict[str, Any]:
         """
         Run the full analysis pipeline on the given job.
         Stages: ingest → scenes → sampling → metrics → inference → aggregation → selection → export
@@ -836,7 +842,8 @@ class AestheticAPI:
             # --- stage 3: candidate sampling ---
             self._push_progress(job_id, "Sampling candidate frames…", 30)
             from ..agents.sampling import sample_candidates
-            per_scene = cfg.get("extract", {}).get("per_scene_candidates", 9)
+            per_scene = _preset.get("per_scene_candidates",
+                          cfg.get("extract", {}).get("per_scene_candidates", 9))
             candidates = sample_candidates(video_meta, scenes, job_dir, per_scene_candidates=per_scene, seed=seed)
             self._push_progress(job_id, f"Extracted {len(candidates)} candidate frames", 40)
 
@@ -937,7 +944,14 @@ class AestheticAPI:
                 stage2_config, shortlist_progress_label, build_stage_summary,
                 DEFAULT_SHORTLIST_PCT,
             )
-            shortlist_pct = float(cfg.get("selection", {}).get("shortlist_pct", DEFAULT_SHORTLIST_PCT))
+            shortlist_pct = float(_preset.get("shortlist_pct",
+                          cfg.get("selection", {}).get("shortlist_pct", DEFAULT_SHORTLIST_PCT)))
+
+            # Apply preset feature flag overrides
+            for _flag in ("midas_enabled", "yolo_enabled", "clip_enabled"):
+                if _flag in _preset:
+                    features[_flag] = _preset[_flag]
+            # subject_metrics flag propagated to frame_cfg later
 
             if features.get("clip_enabled", True) or features.get("midas_enabled", True) or features.get("yolo_enabled", True):
                 from ..agents.inference import run_frame_inference
@@ -1013,6 +1027,7 @@ class AestheticAPI:
                         frame_cfg = dict(cfg)
                         frame_cfg["features"] = dict(features)
                         frame_cfg["features"]["midas_enabled"] = run_midas
+                        frame_cfg["features"]["subject_metrics_enabled"] = _preset.get("subject_metrics", True)
                         # re-run inference (CLIP cached, only depth runs again)
                         if run_midas:
                             all_frame_metrics[fi] = run_frame_inference(
