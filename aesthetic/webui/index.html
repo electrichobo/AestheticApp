@@ -1539,21 +1539,29 @@ async function loadBaseline(){
 }
 
 document.getElementById('trainBaselineBtn').addEventListener('click', async () => {
-  if(!hasBridge) return;
+  hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview.api;
+  if(!hasBridge){ alert('Bridge not ready — please wait a moment and try again.'); return; }
   const dir = document.getElementById('baselineDirInput').value.trim();
-  if(!dir){ alert('Enter path to reference stills folder in the Advanced section'); return; }
-  document.getElementById('baselineStatus').textContent = 'training…';
-  log(`training baseline: ${dir}`);
-  const r = await window.pywebview.api.train_baseline(dir, 'trained via UI', 'staging');
-  if(r.ok){
-    const d   = r.result;
-    const qc  = d?.qc_pass_rate !== undefined ? ` (${d.qc_pass_rate}% QC pass)` : '';
-    document.getElementById('baselineStatus').textContent = `v${d?.promotion?.version} — ${d?.processed} stills${qc}`;
-    log(`baseline v${d?.promotion?.version}: ${d?.processed}/${d?.total} accepted, ${d?.failed} QC rejected`);
-    loadBaseline();
-  } else {
-    document.getElementById('baselineStatus').textContent = `error: ${r.error}`;
-    log(`baseline error: ${r.error}`);
+  if(!dir){ alert('Enter the path to your reference stills folder in the field above.'); return; }
+  const btn = document.getElementById('trainBaselineBtn');
+  btn.disabled = true; btn.textContent = 'Training…';
+  log(`training baseline from: ${dir}`);
+  try {
+    const r = await window.pywebview.api.train_baseline(dir, 'trained via UI', 'staging');
+    if(r && r.ok){
+      const d  = r.result || {};
+      const qc = d.qc_pass_rate !== undefined ? ` (${d.qc_pass_rate}% QC pass)` : '';
+      log(`baseline v${d?.promotion?.version}: ${d?.processed}/${d?.total} accepted, ${d?.failed} QC rejected${qc}`);
+      loadBaseline();
+    } else {
+      log(`baseline training failed: ${r?.error || 'unknown error'}`);
+      alert(`Training failed: ${r?.error || 'unknown error'}`);
+    }
+  } catch(e) {
+    log(`baseline exception: ${e}`);
+    alert(`Training error: ${e}`);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Train (new)';
   }
 });
 
