@@ -1296,9 +1296,11 @@ class AestheticAPI:
             _scenes_map      = {s.scene_id: s for s in scenes}
             _shot_frames_map = {}
             for _shot in selected:
-                _sid = _shot.shot_id
-                _scid= _shot.scene_id
-                _shot_frames_map[_sid] = scene_candidate_map.get(_scid, [])
+                # selected items are dicts from select_shots()
+                _sid  = _shot.get("shot_id") if isinstance(_shot, dict) else _shot.shot_id
+                _scid = _shot.get("scene_id") if isinstance(_shot, dict) else _shot.scene_id
+                if _sid is not None:
+                    _shot_frames_map[_sid] = scene_candidate_map.get(_scid, [])
 
             manifest_out = export_job(
                 job_model, selected, job_dir, cfg,
