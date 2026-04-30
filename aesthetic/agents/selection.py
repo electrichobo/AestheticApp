@@ -818,6 +818,12 @@ def _build_output(
             "delta_e_d65":        score.delta_e_d65,
             "delta_e_baseline":   score.delta_e_baseline,
             "gamut_coverage":     score.gamut_coverage,
+            "dominant_colours":   score.dominant_colours,
+            "per_frame_colours":  score.per_frame_colours,
+            "waveform":           score.waveform,
+            "parade_r":           score.parade_r,
+            "parade_g":           score.parade_g,
+            "parade_b":           score.parade_b,
             "skin_tone_detected": score.skin_tone_detected,
             "dedupe_evidence": {
                 "kept_over_duplicates": True,
