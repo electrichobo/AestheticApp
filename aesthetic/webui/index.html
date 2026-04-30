@@ -458,7 +458,7 @@ async function loadShotImages() {
       const r = await window.pywebview.api.get_local_file_url(path);
       if(r.ok) { img.src = r.url; img.removeAttribute('data-path'); }
     } catch(e) {
-      img.src = 'file:///' + path.replace(/\\/g, '/');
+      img.src = 'file:///' + path.split('\\').join('/');
     }
   }
 }
@@ -474,7 +474,7 @@ document.getElementById('browseBtn').addEventListener('click', async () => {
   if(!r.ok){ log(r.error || 'no file selected'); return; }
 
   currentSource = r.path;
-  const parts   = r.path.replace(/\\/g, '/').split('/');
+  const parts   = r.path.split('\\').join('/').split('/');
   const name    = parts[parts.length - 1];
   document.getElementById('fileName').textContent = name;
   document.getElementById('sourceLabel').textContent = name;
@@ -486,7 +486,7 @@ document.getElementById('browseBtn').addEventListener('click', async () => {
   const player = document.getElementById('videoPlayer');
   const ext    = name.split('.').pop().toLowerCase();
   if(['mp4','webm','ogg','m4v'].includes(ext)){
-    player.src = 'file:///' + r.path.replace(/\\/g, '/');
+    player.src = 'file:///' + r.path.split('\\').join('/');
     player.classList.remove('hidden');
     player.onerror = function(){ player.classList.add('hidden'); };
   } else {
@@ -1595,7 +1595,7 @@ document.getElementById('addToQueueBtn').addEventListener('click', async () => {
   const r = await window.pywebview.api.open_file_dialog();
   if(!r.ok) return;
   const path = r.path;
-  const name = path.replace(/\/g, '/').split('/').pop();
+  const name = path.split('\\').join('/').split('/').pop();
   _baselineQueue.push({path, name});
   log(`queued: ${name}`);
   _updateQueueUI();
