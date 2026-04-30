@@ -51,7 +51,14 @@ def main() -> None:
     print(f"[app] WEB_DIR: {WEB_DIR}")
     print(f"[app] WEB_DIR exists: {WEB_DIR.exists()}")
 
-    html_url = str(WEB_DIR / "index.html") if frozen else (WEB_DIR / "index.html").as_uri()
+    # In frozen bundle: always use http_server=True with edgechromium
+    # The window URL must be passed as a file:// URI, not a raw path
+    # http_server=True is required for pywebview to inject window.pywebview bridge
+    if frozen:
+        html_url = (WEB_DIR / "index.html").as_uri()
+    else:
+        html_url = (WEB_DIR / "index.html").as_uri()
+
     print(f"[app] html_url: {html_url}")
 
     print("[app] instantiating AestheticAPI...")
@@ -76,24 +83,10 @@ def main() -> None:
     )
     api._window = window
 
-    if frozen:
-        print("[app] starting webview (bundle mode)...")
-        # Try edgechromium without http_server first — most reliable for JS bridge
-        # http_server can cause bridge injection timing issues in some environments
-        try:
-            print("[app] attempting edgechromium without http_server...")
-            webview.start(gui="edgechromium")
-        except Exception as _e1:
-            print(f"[app] attempt 1 failed: {_e1}")
-            try:
-                print("[app] attempting edgechromium with http_server...")
-                webview.start(gui="edgechromium", http_server=True)
-            except Exception as _e2:
-                print(f"[app] attempt 2 failed: {_e2}")
-                print("[app] falling back to default GUI...")
-                webview.start()
-    else:
-        webview.start()
+    print("[app] starting webview...")
+    # http_server=True is required for pywebview bridge injection on Windows
+    # without it window.pywebview is never injected into the JS context
+    webview.start(http_server=True)
     # Ensure process exits cleanly — pywebview can leave threads running
     # on Windows which prevents the terminal from releasing
     import os as _os
