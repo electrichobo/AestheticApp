@@ -394,19 +394,29 @@ class AestheticAPI:
 
     def open_file_dialog(self) -> Dict[str, Any]:
         """
-        Open a native Windows file picker using ctypes GetOpenFileName.
-        This bypasses pywebview entirely and calls the Win32 API directly,
-        which is the most reliable way to get a native file dialog on Windows.
-        Falls back to a PowerShell-based dialog if ctypes fails.
+        Open a native file picker via pywebview's built-in dialog.
+        Works on all platforms with no external processes.
         """
-        import sys
-
-        if sys.platform == "win32":
-            return self._open_file_dialog_win32()
-        elif sys.platform == "darwin":
-            return self._open_file_dialog_macos()
-        else:
-            return self._open_file_dialog_linux()
+        try:
+            import webview
+            file_types = (
+                "Video Files (*.mp4;*.mov;*.avi;*.mkv;*.mxf;*.mts;*.m2ts;"
+                "*.wmv;*.webm;*.flv;*.m4v;*.mpg;*.mpeg;*.3gp;*.ts;*.r3d;*.braw)",
+                "All Files (*.*)",
+            )
+            if self._window is None:
+                raise RuntimeError("window not initialised")
+            result = self._window.create_file_dialog(
+                webview.OPEN_DIALOG,
+                allow_multiple=False,
+                file_types=file_types,
+            )
+            if result and len(result) > 0:
+                return {"ok": True, "path": result[0]}
+            return {"ok": False, "error": "no file selected"}
+        except Exception as exc:
+            print(f"[bridge] pywebview dialog failed: {exc} — trying PowerShell fallback")
+            return self._open_file_dialog_powershell()
 
     def _open_file_dialog_win32(self) -> Dict[str, Any]:
         """Windows native file dialog via ctypes."""
@@ -539,9 +549,12 @@ class AestheticAPI:
 
     def get_local_file_url(self, file_path: str) -> Dict[str, Any]:
         """
-        Return a data: URL for local image files so they can be displayed
-        in http_server mode where file:/// URLs are blocked by same-origin policy.
-        For video files returns a file:// URL (handled by the video element).
+        Return a URL for a local file that can be loaded in http_server mode.
+
+        Images: returned as data: URI (inline base64).
+        Videos: pywebview's http server can serve files from their directory —
+                we use evaluate_js to get the server's base URL and construct
+                a relative path. Falls back to file:// for non-bundle mode.
         """
         try:
             import base64
@@ -549,11 +562,45 @@ class AestheticAPI:
             if not path.exists():
                 return {"ok": False, "error": "file not found"}
             suffix = path.suffix.lower()
+
             if suffix in (".jpg", ".jpeg", ".png", ".webp"):
                 data = base64.b64encode(path.read_bytes()).decode()
                 mime = "image/jpeg" if suffix in (".jpg", ".jpeg") else f"image/{suffix[1:]}"
                 return {"ok": True, "url": f"data:{mime};base64,{data}"}
+
+            # For video: in bundle (http_server mode), file:// is blocked.
+            # Use pywebview's load_url workaround — store path for JS to use.
+            # The video element will use a blob URL created from fetch via the bridge.
+            import sys
+            if getattr(sys, "frozen", False):
+                # Return the path; JS will use get_video_data to fetch as blob
+                return {"ok": True, "url": None, "path": str(path), "use_blob": True}
+
             return {"ok": True, "url": path.as_uri()}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def get_video_data(self, file_path: str) -> Dict[str, Any]:
+        """
+        Return video file as base64 for blob URL creation in bundle mode.
+        Only called for short preview clips — not full films.
+        Limits to 50MB to avoid memory issues.
+        """
+        try:
+            import base64
+            path = Path(file_path)
+            if not path.exists():
+                return {"ok": False, "error": "file not found"}
+            size = path.stat().st_size
+            if size > 50 * 1024 * 1024:  # 50MB limit for preview
+                return {"ok": False, "error": "file too large for preview", "too_large": True}
+            suffix = path.suffix.lower().lstrip(".")
+            mime_map = {"mp4": "video/mp4", "mov": "video/quicktime",
+                        "avi": "video/x-msvideo", "mkv": "video/x-matroska",
+                        "webm": "video/webm", "m4v": "video/mp4"}
+            mime = mime_map.get(suffix, "video/mp4")
+            data = base64.b64encode(path.read_bytes()).decode()
+            return {"ok": True, "data": data, "mime": mime}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 

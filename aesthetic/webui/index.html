@@ -486,9 +486,31 @@ document.getElementById('browseBtn').addEventListener('click', async () => {
   const player = document.getElementById('videoPlayer');
   const ext    = name.split('.').pop().toLowerCase();
   if(['mp4','webm','ogg','m4v'].includes(ext)){
-    player.src = 'file:///' + r.path.split('\\').join('/');
-    player.classList.remove('hidden');
-    player.onerror = function(){ player.classList.add('hidden'); };
+    // Get URL from bridge — handles file:// (dev) and blob (bundle) modes
+    const urlRes = await window.pywebview.api.get_local_file_url(r.path);
+    if(urlRes.ok && urlRes.url){
+      player.src = urlRes.url;
+      player.classList.remove('hidden');
+      player.onerror = function(){ player.classList.add('hidden'); };
+    } else if(urlRes.ok && urlRes.use_blob){
+      // Bundle mode: fetch video as base64 and create blob URL
+      // Only for files under 50MB — larger files skip preview
+      const vd = await window.pywebview.api.get_video_data(r.path);
+      if(vd.ok){
+        const bytes  = Uint8Array.from(atob(vd.data), c => c.charCodeAt(0));
+        const blob   = new Blob([bytes], {type: vd.mime});
+        player.src   = URL.createObjectURL(blob);
+        player.classList.remove('hidden');
+        player.onerror = function(){ player.classList.add('hidden'); };
+      } else if(vd.too_large){
+        player.classList.add('hidden');
+        log('preview skipped — file over 50MB (analysis will work fine)');
+      } else {
+        player.classList.add('hidden');
+      }
+    } else {
+      player.classList.add('hidden');
+    }
   } else {
     player.classList.add('hidden');
     log('preview not available for .' + ext + ' — analysis will work fine');
@@ -1013,16 +1035,14 @@ function buildDetailPanel(s){
       </div>` : ''}
     </div>
 
-    <div class="flex gap-4 text-xs">
-      <!-- ΔE info -->
+    <!-- Top row: ΔE + CIE -->
+    <div class="flex gap-4 text-xs mb-2">
       <div class="flex-1 min-w-0">
         <div class="text-gray-500 mb-1">ΔE2000 Colour Accuracy</div>
         <div class="mb-1">vs D65 neutral: <span class="${deC(deD)}">${deD}</span>
           &nbsp; vs Baseline: <span class="${deC(deB)}">${deB}</span></div>
         <div class="text-gray-600 leading-relaxed text-xs">ΔE &lt;2 = imperceptible &nbsp; 2–5 = subtle cast &nbsp; 5–10 = visible &nbsp; &gt;10 = strong</div>
       </div>
-
-      <!-- CIE chart -->
       <div class="flex-shrink-0">
         <div class="text-gray-500 mb-1 text-xs">CIE 1931 Chromaticity</div>
         <div class="flex gap-2 items-start">
@@ -1039,22 +1059,22 @@ function buildDetailPanel(s){
           </div>
         </div>
       </div>
-
-      <!-- Scopes: stacked waveform + parade, same height as CIE -->
-      ${hasWaveform ? `
-      <div class="flex-shrink-0 space-y-1">
-        <div>
-          <div class="text-gray-600 text-xs mb-0.5">Luma</div>
-          <canvas id="wf-${s.id}" width="280" height="76"
-            class="rounded border border-gray-700/40 bg-gray-950 block"></canvas>
-        </div>
-        <div>
-          <div class="text-gray-600 text-xs mb-0.5">RGB Parade</div>
-          <canvas id="par-${s.id}" width="280" height="76"
-            class="rounded border border-gray-700/40 bg-gray-950 block"></canvas>
-        </div>
-      </div>` : ''}
     </div>
+
+    <!-- Bottom row: scopes full width -->
+    ${hasWaveform ? `
+    <div class="border-t border-gray-700/30 pt-2 grid grid-cols-2 gap-2">
+      <div>
+        <div class="text-gray-600 text-xs mb-0.5">Luma</div>
+        <canvas id="wf-${s.id}" width="400" height="80"
+          class="rounded border border-gray-700/40 bg-gray-950 block w-full"></canvas>
+      </div>
+      <div>
+        <div class="text-gray-600 text-xs mb-0.5">RGB Parade</div>
+        <canvas id="par-${s.id}" width="400" height="80"
+          class="rounded border border-gray-700/40 bg-gray-950 block w-full"></canvas>
+      </div>
+    </div>` : ''}
   </div>`;
 
   const catSections = cats.map(cat => {
