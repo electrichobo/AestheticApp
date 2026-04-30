@@ -193,6 +193,11 @@ def aggregate_shot(
         metric_detail=metric_detail,
         gamut_coverage=gamut_data.get("gamut_coverage"),
         dominant_colours=gamut_data.get("dominant_colours"),
+        per_frame_colours=gamut_data.get("per_frame_colours"),
+        waveform=gamut_data.get("waveform"),
+        parade_r=gamut_data.get("parade_r"),
+        parade_g=gamut_data.get("parade_g"),
+        parade_b=gamut_data.get("parade_b"),
     )
 
 
@@ -346,48 +351,69 @@ def _compute_subjective_proxy(
     temporal_variance: Optional[float],
 ) -> float:
     """
-    Compute a subjective pillar proxy score from narrative metrics and
-    temporal consistency only — deliberately avoiding technical category
-    scores to prevent circular dependency with the Technical pillar.
+    Compute a subjective pillar score. Combines:
+      - SigLIP zero-shot potency signals (thumbnail, portfolio, mood, presence)
+      - Emotional intensity (DeepFace)
+      - Saliency consistency and compelling MOS
+      - Temporal stability
 
-    Components:
-      - Saliency consistency (40%) — how well the frame draws attention
-      - Compelling MOS (40%)      — aesthetic appeal proxy
-      - Temporal stability (20%)  — consistent shots feel more intentional
-
-    Neutral midpoint is 50. Missing data returns 50 (unknown, not penalised).
-    Real calibration improves as the baseline corpus grows.
+    Neutral midpoint is 50.0 — missing data never penalises.
+    This is the permanent baseline score. The reranker (Phase 2) will
+    learn a personalised adjustment layer on top of this once feedback
+    data accumulates, but this value is complete and meaningful on its own.
     """
     NEUTRAL = 50.0
-    parts:   list = []
-    weights: list = []
 
-    # pull raw narrative signals directly from FrameMetrics — NOT from
-    # narrative_score which is a CategoryScore (collapsed scalar) and has
-    # no saliency_consistency or compelling_mos attributes
-    sal_vals = _collect(frames, lambda f: f.narrative.saliency_consistency
-                        if f.narrative is not None else None)
-    mos_vals = _collect(frames, lambda f: f.narrative.compelling_mos
-                        if f.narrative is not None else None)
+    def _avg_field(getter):
+        vals = _collect(frames, getter)
+        return float(np.mean(vals)) if vals else None
 
-    sal = float(np.mean(sal_vals)) if sal_vals else None
-    mos = float(np.mean(mos_vals)) if mos_vals else None
+    # --- SigLIP zero-shot signals (Phase 1.5 SubjectMetrics) ---
+    thumbnail   = _avg_field(lambda f: f.subject.thumbnail_strength       if f.subject else None)
+    portfolio   = _avg_field(lambda f: f.subject.portfolio_potential       if f.subject else None)
+    mood        = _avg_field(lambda f: f.subject.mood_clarity              if f.subject else None)
+    presence    = _avg_field(lambda f: f.subject.presence_signal           if f.subject else None)
+    simplicity  = _avg_field(lambda f: f.subject.graphic_simplicity        if f.subject else None)
+    one_sec     = _avg_field(lambda f: f.subject.one_sec_comprehension     if f.subject else None)
 
-    parts.append(float(sal) if sal is not None else NEUTRAL)
-    weights.append(0.40)
+    # --- Emotional intensity ---
+    emotion     = _avg_field(lambda f: f.subject.facial_emotion_intensity  if f.subject else None)
 
-    parts.append(float(mos) if mos is not None else NEUTRAL)
-    weights.append(0.40)
+    # --- Narrative signals ---
+    sal_vals    = _collect(frames, lambda f: f.narrative.saliency_consistency if f.narrative else None)
+    mos_vals    = _collect(frames, lambda f: f.narrative.compelling_mos       if f.narrative else None)
+    sal         = float(np.mean(sal_vals)) if sal_vals else None
+    mos         = float(np.mean(mos_vals)) if mos_vals else None
 
-    # temporal stability — low variance = intentional, consistent shot
+    # --- Weighted combination ---
+    # SigLIP zero-shot carries most weight when available — it's purpose-built
+    # for portfolio/reel use cases. Narrative proxy is the fallback base.
+    parts_weights = [
+        (thumbnail,  0.20),
+        (portfolio,  0.20),
+        (mood,       0.10),
+        (presence,   0.10),
+        (simplicity, 0.05),
+        (one_sec,    0.05),
+        (emotion,    0.10),
+        (sal,        0.10),
+        (mos,        0.10),
+    ]
+
+    total_w = 0.0
+    score   = 0.0
+    for val, w in parts_weights:
+        v = val if val is not None else NEUTRAL
+        score   += v * w
+        total_w += w
+
+    # temporal stability bonus/penalty (max ±5 points)
     if temporal_variance is not None:
         stability = max(0.0, 100.0 - min(temporal_variance * 2.0, 50.0))
-        parts.append(stability)
-    else:
-        parts.append(NEUTRAL)
-    weights.append(0.20)
+        score   += stability * 0.10
+        total_w += 0.10
 
-    proxy = sum(p * w for p, w in zip(parts, weights)) / sum(weights)
+    proxy = score / total_w if total_w > 0 else NEUTRAL
     return round(min(100.0, max(0.0, proxy)), 2)
 
 

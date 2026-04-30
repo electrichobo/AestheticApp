@@ -349,6 +349,11 @@ class ShotScore(BaseModel):
     delta_e_baseline:   Optional[float] = None
     gamut_coverage:     Optional[Dict[str, float]] = None
     dominant_colours:   Optional[List[List[float]]] = None
+    per_frame_colours:  Optional[List[List[List[float]]]] = None  # per-frame CIE clusters
+    waveform:           Optional[List[List[float]]] = None         # [col][p5,p25,p50,p75,p95]
+    parade_r:           Optional[List[List[float]]] = None
+    parade_g:           Optional[List[List[float]]] = None
+    parade_b:           Optional[List[List[float]]] = None
     skin_tone_detected: bool = False
 
     def category_list(self) -> List[Dict[str, Any]]:
