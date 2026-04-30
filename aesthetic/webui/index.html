@@ -236,7 +236,7 @@
             class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200">Matrix</a>
           <a href="#" id="tab-log" onclick="showTab('log');return false"
             class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200">Log</a>
-          <a href="#" id="tab-baseline" onclick="showTab('baseline');return false"
+          <a href="#" id="tab-baseline" onclick="showTab('baseline');loadFeedbackStats();loadTransitionStatus();return false"
             class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200">Baseline</a>
           <a href="#" id="tab-corpus" onclick="showTab('corpus');return false"
             class="tab-link whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm border-transparent text-gray-400 hover:text-gray-200">Corpus</a>
@@ -284,6 +284,27 @@
             <span class="text-xs text-gray-500 ml-2">Remove old-dimension files from a previous model</span>
           </div>
           <pre id="baselineDisplayFull" class="text-xs text-gray-300 bg-gray-800 rounded p-3 overflow-x-auto border border-gray-700">not loaded</pre>
+
+          <!-- Transition Classifier -->
+          <div class="border-t border-gray-700 pt-4">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-semibold text-white">Transition Classifier</h3>
+              <button onclick="loadTransitionStatus()" class="py-1 px-3 rounded text-xs font-medium text-white bg-gray-700 hover:bg-gray-600">Refresh</button>
+            </div>
+            <div id="transitionStatus" class="text-xs text-gray-500 mb-3">Checking…</div>
+            <div class="flex gap-2">
+              <input id="transitionDataPath" type="text" placeholder="E:\transitiontrainer"
+                class="flex-1 bg-gray-700 border border-gray-600 rounded px-2 py-1.5 text-xs text-gray-200 font-mono"/>
+              <button onclick="trainTransitionClassifier()"
+                class="py-1.5 px-3 rounded text-xs font-medium text-white bg-purple-700 hover:bg-purple-600 whitespace-nowrap"
+                id="trainTransitionBtn">
+                Train
+              </button>
+            </div>
+            <p class="text-xs text-gray-600 mt-1.5">
+              Point to your transitiontrainer directory. Expects dissolve/, fade_black/, fade_white/, hard_cut/, wipe/ subfolders with videos/.
+            </p>
+          </div>
 
           <!-- Feedback & Training -->
           <div class="border-t border-gray-700 pt-4">
@@ -1221,6 +1242,47 @@ function renderParade(canvasId, shot) {
 // ---------------------------------------------------------------------------
 // Feedback stats + training export
 // ---------------------------------------------------------------------------
+
+async function loadTransitionStatus() {
+  const el = document.getElementById('transitionStatus');
+  try {
+    const r = await window.pywebview.api.get_transition_model_status();
+    if (r.trained) {
+      el.innerHTML = `<span class="text-purple-400 font-medium">✓ Model trained</span>
+        <span class="text-gray-500 ml-2">${r.cv_accuracy}% CV accuracy · ${r.n_samples} clips · ${(r.classes||[]).join(', ')}</span>`;
+    } else {
+      el.innerHTML = '<span class="text-gray-500">No model trained yet. Add your training data path and click Train.</span>';
+    }
+  } catch(e) {
+    el.textContent = 'Status unavailable';
+  }
+}
+
+async function trainTransitionClassifier() {
+  const dataPath = document.getElementById('transitionDataPath').value.trim();
+  if (!dataPath) { alert('Enter the path to your transitiontrainer directory.'); return; }
+  const btn = document.getElementById('trainTransitionBtn');
+  btn.disabled = true;
+  btn.textContent = 'Training…';
+  document.getElementById('transitionStatus').innerHTML =
+    '<span class="text-yellow-400">Training in progress — this may take a few minutes…</span>';
+  try {
+    const r = await window.pywebview.api.train_transition_classifier(dataPath);
+    if (r.ok) {
+      document.getElementById('transitionStatus').innerHTML =
+        `<span class="text-green-400 font-medium">✓ Training complete</span>
+         <span class="text-gray-500 ml-2">${r.cv_accuracy}% CV accuracy · ${r.n_samples} clips</span>`;
+    } else {
+      document.getElementById('transitionStatus').innerHTML =
+        `<span class="text-red-400">Training failed: ${r.error}</span>`;
+    }
+  } catch(e) {
+    document.getElementById('transitionStatus').innerHTML =
+      `<span class="text-red-400">Error: ${e}</span>`;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Train';
+}
 
 async function loadFeedbackStats() {
   if(!hasBridge) return;

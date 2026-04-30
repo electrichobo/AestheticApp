@@ -125,11 +125,13 @@ class VideoMeta(BaseModel):
 # ---------------------------------------------------------------------------
 
 class Scene(BaseModel):
-    scene_id:    int
-    start_frame: int   = Field(ge=0)
-    end_frame:   int   = Field(ge=0)
-    start_time:  float = Field(ge=0.0)   # seconds
-    end_time:    float = Field(ge=0.0)   # seconds
+    scene_id:       int
+    start_frame:    int   = Field(ge=0)
+    end_frame:      int   = Field(ge=0)
+    start_time:     float = Field(ge=0.0)   # seconds
+    end_time:       float = Field(ge=0.0)   # seconds
+    transition_type: Optional[str] = None   # hard_cut / dissolve / fade_black / fade_white / wipe / unknown
+    transition_conf: Optional[float] = None # classifier confidence 0-1
 
     @field_validator("end_frame")
     @classmethod

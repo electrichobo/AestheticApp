@@ -84,6 +84,26 @@ def detect_scenes(
     )
 
     _write_scenes_json(scenes, job_dir)
+
+    # --- Transition classification (optional, requires trained model) ---
+    try:
+        from pathlib import Path as _Path
+        from ..config import DATA_DIR as _DATA_DIR
+        _model_path = str(_DATA_DIR / "transition_model.pkl")
+        if _Path(_model_path).exists() and len(scenes) > 1:
+            from .transition_classifier import classify_boundaries_batch
+            boundary_frames = [s.start_frame for s in scenes[1:]]  # skip first scene
+            results = classify_boundaries_batch(
+                video_meta.path, boundary_frames, video_meta.fps, _model_path
+            )
+            for scene, (t_type, t_conf) in zip(scenes[1:], results):
+                scene.transition_type = t_type
+                scene.transition_conf = round(t_conf, 3)
+            _write_scenes_json(scenes, job_dir)  # re-write with transition types
+            print(f"[scenes] transition types classified for {len(results)} boundaries")
+    except Exception as _tc_exc:
+        print(f"[scenes] transition classification skipped: {_tc_exc}")
+
     return scenes
 
 

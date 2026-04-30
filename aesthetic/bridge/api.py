@@ -564,6 +564,54 @@ class AestheticAPI:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
+    def train_transition_classifier(self, data_dir: str) -> Dict[str, Any]:
+        """
+        Train the transition type classifier from labelled clips.
+        data_dir should point to the transitiontrainer directory.
+        """
+        try:
+            from ..agents.transition_classifier import train as _train_tc
+            from ..config import DATA_DIR
+            model_path = _train_tc(
+                data_dir=data_dir,
+                output_dir=str(DATA_DIR),
+                verbose=True,
+            )
+            # Load the saved payload to report accuracy
+            import pickle
+            with open(model_path, "rb") as f:
+                payload = pickle.load(f)
+            return {
+                "ok":          True,
+                "model_path":  str(model_path),
+                "cv_accuracy": round(payload.get("cv_accuracy", 0) * 100, 1),
+                "n_samples":   payload.get("n_samples", 0),
+                "classes":     payload.get("classes", []),
+            }
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            return {"ok": False, "error": str(exc)}
+
+    def get_transition_model_status(self) -> Dict[str, Any]:
+        """Check whether a trained transition model exists."""
+        from ..config import DATA_DIR
+        model_path = DATA_DIR / "transition_model.pkl"
+        if not model_path.exists():
+            return {"trained": False}
+        try:
+            import pickle
+            with open(model_path, "rb") as f:
+                payload = pickle.load(f)
+            return {
+                "trained":     True,
+                "cv_accuracy": round(payload.get("cv_accuracy", 0) * 100, 1),
+                "n_samples":   payload.get("n_samples", 0),
+                "classes":     payload.get("classes", []),
+            }
+        except Exception:
+            return {"trained": False}
+
     def get_baseline_compat(self) -> Dict[str, Any]:
         """Check whether stored baseline embeddings match the current model."""
         try:
