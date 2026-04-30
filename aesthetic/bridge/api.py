@@ -181,6 +181,109 @@ class AestheticAPI:
         t.start()
         return {"ok": True, "task_id": task_id}
 
+    def queue_baseline_videos(self, video_paths: list, sensitivity: int = 50) -> Dict[str, Any]:
+        """
+        Queue multiple video files for sequential baseline augmentation.
+        Processes them one at a time in a background thread.
+        Returns a queue_id the UI can poll via poll_baseline_queue().
+        """
+        import threading
+
+        if not video_paths:
+            return {"ok": False, "error": "no paths provided"}
+
+        queue_id = "baseline_queue"
+        self._progress[queue_id] = []
+        self._baseline_video_result[queue_id] = {
+            "status":   "running",
+            "total":    len(video_paths),
+            "current":  0,
+            "current_name": "",
+            "completed": [],
+            "errors":    [],
+        }
+
+        def _run_queue():
+            from ..agents.baseline_trainer import train_baseline_from_video as _train
+            from ..agents.stratification  import rebuild_cluster_index
+            from ..agents.baseline_trainer import invalidate_embedding_cache
+
+            state = self._baseline_video_result[queue_id]
+
+            for i, vpath in enumerate(video_paths):
+                name = Path(vpath).name
+                state["current"]      = i + 1
+                state["current_name"] = name
+                self._push_progress(queue_id,
+                    f"[{i+1}/{len(video_paths)}] Starting: {name}", int(i / len(video_paths) * 100))
+
+                try:
+                    def _cb(current, total, stage):
+                        # blend item progress into overall queue progress
+                        item_pct = int(current)
+                        overall  = int((i + item_pct / 100) / len(video_paths) * 100)
+                        self._push_progress(queue_id,
+                            f"[{i+1}/{len(video_paths)}] {name}: {stage}", overall)
+
+                    result = _train(
+                        video_path=vpath,
+                        data_dir=DATA_DIR,
+                        config=self._cfg,
+                        note=f"queue item {i+1}/{len(video_paths)}: {name}",
+                        sensitivity=sensitivity,
+                        per_scene_candidates=self._cfg.get("extract", {}).get("per_scene_candidates", 6),
+                        progress_cb=_cb,
+                    )
+                    self._baseline = BaselineStore(DATA_DIR)
+                    invalidate_embedding_cache()
+                    state["completed"].append({
+                        "name":      name,
+                        "processed": result.get("processed", 0),
+                        "scenes":    result.get("scene_count", 0),
+                    })
+                    self._push_progress(queue_id,
+                        f"[{i+1}/{len(video_paths)}] ✓ {name} — {result.get('processed',0)} frames",
+                        int((i + 1) / len(video_paths) * 100))
+
+                except Exception as exc:
+                    state["errors"].append({"name": name, "error": str(exc)})
+                    self._push_progress(queue_id,
+                        f"[{i+1}/{len(video_paths)}] ✗ {name}: {exc}",
+                        int((i + 1) / len(video_paths) * 100))
+
+            # rebuild clusters once at the end, not after every file
+            try:
+                self._push_progress(queue_id, "Rebuilding style clusters…", 99)
+                bv = self._baseline.get_summary().get("active", {}).get("version", 0)
+                rebuild_cluster_index(DATA_DIR, bv)
+            except Exception as ce:
+                print(f"[bridge] cluster rebuild after queue: {ce}")
+
+            state["status"] = "complete"
+            total_frames = sum(c["processed"] for c in state["completed"])
+            self._push_progress(queue_id,
+                f"Queue complete — {len(state['completed'])} files, {total_frames} frames added", 100)
+
+        threading.Thread(target=_run_queue, daemon=True).start()
+        return {"ok": True, "queue_id": queue_id, "total": len(video_paths)}
+
+    def poll_baseline_queue(self) -> Dict[str, Any]:
+        """Poll progress for the running baseline video queue."""
+        queue_id = "baseline_queue"
+        events   = self._progress.get(queue_id, [])
+        self._progress[queue_id] = []
+        state    = self._baseline_video_result.get(queue_id, {"status": "idle"})
+        return {
+            "ok":      True,
+            "events":  events,
+            "status":  state.get("status", "idle"),
+            "total":   state.get("total", 0),
+            "current": state.get("current", 0),
+            "current_name": state.get("current_name", ""),
+            "completed": state.get("completed", []),
+            "errors":    state.get("errors", []),
+        }
+
     def poll_baseline_video_progress(self, task_id: str) -> Dict[str, Any]:
         """
         Poll progress events for a running baseline video ingest.

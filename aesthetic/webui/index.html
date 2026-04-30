@@ -175,14 +175,41 @@
           </div>
 
           <!-- Baseline actions — reference video -->
+          <!-- Augment queue -->
           <div class="space-y-1.5">
-            <label class="block text-xs text-gray-400">Add reference video</label>
-            <button id="addVideoBaselineBtn"
-              class="w-full py-1.5 px-2 rounded text-xs font-medium text-white bg-indigo-800 hover:bg-indigo-700">
-              Browse Reference Video…
-            </button>
-            <p class="text-xs text-gray-600">Ingests full metrics including motion data. Always augments — never replaces existing corpus.</p>
-            <p id="baselineStatus" class="text-xs text-gray-500">—</p>
+            <div class="flex items-center justify-between">
+              <label class="block text-xs text-gray-400">Augment baseline — queue</label>
+              <span class="text-xs text-gray-600">Always augments, never replaces</span>
+            </div>
+            <div class="flex gap-2">
+              <button id="addToQueueBtn"
+                class="flex-1 py-1.5 px-2 rounded text-xs font-medium text-white bg-indigo-800 hover:bg-indigo-700">
+                + Add Video to Queue
+              </button>
+              <button id="startQueueBtn" disabled
+                class="flex-1 py-1.5 px-2 rounded text-xs font-medium text-white bg-green-800 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                Run Queue
+              </button>
+              <button id="clearQueueBtn" disabled
+                class="py-1.5 px-2 rounded text-xs font-medium text-white bg-gray-700 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed">
+                Clear
+              </button>
+            </div>
+            <!-- Queue list -->
+            <div id="queueList" class="space-y-0.5 max-h-40 overflow-y-auto"></div>
+            <p id="queueStatus" class="text-xs text-gray-500">No videos queued.</p>
+          </div>
+
+          <!-- Queue progress -->
+          <div id="queueProgress" class="hidden space-y-1.5">
+            <div class="flex items-center justify-between text-xs">
+              <span id="queueStage" class="text-gray-400 truncate">—</span>
+              <span id="queuePct" class="text-indigo-300 flex-shrink-0 ml-2">0%</span>
+            </div>
+            <div class="score-bar">
+              <div id="queueBar" class="progress-bar-inner score-bar-fill bg-indigo-500" style="width:0%"></div>
+            </div>
+            <div id="queueLog" class="text-xs text-gray-500 font-mono max-h-24 overflow-y-auto space-y-0.5"></div>
           </div>
 
           <!-- Cluster index -->
@@ -193,21 +220,6 @@
               Rebuild Style Clusters
             </button>
             <p class="text-xs text-gray-600">Rebuilds after adding new baseline material. Clusters enable like-for-like Creative pillar scoring.</p>
-          </div>
-
-          <!-- Baseline video ingest progress -->
-          <div id="baselineIngestProgress" class="hidden space-y-1.5">
-            <div class="flex items-center justify-between text-xs">
-              <span id="baselineIngestStage" class="text-gray-400 truncate">—</span>
-              <span id="baselineIngestPct" class="text-indigo-300 flex-shrink-0 ml-2">0%</span>
-            </div>
-            <div class="score-bar">
-              <div id="baselineIngestBar" class="progress-bar-inner score-bar-fill bg-indigo-500" style="width:0%"></div>
-            </div>
-            <div class="flex items-center gap-1.5">
-              <span id="baselineIngestPulse" class="inline-block w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
-              <span id="baselineIngestEta" class="text-xs text-gray-500">—</span>
-            </div>
           </div>
 
           <!-- Baseline display -->
@@ -1536,96 +1548,110 @@ document.getElementById('trainBaselineBtn').addEventListener('click', async () =
   }
 });
 
-document.getElementById('addVideoBaselineBtn').addEventListener('click', async () => {
-  hasBridge = typeof window.pywebview !== 'undefined' && !!window.pywebview.api;
-  if(!hasBridge) return;
+// ---------------------------------------------------------------------------
+// Baseline augment queue
+// ---------------------------------------------------------------------------
+let _baselineQueue    = [];   // array of {path, name}
+let _queueRunning     = false;
+let _queuePollTimer   = null;
 
-  // open native file dialog
-  document.getElementById('baselineStatus').textContent = 'opening file dialog…';
+function _updateQueueUI() {
+  const list     = document.getElementById('queueList');
+  const status   = document.getElementById('queueStatus');
+  const startBtn = document.getElementById('startQueueBtn');
+  const clearBtn = document.getElementById('clearQueueBtn');
+
+  list.innerHTML = _baselineQueue.map((item, i) =>
+    `<div class="flex items-center justify-between px-2 py-1 bg-gray-800 rounded text-xs">
+      <span class="text-gray-300 truncate flex-1 min-w-0 mr-2">${item.name}</span>
+      ${!_queueRunning ? `<button onclick="_removeFromQueue(${i})"
+        class="text-gray-500 hover:text-red-400 flex-shrink-0">✕</button>` : ''}
+    </div>`
+  ).join('');
+
+  const n = _baselineQueue.length;
+  status.textContent = n === 0 ? 'No videos queued.' :
+    `${n} video${n !== 1 ? 's' : ''} queued${_queueRunning ? ' — running…' : ''}.`;
+  startBtn.disabled = n === 0 || _queueRunning;
+  clearBtn.disabled = n === 0 || _queueRunning;
+}
+
+function _removeFromQueue(i) {
+  _baselineQueue.splice(i, 1);
+  _updateQueueUI();
+}
+
+document.getElementById('addToQueueBtn').addEventListener('click', async () => {
+  if(!hasBridge || _queueRunning) return;
   const r = await window.pywebview.api.open_file_dialog();
-  if(!r.ok){
-    document.getElementById('baselineStatus').textContent = r.error || 'no file selected';
-    log(r.error || 'no file selected');
-    return;
-  }
-
+  if(!r.ok) return;
   const path = r.path;
-  const name = path.replace(/\\/g, '/').split('/').pop();
-  document.getElementById('addVideoBaselineBtn').disabled = true;
-  document.getElementById('addVideoBaselineBtn').textContent = 'Ingesting…';
-  document.getElementById('baselineStatus').textContent = `starting ingest: ${name}`;
-  log(`adding reference video to baseline: ${path}`);
+  const name = path.replace(/\/g, '/').split('/').pop();
+  _baselineQueue.push({path, name});
+  log(`queued: ${name}`);
+  _updateQueueUI();
+});
 
-  const sens = parseInt(document.getElementById('sensitivitySlider').value, 10);
+document.getElementById('clearQueueBtn').addEventListener('click', () => {
+  if(_queueRunning) return;
+  _baselineQueue = [];
+  _updateQueueUI();
+});
 
-  // start ingest — returns immediately with task_id
-  const startRes = await window.pywebview.api.train_baseline_from_video(
-    path, `reference video: ${name}`, sens
-  );
+document.getElementById('startQueueBtn').addEventListener('click', async () => {
+  if(!hasBridge || _queueRunning || _baselineQueue.length === 0) return;
 
-  if(!startRes.ok){
-    document.getElementById('baselineStatus').textContent = `error: ${startRes.error}`;
-    document.getElementById('addVideoBaselineBtn').disabled = false;
-    document.getElementById('addVideoBaselineBtn').textContent = 'Browse Reference Video…';
-    log(`baseline video error: ${startRes.error}`);
+  _queueRunning = true;
+  _updateQueueUI();
+
+  const paths = _baselineQueue.map(i => i.path);
+  const sens  = parseInt(document.getElementById('sensitivitySlider').value, 10);
+
+  document.getElementById('queueProgress').classList.remove('hidden');
+  document.getElementById('queueBar').style.width = '0%';
+  document.getElementById('queuePct').textContent  = '0%';
+  document.getElementById('queueLog').innerHTML    = '';
+
+  const startRes = await window.pywebview.api.queue_baseline_videos(paths, sens);
+  if(!startRes.ok) {
+    document.getElementById('queueStage').textContent = `Error: ${startRes.error}`;
+    _queueRunning = false;
+    _updateQueueUI();
     return;
   }
 
-  const taskId = startRes.task_id;
-  log(`ingest started — task: ${taskId}`);
+  log(`queue started — ${startRes.total} files`);
 
-  // show progress UI
-  document.getElementById('baselineIngestProgress').classList.remove('hidden');
-  document.getElementById('baselineIngestBar').style.width = '0%';
-  document.getElementById('baselineIngestPct').textContent = '0%';
-  document.getElementById('baselineIngestEta').textContent = 'calculating…';
-
-  // extract ETA from progress message if present
-  function parseEta(msg) {
-    const m = msg.match(/ETA\s+([\w\s]+)$/);
-    return m ? m[1].trim() : null;
-  }
-
-  // poll progress every 2 seconds
-  const _baselinePoll = setInterval(async () => {
-    const p = await window.pywebview.api.poll_baseline_video_progress(taskId);
+  _queuePollTimer = setInterval(async () => {
+    const p = await window.pywebview.api.poll_baseline_queue();
     if(!p.ok) return;
 
-    // process each event
     (p.events || []).forEach(ev => {
-      log(`[baseline] ${ev.message}`);
       const pct = Math.max(0, Math.min(100, ev.pct || 0));
-      document.getElementById('baselineIngestBar').style.width = pct + '%';
-      document.getElementById('baselineIngestPct').textContent  = pct + '%';
-      document.getElementById('baselineIngestStage').textContent = ev.message;
-      const eta = parseEta(ev.message);
-      if(eta) document.getElementById('baselineIngestEta').textContent = 'ETA: ' + eta;
+      document.getElementById('queueBar').style.width  = pct + '%';
+      document.getElementById('queuePct').textContent  = pct + '%';
+      document.getElementById('queueStage').textContent = ev.message;
+      // prepend to log
+      const line = document.createElement('div');
+      line.textContent = ev.message;
+      line.className   = 'text-gray-400';
+      const qlog = document.getElementById('queueLog');
+      qlog.insertBefore(line, qlog.firstChild);
     });
 
-    if(p.status === 'complete'){
-      clearInterval(_baselinePoll);
-      const d = p.result || {};
-      const msg = `v${d.promotion?.version} — +${d.processed || 0} frames from ${d.scene_count || 0} scenes`;
-      document.getElementById('baselineStatus').textContent = msg;
-      document.getElementById('baselineIngestBar').style.width = '100%';
-      document.getElementById('baselineIngestPct').textContent = '100%';
-      document.getElementById('baselineIngestStage').textContent = 'Complete';
-      document.getElementById('baselineIngestEta').textContent = 'Done';
-      document.getElementById('baselineIngestPulse').classList.remove('animate-pulse');
-      document.getElementById('baselineIngestPulse').classList.add('bg-green-500');
-      document.getElementById('addVideoBaselineBtn').disabled = false;
-      document.getElementById('addVideoBaselineBtn').textContent = 'Browse Reference Video…';
-      log(`baseline updated: ${d.processed}/${d.frame_count} frames → ${msg}`);
+    if(p.status === 'complete') {
+      clearInterval(_queuePollTimer);
+      _queueRunning = false;
+      _baselineQueue = [];
+      _updateQueueUI();
+
+      const total = (p.completed || []).reduce((s, c) => s + (c.processed || 0), 0);
+      const msg   = `Queue complete — ${p.completed?.length || 0} files, ${total} frames added`;
+      document.getElementById('queueStage').textContent = msg;
+      document.getElementById('queueBar').style.width   = '100%';
+      document.getElementById('queuePct').textContent   = '100%';
+      log(msg);
       loadBaseline();
-    } else if(p.status === 'error'){
-      clearInterval(_baselinePoll);
-      document.getElementById('baselineStatus').textContent = `error: ${p.error}`;
-      document.getElementById('baselineIngestStage').textContent = 'Failed';
-      document.getElementById('baselineIngestPulse').classList.remove('animate-pulse');
-      document.getElementById('baselineIngestPulse').classList.add('bg-red-500');
-      document.getElementById('addVideoBaselineBtn').disabled = false;
-      document.getElementById('addVideoBaselineBtn').textContent = 'Browse Reference Video…';
-      log(`baseline ingest failed: ${p.error}`);
     }
   }, 2000);
 });
