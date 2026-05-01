@@ -129,6 +129,28 @@ def sensitivity_to_threshold(sensitivity: int) -> float:
 # Core detection — multi-signal
 # ---------------------------------------------------------------------------
 
+def _open_video_capture(video_path: str) -> cv2.VideoCapture:
+    """
+    Open a video file for reading. Tries direct OpenCV first, then
+    falls back to ffmpeg pipe for problematic codecs (MKV, HEVC, etc.)
+    """
+    cap = cv2.VideoCapture(video_path)
+    if cap.isOpened():
+        # Quick read test — some codecs open but stall on first read
+        ok, _ = cap.read()
+        if ok:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            return cap
+        cap.release()
+
+    # Fallback: force ffmpeg backend
+    cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
+    if cap.isOpened():
+        return cap
+
+    raise RuntimeError(f"Could not open video (tried OpenCV + ffmpeg backend): {video_path}")
+
+
 def _find_cut_boundaries(
     video_path:      str,
     fps:             float,
@@ -140,10 +162,9 @@ def _find_cut_boundaries(
     """
     Step through the video and return frame indices where cuts occur.
     Combines MAD + quadrant diff + SSIM. CLIP is optional.
+    Uses ffmpeg backend for MKV/HEVC files that stall OpenCV's default decoder.
     """
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise RuntimeError(f"OpenCV could not open video: {video_path}")
+    cap = _open_video_capture(video_path)
 
     # derive secondary thresholds from primary
     quadrant_threshold = threshold * 0.6   # tighter — localised changes
