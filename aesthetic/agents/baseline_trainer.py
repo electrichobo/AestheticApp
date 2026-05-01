@@ -77,9 +77,10 @@ def train_baseline_from_folder(
         return {"ok": False, "error": f"No supported image files found in: {source_dir}"}
 
     features  = config.get("features", {})
-    gpu       = bool(features.get("gpu_enabled", False))
+    gpu       = bool(features.get("gpu_enabled", True))  # default True
     from ..agents.inference import _get_device
     device    = _get_device(gpu)
+    print(f"[baseline_trainer] compute device: {device}")
 
     store     = BaselineStore(data_dir)
     processed = 0
@@ -194,9 +195,10 @@ def train_baseline_from_video(
         return {"ok": False, "error": f"Video file not found: {video_path}"}
 
     features = config.get("features", {})
-    gpu      = bool(features.get("gpu_enabled", False))
+    gpu      = bool(features.get("gpu_enabled", True))  # default True — use GPU if available
     from ..agents.inference import _get_device
     device   = _get_device(gpu)
+    print(f"[baseline_trainer] compute device: {device}")
     seed     = config.get("runtime", {}).get("seed", 42)
     store    = BaselineStore(data_dir)
 
