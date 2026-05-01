@@ -9,8 +9,22 @@ from pathlib import Path
 
 def _setup_bundle_env() -> None:
     if getattr(sys, "frozen", False):
-        exe_dir = Path(sys.executable).parent
-        os.environ["PATH"] = str(exe_dir) + os.pathsep + os.environ.get("PATH", "")
+        exe_dir  = Path(sys.executable).parent
+        internal = Path(sys._MEIPASS)
+
+        # Add all directories needed for CUDA DLL discovery
+        cuda_paths = [
+            str(exe_dir),
+            str(internal / "torch" / "lib"),        # CUDA runtime DLLs
+            str(internal / "torch" / "bin"),
+            str(internal),
+        ]
+        existing = os.environ.get("PATH", "")
+        os.environ["PATH"] = os.pathsep.join(cuda_paths) + os.pathsep + existing
+
+        # Tell PyTorch where to find CUDA
+        os.environ.setdefault("CUDA_PATH", str(internal / "torch" / "lib"))
+
         import multiprocessing
         multiprocessing.freeze_support()
 
