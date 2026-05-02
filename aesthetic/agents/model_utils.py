@@ -155,7 +155,8 @@ def load_model(device: str):
 # Device detection
 # ---------------------------------------------------------------------------
 
-_device: Optional[str] = None
+# Cache per gpu_enabled state — a CPU-forced call never blocks later GPU calls
+_device_cache: dict = {}
 
 
 def get_device(gpu_enabled: bool = True) -> str:
@@ -164,34 +165,37 @@ def get_device(gpu_enabled: bool = True) -> str:
 
     Priority: CUDA (any NVIDIA GPU) → MPS (Apple Silicon) → CPU
 
-    Works with any CUDA-capable GPU — RTX 2060, 3090, 4080, 5080, etc.
-    No specific GPU model is assumed or required.
-
-    gpu_enabled=False forces CPU (useful for testing or low-memory situations).
+    gpu_enabled=False forces CPU for that call only.
+    Cached per gpu_enabled state so a CPU-forced call never poisons
+    subsequent GPU-enabled calls.
     """
-    global _device
-    if _device is None:
-        if not gpu_enabled:
-            _device = "cpu"
-        else:
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    _device = "cuda"
-                elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                    _device = "mps"
-                else:
-                    _device = "cpu"
-            except ImportError:
-                _device = "cpu"
-        print(f"[model_utils] compute device: {_device}")
-    return _device
+    global _device_cache
+    key = bool(gpu_enabled)
+    if key in _device_cache:
+        return _device_cache[key]
+
+    if not gpu_enabled:
+        _device_cache[key] = "cpu"
+    else:
+        try:
+            import torch
+            if torch.cuda.is_available():
+                _device_cache[key] = "cuda"
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                _device_cache[key] = "mps"
+            else:
+                _device_cache[key] = "cpu"
+        except ImportError:
+            _device_cache[key] = "cpu"
+
+    print(f"[model_utils] compute device: {_device_cache[key]} (gpu_enabled={gpu_enabled})")
+    return _device_cache[key]
 
 
 def reset_device_cache() -> None:
     """Force re-detection of device on next call (useful for testing)."""
-    global _device, _selected_model
-    _device = None
+    global _device_cache, _selected_model
+    _device_cache = {}
     _selected_model = None
 
 # ---------------------------------------------------------------------------

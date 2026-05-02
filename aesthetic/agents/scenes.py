@@ -129,26 +129,75 @@ def sensitivity_to_threshold(sensitivity: int) -> float:
 # Core detection — multi-signal
 # ---------------------------------------------------------------------------
 
-def _open_video_capture(video_path: str) -> cv2.VideoCapture:
+def _iter_frames_ffmpeg(
+    video_path: str,
+    fps: float,
+    width: int,
+    step: int = 2,
+):
     """
-    Open a video file for reading. Tries direct OpenCV first, then
-    falls back to ffmpeg pipe for problematic codecs (MKV, HEVC, etc.)
+    Yield (frame_idx, bgr_frame) using ffmpeg subprocess pipe.
+    Never blocks — if ffmpeg exits or errors, the generator ends cleanly.
+    Samples every `step` frames to reduce I/O and processing time.
     """
-    cap = cv2.VideoCapture(video_path)
-    if cap.isOpened():
-        # Quick read test — some codecs open but stall on first read
-        ok, _ = cap.read()
-        if ok:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            return cap
-        cap.release()
+    import subprocess, sys
 
-    # Fallback: force ffmpeg backend
-    cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
-    if cap.isOpened():
-        return cap
+    target_fps = fps / step  # e.g. 24fps ÷ 2 = 12fps output
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "-i", video_path,
+        "-vf", f"fps={target_fps:.4f},scale={width}:-2",
+        "-f", "rawvideo",
+        "-pix_fmt", "bgr24",
+        "pipe:1",
+    ]
+    no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        creationflags=no_window,
+    )
+    h = None
+    w = None
+    frame_idx = 0
+    try:
+        # Read frame dimensions from first frame
+        # We'll derive h from width and frame data
+        buf_size = None
+        while True:
+            if buf_size is None:
+                # Probe dimensions first
+                probe_cmd = [
+                    "ffprobe", "-v", "error", "-select_streams", "v:0",
+                    "-show_entries", "stream=width,height",
+                    "-of", "csv=p=0", video_path,
+                ]
+                probe = subprocess.run(
+                    probe_cmd, capture_output=True, text=True,
+                    creationflags=no_window,
+                )
+                if probe.returncode == 0 and probe.stdout.strip():
+                    parts = probe.stdout.strip().split(",")
+                    orig_w, orig_h = int(parts[0]), int(parts[1])
+                    # scale=width:-2 computes height proportionally (even number)
+                    scale = width / orig_w
+                    h = int(orig_h * scale)
+                    if h % 2 != 0:
+                        h += 1
+                    w = width
+                    buf_size = h * w * 3
+                else:
+                    proc.kill()
+                    return
 
-    raise RuntimeError(f"Could not open video (tried OpenCV + ffmpeg backend): {video_path}")
+            chunk = proc.stdout.read(buf_size)
+            if len(chunk) < buf_size:
+                break
+            frame = np.frombuffer(chunk, dtype=np.uint8).reshape((h, w, 3))
+            yield frame_idx * step, frame
+            frame_idx += 1
+    finally:
+        proc.kill()
+        proc.wait()
 
 
 def _find_cut_boundaries(
@@ -161,10 +210,9 @@ def _find_cut_boundaries(
 ) -> List[int]:
     """
     Step through the video and return frame indices where cuts occur.
-    Combines MAD + quadrant diff + SSIM. CLIP is optional.
-    Uses ffmpeg backend for MKV/HEVC files that stall OpenCV's default decoder.
+    Uses ffmpeg pipe for frame extraction — never blocks regardless of codec.
     """
-    cap = _open_video_capture(video_path)
+    _cap_unused = None  # kept for API compatibility
 
     # derive secondary thresholds from primary
     quadrant_threshold = threshold * 0.6   # tighter — localised changes
@@ -184,26 +232,11 @@ def _find_cut_boundaries(
     if use_clip:
         clip_model, clip_preprocess, clip_device = _load_clip_for_scenes()
 
-    # Sample every N frames — cuts are never sub-frame events.
-    # At 24fps step=2 → 12 comparisons/sec. At 60fps step=5 → 12 comparisons/sec.
-    # Reduces detection time by 50-75% on long films with no accuracy loss.
+    # Sample at ~12fps regardless of source fps — sufficient for cut detection
     step = max(1, int(round(fps / 12)))
 
     try:
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
-
-            if frame is None or frame_idx > frame_count + 100:
-                frame_idx += 1
-                continue
-
-            # Skip to next sample position
-            if frame_idx % step != 0:
-                frame_idx += 1
-                continue
-
+        for frame_idx, frame in _iter_frames_ffmpeg(video_path, fps, downscale_width, step):
             gray = _preprocess_frame(frame, downscale_width)
 
             if prev_gray is not None:
