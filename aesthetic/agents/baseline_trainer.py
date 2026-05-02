@@ -208,9 +208,11 @@ def train_baseline_from_video(
 
     try:
         # --- stage 1: ingest ---
+        print(f"[baseline_trainer] starting video ingest: {video_path}")
         if progress_cb:
             progress_cb(0, 100, f"Ingesting {video_file.name}…")
         video_meta = ingest(video_path)
+        print(f"[baseline_trainer] ingest complete: {video_meta.duration:.1f}s, {video_meta.fps:.2f}fps")
 
         # --- stage 2: scene detection ---
         if progress_cb:
@@ -222,8 +224,14 @@ def train_baseline_from_video(
             config=config,
             seed=seed,
         )
+        print(f"[baseline_trainer] found {len(scenes)} scenes in {video_file.name}")
         if progress_cb:
             progress_cb(15, 100, f"Found {len(scenes)} scenes")
+
+        if len(scenes) == 0:
+            print(f"[baseline_trainer] WARNING: 0 scenes detected — check sensitivity or file")
+            return {"ok": True, "video": video_file.name, "scene_count": 0,
+                    "frame_count": 0, "processed": 0, "failed": 0, "promotion": {}}
 
         # --- stage 3: sample candidates ---
         if progress_cb:
@@ -234,6 +242,7 @@ def train_baseline_from_video(
             seed=seed,
         )
         total_frames = len(candidates)
+        print(f"[baseline_trainer] sampled {total_frames} candidates from {len(scenes)} scenes")
         if progress_cb:
             progress_cb(30, 100, f"Extracted {total_frames} candidate frames")
 
