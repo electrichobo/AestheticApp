@@ -308,17 +308,12 @@ def train_baseline_from_video(
             t_start = _time.time()
             completed_count = 0
 
-            # Use ThreadPoolExecutor on Windows to avoid DLL conflicts (cublas/BLAS)
-            # that occur when spawning new processes after torch has loaded.
-            # numpy/OpenCV/scipy release the GIL during computation so threads
-            # achieve true parallelism for CPU-bound metric work.
-            # ProcessPoolExecutor is used on Linux/macOS where fork is available.
-            import platform as _platform
-            _executor_cls = (concurrent.futures.ThreadPoolExecutor
-                             if _platform.system() == "Windows"
-                             else concurrent.futures.ProcessPoolExecutor)
-
-            with _executor_cls(max_workers=max_workers) as executor:
+            # Always use ThreadPoolExecutor on all platforms.
+            # ProcessPoolExecutor forks after torch/OpenCV/BLAS are loaded,
+            # causing deadlocks from inherited mutex state in native libs.
+            # numpy/OpenCV/scipy release the GIL so threads achieve true
+            # parallelism for CPU-bound metric work without the fork hazard.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_map = {
                     executor.submit(_compute_frame_metrics_worker, args): args[0]
                     for args in frame_args
