@@ -259,7 +259,12 @@ def train_baseline_from_video(
         processed = skipped   # count resumed frames as processed
         failed    = 0
 
+        print(f"[baseline_trainer] candidates: {total_frames}, already_done: {skipped}, remaining: {total_remaining}")
         if total_remaining == 0:
+            if skipped > 0:
+                print(f"[baseline_trainer] WARNING: all {skipped} frames skipped as already_done — check embeddings dir")
+                print(f"[baseline_trainer] embeddings_dir: {embeddings_dir}")
+                print(f"[baseline_trainer] embeddings count: {len(already_done)}")
             if progress_cb:
                 progress_cb(90, 100, "All frames already processed — skipping to promotion")
         else:
