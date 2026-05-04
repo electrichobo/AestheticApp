@@ -45,18 +45,30 @@ def _get_data_dir() -> Path:
     if getattr(sys, "frozen", False):
         return _get_user_data_dir()
 
-    # development — check source tree first
-    source_data = Path(__file__).resolve().parent.parent / "data"
-    emb_dir = source_data / "baseline" / "embeddings"
-    if emb_dir.exists() and any(emb_dir.glob("*.json")):
-        return source_data
-
-    # no embeddings in source tree — use user data dir (has the trained baseline)
+    # development — always use user data dir for read/write
+    # The source tree may contain seed embeddings for bundling, but those
+    # are read-only. All user-generated data (augments, jobs, feedback)
+    # must go to the user data dir so it persists correctly and doesn't
+    # pollute the repo.
     user_dir = _get_user_data_dir()
     if user_dir.exists():
         return user_dir
 
-    # last resort: source tree (will be empty, but at least won't crash)
+    # user data dir doesn't exist yet — seed from source tree if available
+    source_data = Path(__file__).resolve().parent.parent / "data"
+    emb_dir = source_data / "baseline" / "embeddings"
+    if emb_dir.exists() and any(emb_dir.glob("*.json")):
+        # Copy seed embeddings to user data dir, then use user dir
+        import shutil
+        user_emb = user_dir / "baseline" / "embeddings"
+        user_emb.mkdir(parents=True, exist_ok=True)
+        for f in emb_dir.glob("*.json"):
+            dest = user_emb / f.name
+            if not dest.exists():
+                shutil.copy2(f, dest)
+        return user_dir
+
+    # last resort: source tree
     return source_data
 
 
