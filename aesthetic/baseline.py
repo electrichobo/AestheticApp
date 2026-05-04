@@ -354,12 +354,15 @@ class BaselineStore:
             print("[baseline] no active golden found — creating first golden from embeddings")
             emb_count = len(list((self.base / "embeddings").glob("*.json")))
             version   = 1
+            # stats must be a dict of OnlineStat-compatible dicts for get_summary()
+            # Use a single "embedding_count" metric with n=emb_count
+            stats = {"embedding_count": {"n": emb_count, "mean": 1.0, "M2": 0.0}}
             meta: Dict[str, Any] = {
                 "id":      f"golden-{_now_iso().replace(':','-')}",
                 "version": version,
                 "created": _now_iso(),
                 "note":    note or "initial golden baseline",
-                "stats":   {"sample_count": emb_count},
+                "stats":   stats,
             }
             meta["hash"] = _sha256_of({"version": version, "stats": meta["stats"]})
             vpath = self.golden_dir / f"v{version:04d}.json"
