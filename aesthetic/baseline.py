@@ -350,7 +350,24 @@ class BaselineStore:
     def apply_augment_to_new_golden(self, note: str = "") -> Dict[str, Any]:
         active = self.load_active_golden()
         if not active:
-            return {"ok": False, "error": "no active golden to augment"}
+            # No existing golden — create first golden from current embeddings
+            print("[baseline] no active golden found — creating first golden from embeddings")
+            emb_count = len(list(self.embeddings_dir.glob("*.json")))
+            version   = 1
+            meta: Dict[str, Any] = {
+                "id":      f"golden-{_now_iso().replace(':','-')}",
+                "version": version,
+                "created": _now_iso(),
+                "note":    note or "initial golden baseline",
+                "stats":   {"sample_count": emb_count},
+            }
+            meta["hash"] = _sha256_of({"version": version, "stats": meta["stats"]})
+            vpath = self.golden_dir / f"v{version:04d}.json"
+            self._save_json(vpath, meta)
+            self._save_json(self.active_path, {"version": version, "path": str(vpath)})
+            self._save_json(self.augment_path, {"stats": {}, "updated": _now_iso()})
+            return {"ok": True, "version": version, "path": str(vpath),
+                    "id": meta["id"], "hash": meta["hash"]}
         augment = self._load_json(self.augment_path, {"stats": {}})
         merged_stats = self._merge_stats(
             cast(Dict[str, Any], active.get("stats", {})),
