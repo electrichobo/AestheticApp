@@ -435,6 +435,9 @@ def train_baseline_from_video(
         }
 
     except Exception as exc:
+        import traceback
+        print(f"[baseline_trainer] EXCEPTION in train_baseline_from_video: {exc}")
+        traceback.print_exc()
         return {"ok": False, "error": str(exc)}
 
 

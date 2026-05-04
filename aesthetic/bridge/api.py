@@ -237,16 +237,25 @@ class AestheticAPI:
                         per_scene_candidates=self._cfg.get("extract", {}).get("per_scene_candidates", 6),
                         progress_cb=_cb,
                     )
-                    self._baseline = BaselineStore(DATA_DIR)
-                    invalidate_embedding_cache()
-                    state["completed"].append({
-                        "name":      name,
-                        "processed": result.get("processed", 0),
-                        "scenes":    result.get("scene_count", 0),
-                    })
-                    self._push_progress(queue_id,
-                        f"[{i+1}/{len(video_paths)}] ✓ {name} — {result.get('processed',0)} frames",
-                        int((i + 1) / len(video_paths) * 100))
+                    print(f"[queue] _train result for {name}: {result}")
+                    if not result.get("ok", False):
+                        err = result.get("error", "unknown error")
+                        print(f"[queue] _train failed for {name}: {err}")
+                        state["errors"].append({"name": name, "error": err})
+                        self._push_progress(queue_id,
+                            f"[{i+1}/{len(video_paths)}] ✗ {name}: {err}",
+                            int((i + 1) / len(video_paths) * 100))
+                    else:
+                        self._baseline = BaselineStore(DATA_DIR)
+                        invalidate_embedding_cache()
+                        state["completed"].append({
+                            "name":      name,
+                            "processed": result.get("processed", 0),
+                            "scenes":    result.get("scene_count", 0),
+                        })
+                        self._push_progress(queue_id,
+                            f"[{i+1}/{len(video_paths)}] ✓ {name} — {result.get('processed',0)} frames",
+                            int((i + 1) / len(video_paths) * 100))
 
                 except Exception as exc:
                     state["errors"].append({"name": name, "error": str(exc)})
