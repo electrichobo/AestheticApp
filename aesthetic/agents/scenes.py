@@ -278,7 +278,7 @@ def _find_cut_boundaries(
             frame_idx += 1
 
     finally:
-        cap.release()
+        pass  # ffmpeg pipe cleanup handled inside _iter_frames_ffmpeg
 
     last_frame = frame_idx - 1
     if last_frame > 0 and boundaries[-1] != last_frame:
