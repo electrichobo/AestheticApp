@@ -406,11 +406,12 @@ def train_baseline_from_video(
                 if record:
                     store.update_augment([record])
                     if fm.inference.clip_embedding:
-                        _store_embedding(
+                        out_path = _store_embedding(
                             Path(frame_path),
                             fm.inference.clip_embedding,
                             fm.inference.clip_model_version,
                             data_dir,
+                            video_prefix=video_prefix,
                         )
                     processed += 1
                 else:
@@ -1004,6 +1005,7 @@ def _store_embedding(
     }
     out_path = embeddings_dir / f"{key}.json"
     out_path.write_text(json.dumps(record), encoding="utf-8")
+    return out_path
 
 
 # Session-level embedding cache — loaded once per run, not per frame
