@@ -223,10 +223,11 @@ def train_baseline_from_video(
             threshold=threshold,
             config=config,
             seed=seed,
+            progress_cb=progress_cb,
         )
         print(f"[baseline_trainer] found {len(scenes)} scenes in {video_file.name}")
         if progress_cb:
-            progress_cb(15, 100, f"Found {len(scenes)} scenes")
+            progress_cb(15, 100, f"Found {len(scenes)} scenes — {len(scenes)} boundaries detected")
 
         if len(scenes) == 0:
             print(f"[baseline_trainer] WARNING: 0 scenes detected — check sensitivity or file")

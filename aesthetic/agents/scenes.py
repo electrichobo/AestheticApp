@@ -47,6 +47,7 @@ def detect_scenes(
     downscale_width:      int   = 320,
     seed:                 int   = 42,
     config:               Optional[Dict] = None,
+    progress_cb=None,
 ) -> List[Scene]:
     """
     Detect scene boundaries in the video described by video_meta.
@@ -74,6 +75,7 @@ def detect_scenes(
         threshold=threshold,
         downscale_width=downscale_width,
         use_clip=use_clip,
+        progress_cb=progress_cb,
     )
 
     scenes = _boundaries_to_scenes(
@@ -159,9 +161,10 @@ def _parse_scene_boundaries(stderr_output: str) -> list:
 
 
 def _find_cut_boundaries_ffmpeg(
-    video_path: str,
-    fps:        float,
-    threshold:  float,
+    video_path:  str,
+    fps:         float,
+    threshold:   float,
+    progress_cb=None,
 ) -> list:
     """
     Use ffmpeg built-in scene detection filter.
@@ -200,16 +203,83 @@ def _find_cut_boundaries_ffmpeg(
         except Exception as e:
             print(f"[scenes] CUDA exception: {e}, trying CPU")
 
-    # CPU fallback
-    r = _run([
-        "ffmpeg", "-hide_banner", "-loglevel", "error",
+    # CPU fallback — stream stderr so we get progress and can detect hangs
+    b = _run_streaming(video_path, ffmpeg_thresh, fps, no_window, progress_cb=progress_cb)
+    print(f"[scenes] ffmpeg CPU: {len(b)-1} cuts (thresh={ffmpeg_thresh})")
+    return b
+
+
+def _run_streaming(
+    video_path:    str,
+    ffmpeg_thresh: float,
+    fps:           float,
+    no_window:     int,
+    progress_cb=None,
+) -> list:
+    """
+    Run ffmpeg scene detection and stream stderr line-by-line.
+    Avoids blocking on a single subprocess.run() call for long films.
+    Reports progress via print statements.
+    """
+    import subprocess, re, threading, time
+
+    cmd = [
+        "ffmpeg", "-hide_banner", "-loglevel", "info",
         "-i", video_path,
         "-vf", "select='gt(scene," + str(ffmpeg_thresh) + ")',showinfo",
         "-vsync", "vfr", "-f", "null", "-",
-    ])
-    b = _parse_scene_boundaries(r.stderr)
-    print(f"[scenes] ffmpeg CPU: {len(b)-1} cuts (thresh={ffmpeg_thresh})")
-    return b
+    ]
+
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        creationflags=no_window,
+        text=True,
+        bufsize=1,
+    )
+
+    boundaries  = [0]
+    last_report = time.time()
+    frame_count = 0
+    duration_sec = None
+
+    for line in proc.stderr:
+        # Parse duration from ffmpeg header
+        if duration_sec is None:
+            dm = re.search(r"Duration:\s*(\d+):(\d+):([\d.]+)", line)
+            if dm:
+                h, m, s = int(dm.group(1)), int(dm.group(2)), float(dm.group(3))
+                duration_sec = h * 3600 + m * 60 + s
+
+        # Parse frame number from showinfo
+        if "Parsed_showinfo" in line and " n:" in line:
+            nm = re.search(r" n:\s*(\d+)", line)
+            if nm:
+                frame_idx = int(nm.group(1))
+                if frame_idx > 0:
+                    boundaries.append(frame_idx)
+
+        # Parse current time position for progress
+        tm = re.search(r"time=\s*(\d+):(\d+):([\d.]+)", line)
+        if tm:
+            h, m, s = int(tm.group(1)), int(tm.group(2)), float(tm.group(3))
+            current_sec = h * 3600 + m * 60 + s
+            frame_count = int(current_sec * fps)
+            now = time.time()
+            if now - last_report >= 10:  # report every 10 seconds
+                if duration_sec and duration_sec > 0:
+                    pct = min(99, int(current_sec / duration_sec * 100))
+                    msg = f"Detecting scenes… {current_sec:.0f}s / {duration_sec:.0f}s ({pct}%)"
+                else:
+                    msg = f"Detecting scenes… frame {frame_count}"
+                print(f"[scenes] {msg}")
+                if progress_cb:
+                    progress_cb(5 + int(pct * 0.10), 100, msg)
+                last_report = now
+
+    proc.wait()
+    return sorted(set(boundaries))
 
 
 def _find_cut_boundaries(
@@ -219,6 +289,7 @@ def _find_cut_boundaries(
     threshold:       float,
     downscale_width: int,
     use_clip:        bool = False,
+    progress_cb=None,
 ) -> list:
     """
     Find scene cut boundaries using ffmpeg native detection.
@@ -227,7 +298,7 @@ def _find_cut_boundaries(
     import subprocess, sys
     import numpy as np
 
-    boundaries = _find_cut_boundaries_ffmpeg(video_path, fps, threshold)
+    boundaries = _find_cut_boundaries_ffmpeg(video_path, fps, threshold, progress_cb=progress_cb)
 
     # Sanity: if 0 cuts on a film-length video, something went wrong
     if len(boundaries) <= 1 and frame_count > fps * 30:
