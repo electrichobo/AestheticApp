@@ -129,75 +129,88 @@ def sensitivity_to_threshold(sensitivity: int) -> float:
 # Core detection — multi-signal
 # ---------------------------------------------------------------------------
 
-def _iter_frames_ffmpeg(
+def _ffmpeg_has_cuda() -> bool:
+    """Check if the available ffmpeg was built with CUDA hwaccel support."""
+    import subprocess, sys
+    no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-hwaccels"],
+            capture_output=True, text=True, timeout=5,
+            creationflags=no_window,
+        )
+        return "cuda" in (r.stdout + r.stderr).lower()
+    except Exception:
+        return False
+
+
+def _parse_scene_boundaries(stderr_output: str) -> list:
+    """Parse ffmpeg showinfo stderr output into a list of frame indices."""
+    import re
+    boundaries = [0]
+    for line in stderr_output.splitlines():
+        if "Parsed_showinfo" in line and " n:" in line:
+            m = re.search(r" n:\s*(\d+)", line)
+            if m:
+                frame_idx = int(m.group(1))
+                if frame_idx > 0:
+                    boundaries.append(frame_idx)
+    return sorted(set(boundaries))
+
+
+def _find_cut_boundaries_ffmpeg(
     video_path: str,
-    fps: float,
-    width: int,
-    step: int = 2,
-):
+    fps:        float,
+    threshold:  float,
+) -> list:
     """
-    Yield (frame_idx, bgr_frame) using ffmpeg subprocess pipe.
-    Never blocks — if ffmpeg exits or errors, the generator ends cleanly.
-    Samples every `step` frames to reduce I/O and processing time.
+    Use ffmpeg built-in scene detection filter.
+    Tries CUDA-accelerated decode first, falls back to CPU.
+    10-20x faster than reading frames in Python.
+
+    ffmpeg scene score 0-1 maps from our MAD threshold 0-45:
+    ffmpeg_thresh = threshold / 45 * 0.6  (capped at 0.6)
     """
     import subprocess, sys
 
-    target_fps = fps / step  # e.g. 24fps ÷ 2 = 12fps output
-    cmd = [
+    ffmpeg_thresh = round(min(0.6, max(0.05, threshold / 45.0 * 0.6)), 3)
+    no_window     = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+    def _run(cmd):
+        return subprocess.run(
+            cmd, capture_output=True, text=True,
+            creationflags=no_window, timeout=600,
+        )
+
+    # Try CUDA decode first if available
+    if _ffmpeg_has_cuda():
+        try:
+            r = _run([
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
+                "-i", video_path,
+                "-vf", "hwdownload,format=nv12,"
+                       "select='gt(scene," + str(ffmpeg_thresh) + ")',showinfo",
+                "-vsync", "vfr", "-f", "null", "-",
+            ])
+            if r.returncode == 0:
+                b = _parse_scene_boundaries(r.stderr)
+                print(f"[scenes] ffmpeg CUDA: {len(b)-1} cuts (thresh={ffmpeg_thresh})")
+                return b
+            print(f"[scenes] CUDA decode failed rc={r.returncode}, trying CPU")
+        except Exception as e:
+            print(f"[scenes] CUDA exception: {e}, trying CPU")
+
+    # CPU fallback
+    r = _run([
         "ffmpeg", "-hide_banner", "-loglevel", "error",
         "-i", video_path,
-        "-vf", f"fps={target_fps:.4f},scale={width}:-2",
-        "-f", "rawvideo",
-        "-pix_fmt", "bgr24",
-        "pipe:1",
-    ]
-    no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-    proc = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-        creationflags=no_window,
-    )
-    h = None
-    w = None
-    frame_idx = 0
-    try:
-        # Read frame dimensions from first frame
-        # We'll derive h from width and frame data
-        buf_size = None
-        while True:
-            if buf_size is None:
-                # Probe dimensions first
-                probe_cmd = [
-                    "ffprobe", "-v", "error", "-select_streams", "v:0",
-                    "-show_entries", "stream=width,height",
-                    "-of", "csv=p=0", video_path,
-                ]
-                probe = subprocess.run(
-                    probe_cmd, capture_output=True, text=True,
-                    creationflags=no_window,
-                )
-                if probe.returncode == 0 and probe.stdout.strip():
-                    parts = probe.stdout.strip().split(",")
-                    orig_w, orig_h = int(parts[0]), int(parts[1])
-                    # scale=width:-2 computes height proportionally (even number)
-                    scale = width / orig_w
-                    h = int(orig_h * scale)
-                    if h % 2 != 0:
-                        h += 1
-                    w = width
-                    buf_size = h * w * 3
-                else:
-                    proc.kill()
-                    return
-
-            chunk = proc.stdout.read(buf_size)
-            if len(chunk) < buf_size:
-                break
-            frame = np.frombuffer(chunk, dtype=np.uint8).reshape((h, w, 3))
-            yield frame_idx * step, frame
-            frame_idx += 1
-    finally:
-        proc.kill()
-        proc.wait()
+        "-vf", "select='gt(scene," + str(ffmpeg_thresh) + ")',showinfo",
+        "-vsync", "vfr", "-f", "null", "-",
+    ])
+    b = _parse_scene_boundaries(r.stderr)
+    print(f"[scenes] ffmpeg CPU: {len(b)-1} cuts (thresh={ffmpeg_thresh})")
+    return b
 
 
 def _find_cut_boundaries(
@@ -207,174 +220,63 @@ def _find_cut_boundaries(
     threshold:       float,
     downscale_width: int,
     use_clip:        bool = False,
-) -> List[int]:
+) -> list:
     """
-    Step through the video and return frame indices where cuts occur.
-    Uses ffmpeg pipe for frame extraction — never blocks regardless of codec.
+    Find scene cut boundaries using ffmpeg native detection.
+    Falls back to grayscale MAD diff pipe if ffmpeg returns no cuts on a long video.
     """
-    _cap_unused = None  # kept for API compatibility
+    import subprocess, sys
+    import numpy as np
 
-    # derive secondary thresholds from primary
-    quadrant_threshold = threshold * 0.6   # tighter — localised changes
-    ssim_threshold     = max(0.55, 0.85 - (threshold / 100.0))  # lower = more different
+    boundaries = _find_cut_boundaries_ffmpeg(video_path, fps, threshold)
 
-    boundaries: List[int] = [0]
-    prev_gray:  Optional[np.ndarray] = None
-    frame_idx:  int = 0
-
-    # CLIP setup
-    clip_model      = None
-    clip_preprocess = None
-    clip_device     = "cpu"
-    prev_embedding: Optional[np.ndarray] = None
-    clip_interval   = max(1, int(fps / 2))   # sample at ~2fps
-
-    if use_clip:
-        clip_model, clip_preprocess, clip_device = _load_clip_for_scenes()
-
-    # Sample at ~12fps regardless of source fps — sufficient for cut detection
-    step = max(1, int(round(fps / 12)))
-
-    try:
-        for frame_idx, frame in _iter_frames_ffmpeg(video_path, fps, downscale_width, step):
-            gray = _preprocess_frame(frame, downscale_width)
-
-            if prev_gray is not None:
-                cut_detected = False
-
-                # signal 1 — MAD
-                if _mean_absolute_diff(prev_gray, gray) > threshold:
-                    cut_detected = True
-
-                # signal 2 — quadrant diff (reverse angles, coverage changes)
-                if not cut_detected:
-                    if _quadrant_diff(prev_gray, gray) > quadrant_threshold:
-                        cut_detected = True
-
-                # signal 3 — SSIM (structural layout change)
-                if not cut_detected:
-                    if _ssim_diff(prev_gray, gray) < ssim_threshold:
-                        cut_detected = True
-
-                # signal 4 — CLIP semantic distance (optional)
-                if not cut_detected and use_clip and clip_model is not None:
-                    if frame_idx % clip_interval == 0:
-                        emb = _clip_embedding_for_frame(
-                            frame, clip_model, clip_preprocess, clip_device
-                        )
-                        if emb is not None and prev_embedding is not None:
-                            cos_dist = 1.0 - float(np.dot(emb, prev_embedding))
-                            if cos_dist > 0.15:
-                                cut_detected = True
-                        if emb is not None:
-                            prev_embedding = emb
-
-                if cut_detected:
-                    # suppress duplicate boundaries on consecutive frames (flash cut)
-                    if not boundaries or frame_idx - boundaries[-1] > 2:
-                        boundaries.append(frame_idx)
-
-            prev_gray = gray
-            frame_idx += 1
-
-    finally:
-        pass  # ffmpeg pipe cleanup handled inside _iter_frames_ffmpeg
-
-    last_frame = frame_idx - 1
-    if last_frame > 0 and boundaries[-1] != last_frame:
-        boundaries.append(last_frame)
+    # Sanity: if 0 cuts on a film-length video, something went wrong
+    if len(boundaries) <= 1 and frame_count > fps * 30:
+        print("[scenes] 0 cuts detected on long video — using MAD fallback")
+        # Simple grayscale MAD pipe fallback
+        no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        step = max(1, int(round(fps / 8)))
+        target_fps = fps / step
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height", "-of", "csv=p=0", video_path],
+            capture_output=True, text=True, creationflags=no_window,
+        )
+        if probe.returncode == 0 and probe.stdout.strip():
+            parts = probe.stdout.strip().split(",")
+            orig_w, orig_h = int(parts[0]), int(parts[1])
+            scale = downscale_width / orig_w
+            h = int(orig_h * scale); h += h % 2
+            w = downscale_width
+            buf = h * w
+            proc = subprocess.Popen(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error",
+                 "-i", video_path,
+                 "-vf", f"fps={target_fps:.4f},scale={w}:-2",
+                 "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                creationflags=no_window,
+            )
+            boundaries = [0]
+            prev = None
+            fi = 0
+            try:
+                while True:
+                    chunk = proc.stdout.read(buf)
+                    if len(chunk) < buf:
+                        break
+                    gray = np.frombuffer(chunk, np.uint8).reshape(h, w).astype(np.float32)
+                    if prev is not None and float(np.mean(np.abs(gray - prev))) > threshold:
+                        boundaries.append(fi * step)
+                    prev = gray
+                    fi += 1
+            finally:
+                proc.kill(); proc.wait()
+            boundaries = sorted(set(boundaries))
+            print(f"[scenes] MAD fallback: {len(boundaries)-1} cuts")
 
     return boundaries
 
-
-# ---------------------------------------------------------------------------
-# Signal implementations
-# ---------------------------------------------------------------------------
-
-def _preprocess_frame(frame: np.ndarray, downscale_width: int) -> np.ndarray:
-    """Downscale and convert to greyscale."""
-    h, w = frame.shape[:2]
-    new_h = max(1, int(h * downscale_width / w))
-    small = cv2.resize(frame, (downscale_width, new_h), interpolation=cv2.INTER_AREA)
-    return cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
-
-
-def _mean_absolute_diff(a: np.ndarray, b: np.ndarray) -> float:
-    """Global mean absolute pixel difference."""
-    return float(np.mean(np.abs(a.astype(np.int32) - b.astype(np.int32))))
-
-
-def _quadrant_diff(a: np.ndarray, b: np.ndarray) -> float:
-    """
-    Split frames into 4 quadrants and return the MAXIMUM quadrant MAD.
-
-    A reverse angle or coverage change will spike one or two quadrants
-    (subject moves sides) while the overall MAD stays low.
-    This is the key signal for catching similar-background cuts.
-    """
-    h, w = a.shape
-    mh, mw = h // 2, w // 2
-
-    quads_a = [a[:mh, :mw], a[:mh, mw:], a[mh:, :mw], a[mh:, mw:]]
-    quads_b = [b[:mh, :mw], b[:mh, mw:], b[mh:, :mw], b[mh:, mw:]]
-
-    diffs = [
-        float(np.mean(np.abs(qa.astype(np.int32) - qb.astype(np.int32))))
-        for qa, qb in zip(quads_a, quads_b)
-    ]
-
-    return float(max(diffs))
-
-
-def _ssim_diff(a: np.ndarray, b: np.ndarray) -> float:
-    """
-    SSIM between two greyscale frames. Lower = more structurally different.
-    Sensitive to compositional layout changes even in tonally similar frames.
-    """
-    try:
-        import warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            return float(ssim_func(a, b, data_range=255))
-    except Exception:
-        return 1.0
-
-
-def _load_clip_for_scenes() -> Tuple:
-    """Load CLIP for scene detection. Returns (model, preprocess, device)."""
-    try:
-        from .model_utils import load_model, get_device
-        device = get_device()
-        model, preprocess, _, _ = load_model(device)
-        return model, preprocess, device
-    except Exception:
-        return None, None, "cpu"
-
-
-def _clip_embedding_for_frame(
-    frame:      np.ndarray,
-    model,
-    preprocess,
-    device:     str,
-) -> Optional[np.ndarray]:
-    """Generate a normalised CLIP embedding for a video frame."""
-    try:
-        import torch
-        from PIL import Image
-        rgb    = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img    = Image.fromarray(rgb)
-        tensor = preprocess(img).unsqueeze(0).to(device)
-        with torch.no_grad():
-            emb = model.encode_image(tensor)
-            emb = emb / emb.norm(dim=-1, keepdim=True)
-        return emb.squeeze().cpu().numpy()
-    except Exception:
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Boundary → Scene conversion
-# ---------------------------------------------------------------------------
 
 def _boundaries_to_scenes(
     boundaries:           List[int],
