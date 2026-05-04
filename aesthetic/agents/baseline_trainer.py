@@ -212,7 +212,7 @@ def train_baseline_from_video(
         if progress_cb:
             progress_cb(0, 100, f"Ingesting {video_file.name}…")
         video_meta = ingest(video_path)
-        print(f"[baseline_trainer] ingest complete: {video_meta.duration:.1f}s, {video_meta.fps:.2f}fps")
+        print(f"[baseline_trainer] ingest complete: {video_meta.duration_sec:.1f}s, {video_meta.fps:.2f}fps")
 
         # --- stage 2: scene detection ---
         if progress_cb:
