@@ -249,6 +249,7 @@ def _find_cut_boundaries(
     prev_lab    = None
     second      = 0
     last_report = 0
+    all_diffs   = []   # store all diffs for adaptive threshold retry
 
     import cv2
 
@@ -263,6 +264,7 @@ def _find_cut_boundaries(
 
             if prev_lab is not None:
                 diff = float(np.mean(np.abs(lab - prev_lab)))
+                all_diffs.append((second, diff))
                 if diff > scene_thresh:
                     frame_idx = int(second * fps)
                     boundaries.append(frame_idx)
@@ -286,6 +288,23 @@ def _find_cut_boundaries(
     finally:
         proc.kill()
         proc.wait()
+
+    # Adaptive threshold retry for low-variance films
+    # (desaturated, monochromatic, heavily graded like war films)
+    if len(boundaries) <= 3 and all_diffs and second > 300:
+        diffs_only = [d for _, d in all_diffs]
+        p75 = float(np.percentile(diffs_only, 75))
+        p90 = float(np.percentile(diffs_only, 90))
+        adaptive = p75 * 1.5  # threshold = 1.5× the 75th percentile diff
+        print(f"[scenes] low boundary count — adaptive retry: p75={p75:.1f}, p90={p90:.1f}, adaptive_thresh={adaptive:.1f}")
+        if adaptive < scene_thresh:
+            boundaries = [0]
+            for sec, diff in all_diffs:
+                if diff > adaptive:
+                    frame_idx = int(sec * fps)
+                    boundaries.append(frame_idx)
+                    print(f"[scenes] adaptive boundary at {sec}s (diff={diff:.1f})")
+            print(f"[scenes] adaptive retry found {len(boundaries)-1} boundaries")
 
     boundaries = sorted(set(boundaries))
     print(f"[scenes] found {len(boundaries)-1} scene boundaries in {second}s of video")

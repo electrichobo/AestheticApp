@@ -209,6 +209,12 @@ def train_baseline_from_video(
     try:
         # --- stage 1: ingest ---
         print(f"[baseline_trainer] starting video ingest: {video_path}")
+        # Clear stale work dir from any previous aborted run
+        if work_dir.exists():
+            import shutil
+            shutil.rmtree(work_dir, ignore_errors=True)
+            print(f"[baseline_trainer] cleared stale work dir: {work_dir}")
+        work_dir.mkdir(parents=True, exist_ok=True)
         if progress_cb:
             progress_cb(0, 100, f"Ingesting {video_file.name}…")
         video_meta = ingest(video_path)

@@ -352,7 +352,7 @@ class BaselineStore:
         if not active:
             # No existing golden — create first golden from current embeddings
             print("[baseline] no active golden found — creating first golden from embeddings")
-            emb_count = len(list(self.embeddings_dir.glob("*.json")))
+            emb_count = len(list((self.base / "embeddings").glob("*.json")))
             version   = 1
             meta: Dict[str, Any] = {
                 "id":      f"golden-{_now_iso().replace(':','-')}",
