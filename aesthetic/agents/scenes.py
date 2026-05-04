@@ -179,7 +179,7 @@ def _find_cut_boundaries_ffmpeg(
     def _run(cmd):
         return subprocess.run(
             cmd, capture_output=True, text=True,
-            creationflags=no_window, timeout=600,
+            creationflags=no_window, timeout=1800,  # 30 min max
         )
 
     # Try CUDA decode first if available
@@ -187,10 +187,9 @@ def _find_cut_boundaries_ffmpeg(
         try:
             r = _run([
                 "ffmpeg", "-hide_banner", "-loglevel", "error",
-                "-hwaccel", "cuda", "-hwaccel_output_format", "cuda",
+                "-hwaccel", "cuda",
                 "-i", video_path,
-                "-vf", "hwdownload,format=nv12,"
-                       "select='gt(scene," + str(ffmpeg_thresh) + ")',showinfo",
+                "-vf", "select='gt(scene," + str(ffmpeg_thresh) + ")',showinfo",
                 "-vsync", "vfr", "-f", "null", "-",
             ])
             if r.returncode == 0:
