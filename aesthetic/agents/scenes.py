@@ -132,7 +132,7 @@ def sensitivity_to_threshold(sensitivity: int) -> float:
 # ---------------------------------------------------------------------------
 
 def _ffmpeg_has_cuda() -> bool:
-    """Check if the available ffmpeg was built with CUDA hwaccel support."""
+    """Check if ffmpeg was built with CUDA hwaccel support."""
     import subprocess, sys
     no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     try:
@@ -146,142 +146,6 @@ def _ffmpeg_has_cuda() -> bool:
         return False
 
 
-def _parse_scene_boundaries(stderr_output: str) -> list:
-    """Parse ffmpeg showinfo stderr output into a list of frame indices."""
-    import re
-    boundaries = [0]
-    for line in stderr_output.splitlines():
-        if "Parsed_showinfo" in line and " n:" in line:
-            m = re.search(r" n:\s*(\d+)", line)
-            if m:
-                frame_idx = int(m.group(1))
-                if frame_idx > 0:
-                    boundaries.append(frame_idx)
-    return sorted(set(boundaries))
-
-
-def _find_cut_boundaries_ffmpeg(
-    video_path:  str,
-    fps:         float,
-    threshold:   float,
-    progress_cb=None,
-) -> list:
-    """
-    Use ffmpeg built-in scene detection filter.
-    Tries CUDA-accelerated decode first, falls back to CPU.
-    10-20x faster than reading frames in Python.
-
-    ffmpeg scene score 0-1 maps from our MAD threshold 0-45:
-    ffmpeg_thresh = threshold / 45 * 0.6  (capped at 0.6)
-    """
-    import subprocess, sys
-
-    ffmpeg_thresh = round(min(0.6, max(0.05, threshold / 45.0 * 0.6)), 3)
-    no_window     = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-
-    def _run(cmd):
-        return subprocess.run(
-            cmd, capture_output=True, text=True,
-            creationflags=no_window, timeout=1800,  # 30 min max
-        )
-
-    # Try CUDA decode first if available
-    if _ffmpeg_has_cuda():
-        try:
-            r = _run([
-                "ffmpeg", "-hide_banner", "-loglevel", "error",
-                "-hwaccel", "cuda",
-                "-i", video_path,
-                "-vf", "select='gt(scene," + str(ffmpeg_thresh) + ")',showinfo",
-                "-vsync", "vfr", "-f", "null", "-",
-            ])
-            if r.returncode == 0:
-                b = _parse_scene_boundaries(r.stderr)
-                print(f"[scenes] ffmpeg CUDA: {len(b)-1} cuts (thresh={ffmpeg_thresh})")
-                return b
-            print(f"[scenes] CUDA decode failed rc={r.returncode}, trying CPU")
-        except Exception as e:
-            print(f"[scenes] CUDA exception: {e}, trying CPU")
-
-    # CPU fallback — stream stderr so we get progress and can detect hangs
-    b = _run_streaming(video_path, ffmpeg_thresh, fps, no_window, progress_cb=progress_cb)
-    print(f"[scenes] ffmpeg CPU: {len(b)-1} cuts (thresh={ffmpeg_thresh})")
-    return b
-
-
-def _run_streaming(
-    video_path:    str,
-    ffmpeg_thresh: float,
-    fps:           float,
-    no_window:     int,
-    progress_cb=None,
-) -> list:
-    """
-    Run ffmpeg scene detection and stream stderr line-by-line.
-    Avoids blocking on a single subprocess.run() call for long films.
-    Reports progress via print statements.
-    """
-    import subprocess, re, threading, time
-
-    cmd = [
-        "ffmpeg", "-hide_banner", "-loglevel", "info",
-        "-i", video_path,
-        "-vf", "select='gt(scene," + str(ffmpeg_thresh) + ")',showinfo",
-        "-vsync", "vfr", "-f", "null", "-",
-    ]
-
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        creationflags=no_window,
-        text=True,
-        bufsize=1,
-    )
-
-    boundaries  = [0]
-    last_report = time.time()
-    frame_count = 0
-    duration_sec = None
-
-    for line in proc.stderr:
-        # Parse duration from ffmpeg header
-        if duration_sec is None:
-            dm = re.search(r"Duration:\s*(\d+):(\d+):([\d.]+)", line)
-            if dm:
-                h, m, s = int(dm.group(1)), int(dm.group(2)), float(dm.group(3))
-                duration_sec = h * 3600 + m * 60 + s
-
-        # Parse frame number from showinfo
-        if "Parsed_showinfo" in line and " n:" in line:
-            nm = re.search(r" n:\s*(\d+)", line)
-            if nm:
-                frame_idx = int(nm.group(1))
-                if frame_idx > 0:
-                    boundaries.append(frame_idx)
-
-        # Parse current time position for progress
-        tm = re.search(r"time=\s*(\d+):(\d+):([\d.]+)", line)
-        if tm:
-            h, m, s = int(tm.group(1)), int(tm.group(2)), float(tm.group(3))
-            current_sec = h * 3600 + m * 60 + s
-            frame_count = int(current_sec * fps)
-            now = time.time()
-            if now - last_report >= 10:  # report every 10 seconds
-                if duration_sec and duration_sec > 0:
-                    pct = min(99, int(current_sec / duration_sec * 100))
-                    msg = f"Detecting scenes… {current_sec:.0f}s / {duration_sec:.0f}s ({pct}%)"
-                else:
-                    msg = f"Detecting scenes… frame {frame_count}"
-                print(f"[scenes] {msg}")
-                if progress_cb:
-                    progress_cb(5 + int(pct * 0.10), 100, msg)
-                last_report = now
-
-    proc.wait()
-    return sorted(set(boundaries))
-
-
 def _find_cut_boundaries(
     video_path:      str,
     fps:             float,
@@ -292,59 +156,134 @@ def _find_cut_boundaries(
     progress_cb=None,
 ) -> list:
     """
-    Find scene cut boundaries using ffmpeg native detection.
-    Falls back to grayscale MAD diff pipe if ffmpeg returns no cuts on a long video.
+    Scene-level boundary detection using 1fps thumbnail diff (Option 2).
+
+    Extracts one tiny thumbnail per second via ffmpeg, computes mean absolute
+    difference between consecutive thumbnails in LAB colour space.
+
+    Editorial cuts between angles of the same scene produce small diffs (~15-30)
+    because lighting, colour, and characters remain similar.
+
+    True scene changes (new location, time jump, major transition) produce
+    large diffs (~50-120) because the overall visual character changes.
+
+    The threshold is re-mapped from the MAD cut-detection range to a
+    scene-level range: sensitivity 50 → scene_thresh ~55 (catches only
+    major visual changes, ignores editorial cuts within a scene).
+
+    Uses CUDA-accelerated decode if available, CPU otherwise.
+    Returns list of FRAME indices (not seconds) for boundary positions.
     """
     import subprocess, sys
     import numpy as np
 
-    boundaries = _find_cut_boundaries_ffmpeg(video_path, fps, threshold, progress_cb=progress_cb)
+    no_window  = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    duration_s = frame_count / fps if fps > 0 else 0
 
-    # Sanity: if 0 cuts on a film-length video, something went wrong
-    if len(boundaries) <= 1 and frame_count > fps * 30:
-        print("[scenes] 0 cuts detected on long video — using MAD fallback")
-        # Simple grayscale MAD pipe fallback
-        no_window = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        step = max(1, int(round(fps / 8)))
-        target_fps = fps / step
-        probe = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "v:0",
-             "-show_entries", "stream=width,height", "-of", "csv=p=0", video_path],
-            capture_output=True, text=True, creationflags=no_window,
-        )
-        if probe.returncode == 0 and probe.stdout.strip():
-            parts = probe.stdout.strip().split(",")
-            orig_w, orig_h = int(parts[0]), int(parts[1])
-            scale = downscale_width / orig_w
-            h = int(orig_h * scale); h += h % 2
-            w = downscale_width
-            buf = h * w
-            proc = subprocess.Popen(
-                ["ffmpeg", "-hide_banner", "-loglevel", "error",
-                 "-i", video_path,
-                 "-vf", f"fps={target_fps:.4f},scale={w}:-2",
-                 "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"],
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                creationflags=no_window,
-            )
-            boundaries = [0]
-            prev = None
-            fi = 0
-            try:
-                while True:
-                    chunk = proc.stdout.read(buf)
-                    if len(chunk) < buf:
-                        break
-                    gray = np.frombuffer(chunk, np.uint8).reshape(h, w).astype(np.float32)
-                    if prev is not None and float(np.mean(np.abs(gray - prev))) > threshold:
-                        boundaries.append(fi * step)
-                    prev = gray
-                    fi += 1
-            finally:
-                proc.kill(); proc.wait()
-            boundaries = sorted(set(boundaries))
-            print(f"[scenes] MAD fallback: {len(boundaries)-1} cuts")
+    # Map MAD threshold (4-45) to scene-level diff threshold (35-90)
+    # Low MAD thresh (high sensitivity) → lower scene thresh (catch more scene changes)
+    # High MAD thresh (low sensitivity) → higher scene thresh (only major changes)
+    scene_thresh = 35.0 + (threshold / 45.0) * 55.0  # range 35-90
 
+    print(f"[scenes] scene detection: 1fps thumbnail diff, threshold={scene_thresh:.1f}")
+
+    # Build ffmpeg command — extract 1fps, scale to 64px wide, output raw BGR
+    hw_args = []
+    if _ffmpeg_has_cuda():
+        hw_args = ["-hwaccel", "cuda"]
+
+    cmd = hw_args + [
+        "ffmpeg", "-hide_banner", "-loglevel", "error",
+    ] + hw_args + [
+        "-i", video_path,
+        "-vf", "fps=1,scale=64:-2",
+        "-f", "rawvideo", "-pix_fmt", "bgr24",
+        "pipe:1",
+    ]
+
+    # Fix cmd — hw_args was duplicated, rebuild cleanly
+    base_cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error"]
+    if _ffmpeg_has_cuda():
+        base_cmd += ["-hwaccel", "cuda"]
+    base_cmd += [
+        "-i", video_path,
+        "-vf", "fps=1,scale=64:-2",
+        "-f", "rawvideo", "-pix_fmt", "bgr24",
+        "pipe:1",
+    ]
+
+    # Probe output dimensions
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=width,height",
+         "-of", "csv=p=0", video_path],
+        capture_output=True, text=True,
+        creationflags=no_window, timeout=30,
+    )
+    if probe.returncode != 0 or not probe.stdout.strip():
+        print("[scenes] ffprobe failed — returning single scene")
+        return [0]
+
+    parts   = probe.stdout.strip().split(",")
+    orig_w  = int(parts[0])
+    orig_h  = int(parts[1])
+    scale   = 64 / orig_w
+    h       = int(orig_h * scale)
+    if h % 2 != 0: h += 1
+    w       = 64
+    buf_size = h * w * 3  # BGR
+
+    proc = subprocess.Popen(
+        base_cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        creationflags=no_window,
+    )
+
+    boundaries  = [0]
+    prev_lab    = None
+    second      = 0
+    last_report = 0
+
+    import cv2
+
+    try:
+        while True:
+            chunk = proc.stdout.read(buf_size)
+            if len(chunk) < buf_size:
+                break
+
+            bgr = np.frombuffer(chunk, dtype=np.uint8).reshape((h, w, 3))
+            lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
+
+            if prev_lab is not None:
+                diff = float(np.mean(np.abs(lab - prev_lab)))
+                if diff > scene_thresh:
+                    frame_idx = int(second * fps)
+                    boundaries.append(frame_idx)
+                    print(f"[scenes] scene boundary at {second}s (diff={diff:.1f})")
+
+            prev_lab = lab
+            second  += 1
+
+            # Progress every 60 seconds of video processed
+            if second - last_report >= 60:
+                if duration_s > 0:
+                    pct = min(99, int(second / duration_s * 100))
+                    msg = f"Detecting scenes… {second//60}m / {int(duration_s)//60}m ({pct}%)"
+                else:
+                    msg = f"Detecting scenes… {second}s processed"
+                print(f"[scenes] {msg}")
+                if progress_cb:
+                    progress_cb(5 + int(pct * 0.10), 100, msg)
+                last_report = second
+
+    finally:
+        proc.kill()
+        proc.wait()
+
+    boundaries = sorted(set(boundaries))
+    print(f"[scenes] found {len(boundaries)-1} scene boundaries in {second}s of video")
     return boundaries
 
 
