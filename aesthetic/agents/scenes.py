@@ -290,19 +290,25 @@ def _find_cut_boundaries(
         proc.wait()
 
     # Adaptive threshold retry for low-variance films
-    # (desaturated, monochromatic, heavily graded like war films)
+    # (desaturated, monochromatic, heavily graded — e.g. war films, noir)
     if len(boundaries) <= 3 and all_diffs and second > 300:
         diffs_only = [d for _, d in all_diffs]
-        p75 = float(np.percentile(diffs_only, 75))
-        p90 = float(np.percentile(diffs_only, 90))
-        adaptive = p75 * 1.5  # threshold = 1.5× the 75th percentile diff
-        print(f"[scenes] low boundary count — adaptive retry: p75={p75:.1f}, p90={p90:.1f}, adaptive_thresh={adaptive:.1f}")
+        p90  = float(np.percentile(diffs_only, 90))
+        p95  = float(np.percentile(diffs_only, 95))
+        # Use p90 × 1.8 — catches only the top outlier diffs (genuine scene changes)
+        # within the film's own tonal range. Much more conservative than p75 × 1.5.
+        adaptive = max(p90 * 1.8, p95 * 1.2)
+        print(f"[scenes] low boundary count — adaptive retry: p90={p90:.1f}, p95={p95:.1f}, adaptive_thresh={adaptive:.1f}")
         if adaptive < scene_thresh:
+            # Also enforce minimum scene duration — at least 30s between boundaries
+            min_scene_sec = 30
             boundaries = [0]
+            last_boundary_sec = 0
             for sec, diff in all_diffs:
-                if diff > adaptive:
+                if diff > adaptive and (sec - last_boundary_sec) >= min_scene_sec:
                     frame_idx = int(sec * fps)
                     boundaries.append(frame_idx)
+                    last_boundary_sec = sec
                     print(f"[scenes] adaptive boundary at {sec}s (diff={diff:.1f})")
             print(f"[scenes] adaptive retry found {len(boundaries)-1} boundaries")
 
