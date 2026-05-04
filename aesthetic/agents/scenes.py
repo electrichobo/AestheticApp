@@ -180,10 +180,15 @@ def _find_cut_boundaries(
     no_window  = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     duration_s = frame_count / fps if fps > 0 else 0
 
-    # Map MAD threshold (4-45) to scene-level diff threshold (35-90)
-    # Low MAD thresh (high sensitivity) → lower scene thresh (catch more scene changes)
-    # High MAD thresh (low sensitivity) → higher scene thresh (only major changes)
-    scene_thresh = 35.0 + (threshold / 45.0) * 55.0  # range 35-90
+    # Map MAD threshold (4-45) to scene-level LAB diff threshold (20-55)
+    # At 64px 1fps thumbnails:
+    #   same scene different angle:  LAB diff ~8-25
+    #   genuine scene change:        LAB diff ~30-60
+    #   fade/major transition:       LAB diff ~70-120
+    # sensitivity 50 (default) → MAD 24 → scene_thresh ~35 — catches scene changes
+    # sensitivity 20 (low)     → MAD 38 → scene_thresh ~47 — only major changes
+    # sensitivity 80 (high)    → MAD 13 → scene_thresh ~26 — catches subtle changes
+    scene_thresh = 20.0 + (threshold / 45.0) * 35.0  # range 20-55
 
     print(f"[scenes] scene detection: 1fps thumbnail diff, threshold={scene_thresh:.1f}")
 
