@@ -204,13 +204,16 @@ class AestheticAPI:
         }
 
         def _run_queue():
+            print(f"[queue] _run_queue started, video_paths={video_paths}")
             from ..agents.baseline_trainer import train_baseline_from_video as _train
             from ..agents.stratification  import rebuild_cluster_index
             from ..agents.baseline_trainer import invalidate_embedding_cache
 
             state = self._baseline_video_result[queue_id]
+            print(f"[queue] state initialized, iterating {len(video_paths)} paths")
 
             for i, vpath in enumerate(video_paths):
+                print(f"[queue] processing item {i}: {vpath}")
                 name = Path(vpath).name
                 state["current"]      = i + 1
                 state["current_name"] = name
