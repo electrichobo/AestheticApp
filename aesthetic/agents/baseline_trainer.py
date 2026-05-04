@@ -208,7 +208,10 @@ def train_baseline_from_video(
 
     try:
         # --- stage 1: ingest ---
-        print(f"[baseline_trainer] starting video ingest: {video_path}")
+        # Unique prefix for this video's embeddings — prevents key collisions
+        # between films that produce identically-named frame files
+        video_prefix = video_file.stem[:16].replace(" ", "_")
+        print(f"[baseline_trainer] starting video ingest: {video_path} (prefix={video_prefix})")
         # Clear stale work dir from any previous aborted run
         if work_dir.exists():
             import shutil
@@ -264,7 +267,8 @@ def train_baseline_from_video(
         embeddings_dir.mkdir(parents=True, exist_ok=True)
         already_done = {p.stem for p in embeddings_dir.glob("*.json")}
 
-        remaining = [c for c in candidates if Path(c.path).stem[:64] not in already_done]
+        def _frame_key(p): stem = p.stem[:48]; return f"{video_prefix}_{stem}"[:64]
+        remaining = [c for c in candidates if _frame_key(Path(c.path)) not in already_done]
         skipped   = total_frames - len(remaining)
         if skipped > 0:
             if progress_cb:
@@ -652,7 +656,7 @@ def _process_reference_still(
         record.update({k: v for k, v in tech.items() if isinstance(v, (int, float))})
 
         # store embedding separately
-        _store_embedding(img_path, embedding, version, data_dir)
+        _store_embedding(img_path, embedding, version, data_dir, video_prefix=video_prefix)
 
         return record
 
@@ -977,21 +981,22 @@ def _texture_retention(gray: np.ndarray) -> float:
 
 
 def _store_embedding(
-    img_path:  Path,
-    embedding: List[float],
-    version:   Optional[str],
-    data_dir:  Path,
+    img_path:     Path,
+    embedding:    List[float],
+    version:      Optional[str],
+    data_dir:     Path,
+    video_prefix: str = "",
 ) -> None:
     """
     Store the CLIP embedding for a reference still in the baseline embeddings index.
-    All embeddings are stored in data/baseline/embeddings/<stem>.json.
-    This file is what compute_baseline_similarity() reads at scoring time.
+    video_prefix is included in the key to prevent collisions when multiple
+    films produce identically-named frame files (scene_001_frame_003 etc).
     """
     embeddings_dir = data_dir / "baseline" / "embeddings"
     embeddings_dir.mkdir(parents=True, exist_ok=True)
 
-    # use a sanitized version of the filename as the key
-    key  = img_path.stem[:64]
+    stem = img_path.stem[:48]
+    key  = f"{video_prefix}_{stem}"[:64] if video_prefix else stem[:64]
     record = {
         "source":    img_path.name,
         "model":     version,
