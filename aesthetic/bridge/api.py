@@ -420,11 +420,11 @@ class AestheticAPI:
                 raise RuntimeError("window not initialised")
             result = self._window.create_file_dialog(
                 webview.OPEN_DIALOG,
-                allow_multiple=False,
+                allow_multiple=True,
                 file_types=file_types,
             )
             if result and len(result) > 0:
-                return {"ok": True, "path": result[0]}
+                return {"ok": True, "path": result[0], "paths": list(result)}
             return {"ok": False, "error": "no file selected"}
         except Exception as exc:
             print(f"[bridge] pywebview dialog failed: {exc} — trying PowerShell fallback")

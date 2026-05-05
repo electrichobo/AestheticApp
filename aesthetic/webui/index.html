@@ -1621,10 +1621,12 @@ document.getElementById('addToQueueBtn').addEventListener('click', async () => {
   if(!hasBridge || _queueRunning) return;
   const r = await window.pywebview.api.open_file_dialog();
   if(!r.ok) return;
-  const path = r.path;
-  const name = path.split('\\').join('/').split('/').pop();
-  _baselineQueue.push({path, name});
-  log(`queued: ${name}`);
+  const paths = r.paths || [r.path];
+  paths.forEach(path => {
+    const name = path.split('\\').join('/').split('/').pop();
+    _baselineQueue.push({path, name});
+    log(`queued: ${name}`);
+  });
   _updateQueueUI();
 });
 
