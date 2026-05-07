@@ -552,15 +552,18 @@ def _detect_faces(
             return 0, None
 
         # score face placement — reward faces near thirds intersection points
+        # Normalization: use w/3 as the reference — if a face is more than
+        # w/3 away from the nearest thirds point it scores below 0 (clamped to 0).
+        # This makes the score genuinely discriminating rather than inflated.
         thirds_points = [(w/3, h/3), (2*w/3, h/3), (w/3, 2*h/3), (2*w/3, 2*h/3)]
+        ref_dist = (w / 3.0)  # meaningful reference: one column width
         best_score = 0.0
         for (fx, fy, fw, fh) in faces:
             face_cx = fx + fw / 2
             face_cy = fy + fh / 2
             for (tx, ty) in thirds_points:
                 dist = ((face_cx - tx)**2 + (face_cy - ty)**2)**0.5
-                max_dist = (w**2 + h**2)**0.5
-                score = max(0.0, 100.0 - (dist / max_dist) * 100.0)
+                score = max(0.0, 100.0 - (dist / ref_dist) * 100.0)
                 best_score = max(best_score, score)
 
         return face_count, round(best_score, 2)

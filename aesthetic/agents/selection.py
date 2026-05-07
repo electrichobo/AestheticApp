@@ -235,6 +235,31 @@ def _is_non_cinematic(
             and saturation is not None and saturation < saturation_thresh * 2):
         flags += 1
 
+    # 8. Title screen / text overlay — detect horizontal text banding
+    # in the CENTER of the frame (not just lower third subtitles).
+    # Title cards have sharp horizontal edges in narrow bands across
+    # the middle 60% of the frame height.
+    try:
+        import cv2, numpy as _np
+        from pathlib import Path as _Path
+        frame_path = None
+        # access raw frame — hero frame if available
+        if hasattr(score, '_raw_frame') and score._raw_frame is not None:
+            gray_tc = cv2.cvtColor(score._raw_frame, cv2.COLOR_BGR2GRAY)
+            h_tc, w_tc = gray_tc.shape
+            center = gray_tc[int(h_tc*0.2):int(h_tc*0.8), :]
+            edges_tc = cv2.Canny(center, 30, 100)
+            rows_tc = _np.mean(edges_tc > 0, axis=1).astype(_np.float32)
+            row_var_tc = float(_np.var(rows_tc))
+            overall_tc = float(_np.mean(edges_tc > 0))
+            lum_tc = float(_np.mean(gray_tc))
+            lum_std_tc = float(_np.std(gray_tc))
+            # Low lum variance + text banding in center = title card
+            if lum_std_tc < 50.0 and row_var_tc > 0.002 and overall_tc > 0.03:
+                flags += 2
+    except Exception:
+        pass
+
     return flags >= 3
 
 
@@ -404,6 +429,10 @@ def _facility_location(
     selected_indices.append(first_idx)
     _update_distances(min_distances, vectors, first_idx)
 
+    # per-scene limit — no more than 2 shots from the same scene
+    max_per_scene = max(2, top_k // 4)
+    scene_counts: Dict[str, int] = {}
+
     while len(selected_indices) < top_k:
         # facility location objective: quality + coverage (min distance to selected)
         # normalise distances to 0-1
@@ -416,9 +445,26 @@ def _facility_location(
         for idx in selected_indices:
             scores_fl[idx] = -np.inf
 
+        # mask shots from scenes that hit the per-scene limit
+        for idx in range(n):
+            if scores_fl[idx] == -np.inf:
+                continue
+            shot, _ = pool[idx]
+            sid = getattr(shot, "scene_id", None) or ""
+            if scene_counts.get(sid, 0) >= max_per_scene:
+                scores_fl[idx] = -np.inf
+
+        # if all candidates masked, relax to fill top_k
+        if np.all(scores_fl == -np.inf):
+            break
+
         next_idx = int(np.argmax(scores_fl))
         selected_indices.append(next_idx)
         _update_distances(min_distances, vectors, next_idx)
+
+        shot, _ = pool[next_idx]
+        sid = getattr(shot, "scene_id", None) or ""
+        scene_counts[sid] = scene_counts.get(sid, 0) + 1
 
     return [pool[i] for i in selected_indices]
 

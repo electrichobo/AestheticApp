@@ -689,44 +689,53 @@ def _corpus_qc(img: np.ndarray, img_path: Path) -> Dict[str, Any]:
     if ar < 1.2:
         return {"pass": False, "reason": f"non-widescreen aspect ratio ({ar:.2f})"}
 
-    # 3. non-cinematic content — reuse our title card signals
+    # 3. non-cinematic content detection
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
     flat = gray.flatten()
     lab  = cv2.cvtColor(img, cv2.COLOR_BGR2Lab).astype(np.float32)
-    hsv  = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-    # non-cinematic content detection
-    # We only want to catch genuine title cards, logos, and graphics —
-    # NOT legitimate cinematic choices like desaturation, high contrast,
-    # negative space, or monochromatic colour grades.
-    #
-    # Strategy: require ALL of the following to be true simultaneously,
-    # not just a majority. Cinematic images will fail at least one.
+    mean_lum = float(np.mean(flat))
+    lum_std  = float(np.std(flat))
+
+    # 3a. Pure black frame — catches fade-to-black and underexposed frames
+    if mean_lum < 15.0:
+        return {"pass": False, "reason": "pure black / severely underexposed frame"}
+
+    # 3b. Near-white frame — overexposed or fade-to-white
+    if mean_lum > 245.0:
+        return {"pass": False, "reason": "pure white / severely overexposed frame"}
+
+    # 3c. Title card / credits detection — text on flat background
+    # Title cards have: low luminance variance + text edges arranged in
+    # regular horizontal bands. Detect by checking if edge density is
+    # concentrated in horizontal strips across the WHOLE frame.
+    lap      = cv2.Laplacian(gray.astype(np.uint8), cv2.CV_32F)
+    lap_std  = float(np.std(lap))
+
     a_ch     = lab[:, :, 1].astype(np.float32) - 128.0
     b_ch     = lab[:, :, 2].astype(np.float32) - 128.0
     chroma   = np.sqrt(a_ch**2 + b_ch**2)
     sat_mean = float(np.mean(chroma))
 
-    # Flag 1: near-zero saturation (< 3 Lab chroma units — truly achromatic,
-    # not just a desaturated grade — bleach bypass still has ~5-15 chroma)
-    near_zero_chroma = sat_mean < 3.0
+    # Check for text banding across the full frame (credits / title cards)
+    edges_full   = cv2.Canny(gray.astype(np.uint8), 30, 100)
+    row_densities = np.mean(edges_full > 0, axis=1).astype(np.float32)
+    row_var      = float(np.var(row_densities))
+    overall_edge = float(np.mean(edges_full > 0))
 
-    # Flag 2: almost no spatial complexity — a title card is nearly uniform.
-    # Measure std of the Laplacian (edge energy variance).
-    # Real images have complex spatial structure even when tonally simple.
-    lap      = cv2.Laplacian(gray.astype(np.uint8), cv2.CV_32F)
-    lap_std  = float(np.std(lap))
-    spatially_flat = lap_std < 8.0   # threshold: essentially zero edge complexity
+    # Title card: very low saturation + low lum variance + text banding
+    near_achromatic = sat_mean < 8.0
+    low_variance    = lum_std < 40.0
+    text_banding    = row_var > 0.003 and overall_edge > 0.04
 
-    # Flag 3: extremely uniform luminance — genuine image will always have
-    # some tonal variation even in the most minimal shot.
-    lum_std = float(np.std(flat))
-    tonally_flat = lum_std < 12.0
+    if near_achromatic and low_variance and text_banding:
+        return {"pass": False, "reason": "title card or credits (text on flat background)"}
 
-    # Only reject if ALL THREE fire — this combination is near-impossible
-    # in a real cinematic image but common in solid-colour title cards.
-    if near_zero_chroma and spatially_flat and tonally_flat:
-        return {"pass": False, "reason": "non-cinematic content (title card / logo / graphic)"}
+    # Original solid-colour title card check (no text, just flat colour)
+    spatially_flat = lap_std < 8.0
+    tonally_flat   = lum_std < 12.0
+    if sat_mean < 3.0 and spatially_flat and tonally_flat:
+        return {"pass": False, "reason": "non-cinematic content (solid colour card)"}
 
     # 4. subtitle / watermark detection — look for horizontal text bands
     #    in the lower 20% of the frame (subtitle zone)
