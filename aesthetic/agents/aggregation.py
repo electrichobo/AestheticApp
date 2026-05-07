@@ -83,10 +83,11 @@ def is_non_cinematic_scene(frames: List[FrameMetrics], threshold: float = 0.6) -
 
 
 def aggregate_shot(
-    shot_id:  str,
-    scene_id: int,
-    frames:   List[FrameMetrics],
-    config:   Dict[str, Any],
+    shot_id:      str,
+    scene_id:     int,
+    frames:       List[FrameMetrics],
+    config:       Dict[str, Any],
+    corpus_stats: Optional[Dict[str, Any]] = None,
 ) -> ShotScore:
     """
     Aggregate a list of FrameMetrics for one scene into a ShotScore.
@@ -175,6 +176,19 @@ def aggregate_shot(
     metric_detail    = _collect_metric_detail(frames)
     gamut_data       = _collect_gamut_data(frames)
 
+    # Corpus-relative scores — score each metric vs golden baseline distribution
+    corpus_scores: Optional[Dict[str, Any]] = None
+    if corpus_stats:
+        try:
+            from .corpus_scoring import score_all_metrics_vs_corpus
+            # Flatten metric_detail into a single dict for scoring
+            flat_metrics: Dict[str, float] = {}
+            for cat_vals in metric_detail.values():
+                flat_metrics.update(cat_vals)
+            corpus_scores = score_all_metrics_vs_corpus(flat_metrics, corpus_stats)
+        except Exception:
+            pass
+
     return ShotScore(
         shot_id=shot_id,
         scene_id=scene_id,
@@ -191,6 +205,7 @@ def aggregate_shot(
         temporal_variance=temporal_variance,
         frame_count=len(frames),
         metric_detail=metric_detail,
+        corpus_scores=corpus_scores,
         mean_embedding=_compute_mean_embedding(frames),
         gamut_coverage=gamut_data.get("gamut_coverage"),
         dominant_colours=gamut_data.get("dominant_colours"),

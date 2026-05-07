@@ -344,6 +344,11 @@ class ShotScore(BaseModel):
     # structure: {category: {metric_name: avg_value}}
     metric_detail: Optional[Dict[str, Dict[str, float]]] = None
 
+    # corpus-relative scores — each metric scored 0-100 vs golden baseline distribution
+    # structure: {metric_name: score_0_to_100}
+    # populated at analysis time if a golden baseline is available
+    corpus_scores: Optional[Dict[str, Optional[float]]] = None
+
     # colour analysis
     delta_e_d65:        Optional[float] = None
     delta_e_baseline:   Optional[float] = None

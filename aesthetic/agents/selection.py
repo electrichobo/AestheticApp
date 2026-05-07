@@ -889,6 +889,7 @@ def _build_output(
             },
             "mean_embedding":    score.mean_embedding,
             "metric_detail":     score.metric_detail or {},
+            "corpus_scores":     score.corpus_scores or {},
             "delta_e_d65":       score.delta_e_d65,
             "delta_e_baseline":   score.delta_e_baseline,
             "gamut_coverage":     score.gamut_coverage,

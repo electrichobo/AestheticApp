@@ -316,6 +316,23 @@ class BaselineStore:
         self._save_json(self.staging_path, out)
         return out
 
+    def get_metric_distributions(self) -> Dict[str, Any]:
+        """
+        Return the active golden baseline metric distributions as a flat dict.
+        Each key maps to {"n": int, "mean": float, "M2": float}.
+        Returns empty dict if no active golden exists.
+        Used by corpus_scoring.score_metric_vs_corpus() at analysis time.
+        """
+        active = self.load_active_golden()
+        if not active:
+            return {}
+        stats = active.get("stats", {})
+        # Filter out non-metric entries (e.g. embedding_count placeholder)
+        return {
+            k: v for k, v in stats.items()
+            if isinstance(v, dict) and "mean" in v and "M2" in v
+        }
+
     def update_augment(self, batch: Iterable[Mapping[str, float]]) -> Dict[str, Any]:
         doc = self._load_json(self.augment_path, {"stats": {}})
         stats = self._map_to_online(cast(Dict[str, Any], doc.get("stats", {})))

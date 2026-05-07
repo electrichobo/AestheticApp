@@ -1191,6 +1191,17 @@ class AestheticAPI:
                 from ..agents.aggregation import aggregate_shot as _agg
                 from ..agents.scoring import compute_harmonised_score as _score
 
+                # Load corpus distributions once for corpus-relative scoring
+                _corpus_stats: Dict[str, Any] = {}
+                try:
+                    _corpus_stats = self._baseline.get_metric_distributions()
+                    if _corpus_stats:
+                        print(f"[analysis] corpus stats loaded: {len(_corpus_stats)} metrics")
+                    else:
+                        print("[analysis] no corpus stats available — scoring without baseline distributions")
+                except Exception as _ce:
+                    print(f"[analysis] corpus stats load failed: {_ce}")
+
                 s1_shots: List[Shot] = []
                 s1_scores: List[ShotScore] = []
 
@@ -1199,7 +1210,8 @@ class AestheticAPI:
                     if not scene_frames:
                         continue
                     s_id  = f"shot_{scene.scene_id:04d}"
-                    sc    = _agg(s_id, scene.scene_id, scene_frames, cfg)
+                    sc    = _agg(s_id, scene.scene_id, scene_frames, cfg,
+                                corpus_stats=_corpus_stats)
                     sc    = _score(sc, "unknown", cfg)   # intent unknown at stage 1
                     s1_shots.append(Shot(
                         shot_id=s_id,
@@ -1330,7 +1342,8 @@ class AestheticAPI:
                     continue
 
                 shot_id = f"shot_{scene.scene_id:04d}"
-                score   = aggregate_shot(shot_id, scene.scene_id, scene_frames, cfg)
+                score   = aggregate_shot(shot_id, scene.scene_id, scene_frames, cfg,
+                                       corpus_stats=_corpus_stats)
 
                 # Colour aggregation — ΔE averaged from frames
                 de_vals = [fm.color.color_accuracy_de2000 for fm in scene_frames
@@ -1631,6 +1644,7 @@ def _build_ui_shots(selected: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "narrative":   _cat("narrative"),
             },
             "metricDetail":     s.get("metric_detail", {}),
+                "corpusScores":     s.get("corpus_scores", {}),
             "deltaED65":        s.get("delta_e_d65"),
             "deltaEBaseline":   s.get("delta_e_baseline"),
             "gamutCoverage":    s.get("gamut_coverage"),
