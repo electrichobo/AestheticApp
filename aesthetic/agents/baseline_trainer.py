@@ -616,10 +616,11 @@ def _frame_metrics_to_baseline_record(fm) -> Optional[Dict[str, float]]:
 # ---------------------------------------------------------------------------
 
 def _process_reference_still(
-    img_path: Path,
-    device:   str,
-    config:   Dict[str, Any],
-    data_dir: Path,
+    img_path:     Path,
+    device:       str,
+    config:       Dict[str, Any],
+    data_dir:     Path,
+    video_prefix: str = "",
 ) -> Optional[Dict[str, Any]]:
     """
     Process a single reference still:
