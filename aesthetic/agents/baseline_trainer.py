@@ -638,11 +638,8 @@ def _process_reference_still(
         if img is None:
             return None
 
-        # --- Corpus QC pass ---
-        qc_result = _corpus_qc(img, img_path)
-        if not qc_result["pass"]:
-            print(f"[trainer] QC rejected {img_path.name}: {qc_result['reason']}")
-            return None
+        # Corpus QC is intentionally skipped for the stills trainer path.
+        # Gold stills are hand-curated — QC only applies to video-extracted frames.
 
         # CLIP embedding
         from ..agents.inference import _run_clip
