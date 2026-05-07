@@ -36,7 +36,7 @@ from ..models.job import Scene, Shot
 
 # fraction of scenes to include in Stage 2 shortlist
 DEFAULT_SHORTLIST_PCT = 0.25
-MIN_SHORTLIST_SCENES  = 3   # always process at least this many in stage 2
+MIN_SHORTLIST_SCENES  = 10  # floor — always shortlist at least this many regardless of duration
 
 
 # ---------------------------------------------------------------------------
@@ -70,8 +70,11 @@ def compute_shortlist(
     if not shots or not scores:
         return []
 
-    n = max(MIN_SHORTLIST_SCENES, int(len(shots) * shortlist_pct))
-    n = min(n, len(shots))
+    # Floor: never shortlist fewer than MIN_SHORTLIST_SCENES or all candidates
+    # if there aren't many. This ensures short-form content isn't starved.
+    pct_n = int(len(shots) * shortlist_pct)
+    n     = max(MIN_SHORTLIST_SCENES, pct_n, min(len(shots), 20))
+    n     = min(n, len(shots))
 
     ranked = sorted(
         zip(shots, scores),

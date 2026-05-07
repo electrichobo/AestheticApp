@@ -94,15 +94,21 @@ def select_shots(
     pool = _apply_duration_weighting(pool, min_dur, soft_min)
 
     # step 5 — ensure we have enough for selection
-    if len(pool) <= top_k:
+    # For short content with few candidates, return all that passed filters
+    # rather than enforcing top_k strictly. Quality over quantity.
+    effective_k = min(top_k, len(pool))
+    if effective_k == 0:
+        return []
+
+    if len(pool) <= effective_k:
         selected = pool
     else:
         # step 6 — facility location selection
-        selected = _facility_location(pool, top_k, rng)
+        selected = _facility_location(pool, effective_k, rng)
 
-    # step 7 — guarantee top_k even if facility location degraded
-    if len(selected) < min(top_k, len(pool)):
-        selected = _top_k_fallback(pool, top_k)
+    # step 7 — guarantee effective_k even if facility location degraded
+    if len(selected) < min(effective_k, len(pool)):
+        selected = _top_k_fallback(pool, effective_k)
 
     # step 8 — narrative diversity enforcement
     # ensure the final picks span shot scales, movement types, and scene types
