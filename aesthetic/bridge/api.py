@@ -756,23 +756,41 @@ class AestheticAPI:
             return {"ok": False, "error": str(exc)}
 
     def get_transition_model_status(self) -> Dict[str, Any]:
-        """Check whether a trained transition model exists."""
+        """Check whether a trained transition model exists.
+        Checks user data dir first, then source tree, then _MEIPASS bundle."""
+        import pickle
+        from pathlib import Path as _Path
         from ..config import DATA_DIR
-        model_path = DATA_DIR / "transition_model.pkl"
-        if not model_path.exists():
-            return {"trained": False}
-        try:
-            import pickle
-            with open(model_path, "rb") as f:
-                payload = pickle.load(f)
-            return {
-                "trained":     True,
-                "cv_accuracy": round(payload.get("cv_accuracy", 0) * 100, 1),
-                "n_samples":   payload.get("n_samples", 0),
-                "classes":     payload.get("classes", []),
-            }
-        except Exception:
-            return {"trained": False}
+
+        candidates = [
+            DATA_DIR / "transition_model.pkl",                                   # user-trained
+            _Path(__file__).resolve().parent.parent / "data" / "transition_model.pkl",  # source tree (dev)
+        ]
+        # Bundle path (_MEIPASS) if frozen
+        import sys as _sys
+        if getattr(_sys, "frozen", False):
+            candidates.append(_Path(_sys._MEIPASS) / "aesthetic" / "data" / "transition_model.pkl")
+
+        for model_path in candidates:
+            if not model_path.exists():
+                continue
+            try:
+                with open(model_path, "rb") as f:
+                    payload = pickle.load(f)
+                source = ("user" if model_path == candidates[0]
+                          else "bundled" if "MEIPASS" in str(model_path)
+                          else "bundled")
+                return {
+                    "trained":     True,
+                    "cv_accuracy": round(payload.get("cv_accuracy", 0) * 100, 1),
+                    "n_samples":   payload.get("n_samples", 0),
+                    "classes":     payload.get("classes", []),
+                    "source":      source,
+                }
+            except Exception:
+                continue
+        return {"trained": False}
+
 
     def get_baseline_compat(self) -> Dict[str, Any]:
         """Check whether stored baseline embeddings match the current model."""
