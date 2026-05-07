@@ -289,9 +289,11 @@ def _find_cut_boundaries(
         proc.kill()
         proc.wait()
 
-    # Adaptive threshold retry for low-variance films
-    # (desaturated, monochromatic, heavily graded — e.g. war films, noir)
-    if len(boundaries) <= 3 and all_diffs and second > 300:
+    # Adaptive threshold retry for low-variance films or under-detected content
+    # Triggers when: fewer than 3 boundaries detected, OR fewer than 1 scene
+    # per 5 minutes of content (e.g. 9-minute film should have at least 1-2 scenes)
+    expected_min = max(3, int(second / 300))  # at least 1 scene per 5 minutes
+    if len(boundaries) <= expected_min and all_diffs and second > 60:
         diffs_only = [d for _, d in all_diffs]
         p90  = float(np.percentile(diffs_only, 90))
         p95  = float(np.percentile(diffs_only, 95))
