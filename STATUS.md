@@ -1,9 +1,9 @@
 # AESTHETIC — Development Status
 
-## Current Milestone: M5 — Desktop UI Shell & Model Inference
+## Current Milestone: M6 — Editorial Deliverables & Golden Baseline Stills Ingest
 - **Phase**: Ground-Up Rebuild in Rust
 - **Target**: Windows x64 (primary), Linux, macOS
-- **Active Focus**: Desktop UI shell architecture, interactive scopes integration, DirectML vision models.
+- **Active Focus**: JSON shot sidecars, Top-$N$ visual contact sheets, native browsable file dialogs, still image baseline ingestion, NLE XML/EDL round-trip.
 
 ---
 
@@ -14,46 +14,46 @@
 | **M0: Protocol & Clean Rebuild** | Protocol initialization, AGENTS.md, HANDOFF.md, purge legacy Python code | ✅ Done | Clean Rust Cargo workspace established |
 | **M1: Data Models & Objective Metrics** | `aesthetic-models`, `aesthetic-metrics` (SIMD/rayon exposure, optics, color physics) | ✅ Done | Pure Rust math verified with passing unit tests |
 | **M2: Temporal Engine & Windowing** | `aesthetic-core` video probe, transition cut detection, 1.5s-4.0s window optimizer, active matte detection | ✅ Done | 4-Output architecture implemented & tested |
-| **M3: Baseline Vector Store & DP Match** | `BaselineStore` vector similarity, master DP fingerprint matching, empirical quantile calibration | ✅ Done | Deakins, Fraser, Dryburgh craft signatures implemented |
+| **M3: Baseline Vector Store & DP Match** | `BaselineStore` vector similarity, master DP fingerprint matching, empirical quantile calibration | ✅ Done | 58 Master DP craft signatures active |
 | **M4: CLI Driver & Benchmark Harness** | `aesthetic-cli`, 4K SIMD physics benchmark (1.70s 4K pass), demo take evaluation | ✅ Done | Standalone executable verified in debug and release |
-| **M5: Desktop UI & Web Ingest** | Web video ingest (yt-dlp), broadcast scopes engine (Waveform, RGB Parade), Desktop UI shell | 🔄 In Progress | Scopes and web ingest complete; UI shell in progress |
+| **M5: Desktop UI, Scopes & Release** | 5 Broadcast Scopes, CMX 3600 EDL/CSV Export, Desktop UI Shell, DirectML Acceleration | ✅ Done | Release binaries verified (`aesthetic-cli`, `aesthetic-ui`) |
+| **M6: Editorial Deliverables & Stills Ingest** | JSON Shot Sidecars, Top-$N$ Breakout & Visual Contact Sheet, Native File Browser, Still Images Baseline Ingest, NLE XML/EDL Round-Trip | 🔄 In Progress | Delivering core showreel and curation workflows |
+| **M7: Advanced Cinematographic Intelligence** | Depth-Conditioned Z-Plane Focus (Bokeh MTF), Volumetric Key-Fill & Catchlight Geometry, Split-Toning in ACES/Linear Space, Gaze-Anchored Cinematic Poise, Style-Family Manifold Geodesics | 🔮 Planned | Learned subjective heads & perceptual optical modeling |
 
 ---
 
-## Completed in M5 (So Far)
-- Built **Broadcast Scopes Suite** (`crates/aesthetic-metrics/src/scopes.rs`):
-  - 100-IRE Luma Waveform with square-root density modeling for authentic analog CRT/phosphor glow.
-  - 3-channel RGB Parade with isolated color channel density columns.
-  - Circular Vectorscope with YUV Cb-Cr polar distribution, graticule bounds, and 57° skin-tone I-line.
+## Completed in M5
+- **5-Scope Broadcast Deck** (`crates/aesthetic-metrics/src/scopes.rs`):
+  - 100-IRE Luma Waveform with square-root density phosphor modeling.
+  - 3-channel isolated RGB Parade.
+  - Circular Vectorscope with YUV Cb-Cr polar distribution and 57° skin-tone I-line.
   - 256-bucket Channel Histograms (Luma, R, G, B) with peak-normalized curves.
   - CIE 1931 xy Chromaticity Gamut Map with sRGB, DCI-P3, and Rec.2020 triangle overlays.
-- Built **Editorial & Selects Export Engine** (`crates/aesthetic-core/src/export.rs`):
+- **Editorial & Selects Export Engine** (`crates/aesthetic-core/src/export.rs`):
   - SMPTE timecode calculation (`seconds_to_smpte_timecode`).
-  - CMX 3600 EDL generator with event indexing, source/record timecodes, and metadata tags for DaVinci Resolve, Premiere Pro, and Avid.
+  - CMX 3600 EDL generator with event indexing and source/record timecodes.
   - CSV Selects manifest for spreadsheet and database ingestion.
-- Built **Frame Demux & Lossless Sub-clip Extraction** (`crates/aesthetic-core/src/video.rs`):
-  - Zero-copy ffmpeg pipe frame extraction (`extract_frame_rgb`).
-  - Stream-copy clip trimming with handle clamping (`extract_trimmed_clip`).
-- Integrated **Hardware Acceleration Engine** (`crates/aesthetic-core`):
+- **Hardware Acceleration Engine** (`crates/aesthetic-core`):
   - Option A approved: `ort` v2.0 with Microsoft DirectML execution provider.
-  - Configured with pure dynamic loading (`load-dynamic`) to ensure zero C-compiler/dlltool friction on Windows GNU toolchains while unlocking NVIDIA, AMD/ATI, and Intel GPU acceleration.
-- Built **Desktop UI Shell & Interactive Scopes Deck** (`crates/aesthetic-ui/`):
+  - Pure dynamic loading (`load-dynamic`) ensuring zero GNU/C-linking friction and vendor-agnostic GPU acceleration (NVIDIA, AMD/ATI, Intel).
+- **Desktop UI Shell** (`crates/aesthetic-ui/`):
   - Pure Rust embedded HTTP server + static HTML5/CSS/Canvas frontend.
   - Native Edge App Mode chromeless window (`msedge.exe --app=...`) with sub-millisecond scope rendering.
-  - Interactive timeline scrubber with live playhead feedback, streaming 5 scopes (Waveform, Parade, Vectorscope, Histogram, CIE 1931) and updating 4-output matrix in real-time.
-  - Full support for opening local files (`/api/open_media`), probing remote URLs (`/api/web_probe`), and downloading CMX 3600 EDL and CSV manifests.
-- Built **Web Video Ingest Engine** (`crates/aesthetic-core/src/web_ingest.rs`):
-  - Direct URL probing and streaming/download via `yt-dlp` sidecar for YouTube, Vimeo, and web streams.
-- Built **Cinematographic Craft & Vision Model Inference Engine** (`crates/aesthetic-core/src/inference.rs`):
-  - Monocular depth estimation (Depth-Anything-V2) computing relative depth map, foreground/background depth separation index (0–100), depth plane count, and silhouette edge clarity.
-  - 1152-dimensional vision embedding extraction (SigLIP / ViT) with L2 normalization for baseline DP craft matching.
-  - Multi-threaded Rayon SIMD execution with DirectML GPU hardware acceleration support.
-- Built **End-to-End Batch Analysis Pipeline** (`crates/aesthetic-core/src/pipeline.rs`):
-  - `analyze_video_file`: End-to-end video probing, frame sampling, transition boundary detection, 4-output candidate take scoring, Master DP matching, and automatic CMX 3600 EDL, CSV selects manifest, and trimmed clips extraction.
-- Expanded **Master Cinematographer Signatures (58 Masters)** (`crates/aesthetic-core/src/baseline_store.rs`):
-  - Calibrated visual signatures covering 58 legendary masters across all lighting paradigms and visual families: Nykvist, Lubezki, Willis, Vierny, Storaro, Nakai, Doyle, Rotunno, Deakins, Alcott, Toland, Idziak, Zsigmond, Atsuta, Richardson, Burks, Coutard, Metty, Yeoman, Chapman, Di Venanzo, Matras, Delli Colli, Urusevsky, Young, Elswit, Miyagawa, Hoch, Maté, Cardiff, Martelli, Fischer, Delbonnel, Müller, Ballhaus, Kamiński, Garmes, Tovoli, Decaë, di Palma, Tisse, Prieto, Suschitzky, Unsworth, Lang, Krasker, Khondji, Almendros, Ping-Bing, van Hoytema, Fraser, Dryburgh, Hall, Deschanel, Dod Mantle, Mukdeeprom, Libatique, and Kuras.
-- Built **Automated Film Ingest & Quantile Recalibration Engine** (`crates/aesthetic-core/src/baseline_store.rs`):
+  - Interactive timeline scrubber with live playhead feedback, streaming 5 scopes and updating 4-output matrix in real-time.
+- **58 Master Cinematographer Signatures** (`crates/aesthetic-core/src/baseline_store.rs`):
+  - Calibrated visual signatures covering 58 legendary masters across all lighting paradigms and visual families.
+- **Automated Baseline Ingest & Recalibration** (`crates/aesthetic-core/src/baseline_store.rs`):
   - `ingest_reference_film` and CLI `aesthetic-cli ingest-baseline <file>`: Ingests reference cinema films, runs 79-metric physics and vision embeddings, and continuously recalibrates empirical quantiles across the entire corpus.
-- Built **Headless CLI Analysis Driver** (`crates/aesthetic-cli/src/main.rs`):
-  - Command line `aesthetic-cli analyze <file> [--edl] [--csv] [--clips] [--step]` outputting formatted terminal selects ranking tables.
-- Comprehensive testing: **16/16 tests passing** across workspace. Zero clippy warnings.
+- **Optimized Release Packaging**:
+  - `aesthetic-cli.exe` (7.4MB) and `aesthetic-ui.exe` (7.5MB) verified with 1.70s 4K physics pass and 1.30ms vector search across 5,000 shots.
+- **Comprehensive Testing**:
+  - 16/16 tests passing, zero clippy warnings, rustfmt compliant.
+
+---
+
+## Active Focus (M6: Editorial Deliverables & Golden Baseline Stills Ingest)
+1. **Shot Sidecars**: Structured JSON sidecar persistence at `jobs/<job_id>/metrics/<shot_id>.json` caching all 79 metrics and model embeddings.
+2. **Top-$N$ Contact Sheet & Hero Stills**: Exportable HTML contact sheet and high-resolution PNG collage grid showcasing top $N$ selects with score badges and master DP matches.
+3. **Still Image Ingestion for Golden Baseline**: Direct ingestion of `.png`, `.jpg`, `.tiff`, and `.exr` stills to expand reference cinema profiles without needing full video files.
+4. **Native Cross-Platform File & Folder Browser**: Native open dialogs on Windows, macOS, and Linux for seamless media browsing.
+5. **NLE Timeline Round-Trip**: CMX 3600 EDL + FCPXML / DaVinci Resolve timeline export.

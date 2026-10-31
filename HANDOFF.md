@@ -7,23 +7,21 @@
 
 ---
 
-## Current Status: M5 (58 Master Cinema Signatures & Release Packaging Complete)
+## Current Status: M6 (Editorial Deliverables & Golden Baseline Stills Ingest)
 - Protocol initialized: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `START_HERE.md`, `STATUS.md`.
 - Workspace crates complete: `aesthetic-models`, `aesthetic-metrics`, `aesthetic-core`, `aesthetic-cli`, `aesthetic-ui`.
-- 58 Master DP Signatures: 50 masters specified by user + 8 canonical masters active in `BaselineStore`.
-- Automated Baseline Ingest: `ingest_reference_film` and `aesthetic-cli ingest-baseline` ingest full films to continuously grow dataset and recalibrate quantiles.
-- End-to-End Batch Engine: `analyze_video_file` demuxes, evaluates 4 outputs, matches masters, and exports CMX 3600 EDL, CSV manifest, and trimmed clips.
+- 58 Master DP Signatures active in `BaselineStore` with dynamic empirical quantiles.
 - 5 Broadcast Scopes Deck: Luma Waveform, RGB Parade, Vectorscope (57° I-line), Histograms, CIE 1931 xy Gamut.
-- Real-Time Scrub & Pipeline: Interactive timeline scrubber wired to frame demuxing and 4-output matrix updates.
-- Inference Engine: Depth-Anything-V2 depth separation & SigLIP 1152-dim vision embeddings with DirectML acceleration.
-- Release Build Verified: Optimized production binaries `aesthetic-cli.exe` (7.4MB) and `aesthetic-ui.exe` (7.5MB) verified with 1.70s 4K physics pass and 1.30ms vector search.
-- All 16 integration tests passing, zero clippy warnings, rustfmt compliant.
+- End-to-End Batch Pipeline & DirectML hardware acceleration verified in release builds.
+- 16/16 tests passing, zero clippy warnings, rustfmt compliant.
 
 ---
 
-## Next Immediate Step (M5 Ingest Validation & UI Polish)
-1. **Interactive UI / Batch Video Test**: Test batch analysis and scope streaming on sample mezzanine footage or URL.
-2. **Preset Profiles & Export Packaging**: Expand user presets for showreel curation workflows.
+## Next Immediate Step (M6 Implementation)
+1. **Still Image Ingestion for Golden Baseline**: Ingest `.png`/`.jpg`/`.tiff`/`.exr` reference stills into `BaselineStore`.
+2. **Shot Sidecars & Top-$N$ Contact Sheet**: Export `jobs/<job_id>/metrics/<shot_id>.json` sidecars and HTML/PNG contact sheet collage.
+3. **Native File & Folder Browser**: Add native file picker dialogs to `aesthetic-ui` for finished media & stills.
+4. **NLE Timeline Round-Trip**: CMX 3600 EDL + FCPXML/Resolve XML exports.
 
 ---
 
