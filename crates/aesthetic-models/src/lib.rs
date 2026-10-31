@@ -17,7 +17,10 @@ pub mod subjective;
 pub mod temporal;
 pub mod window;
 
-pub use baseline::{BaselineCorpusManifest, IngestedReferenceFilm, MetricQuantiles};
+pub use baseline::{
+    BaselineCorpusManifest, CinematographerSignature, IngestedReferenceFilm, MasterMatchResult,
+    MetricQuantiles, ReferenceShot,
+};
 pub use forensics::{DiagnosticFlag, DiagnosticSeverity, ForensicDiagnostics};
 pub use inferred::{
     FocusOptics, LightingGeometry, ModelInferredCraft, MotionDynamics, StagingEyeline,

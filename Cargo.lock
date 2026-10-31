@@ -9,6 +9,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
+name = "aesthetic-cli"
+version = "0.1.0"
+dependencies = [
+ "aesthetic-core",
+ "aesthetic-metrics",
+ "aesthetic-models",
+ "image",
+ "rayon",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "aesthetic-core"
 version = "0.1.0"
 dependencies = [

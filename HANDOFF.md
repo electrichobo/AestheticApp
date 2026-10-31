@@ -7,22 +7,20 @@
 
 ---
 
-## Current Status: M2 Complete → M3 In Progress
+## Current Status: M3 & M4 Complete → M5 In Progress
 - Protocol initialized: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `START_HERE.md`, `STATUS.md`.
-- Workspace crates complete: `aesthetic-models`, `aesthetic-metrics`, `aesthetic-core`.
+- Workspace crates complete: `aesthetic-models`, `aesthetic-metrics`, `aesthetic-core`, `aesthetic-cli`.
 - 4-Output architecture operational: Tangible 0-100 scores, auto style discovery, raw 79 physics metrics, technical concerns.
-- Active picture matte detection: Letterbox/pillarbox auto-crop with native resolution zero-crop pass-through.
-- Cut detection: Hard cuts, dissolves, fades, directional wipes, and match cuts.
-- Continuous usable window (1.5s - 4.0s) optimizer with handle clamping operational.
-- All 8 integration tests passing, zero clippy warnings, rustfmt compliant.
+- Golden Baseline store: Multi-threaded vector search, empirical quantile calibration, master DP fingerprint matching.
+- Standalone CLI verified: 4K 79-metric pass executes in 1.70s (`target\release\aesthetic-cli.exe benchmark`).
+- All 9 integration tests passing, zero clippy warnings, rustfmt compliant.
 
 ---
 
-## Next Immediate Step (M3: Inference & Baseline Embeddings)
-1. **GPU Acceleration**: Implement vendor-agnostic DirectML execution (supporting NVIDIA, AMD/ATI, Intel).
-2. **Scaffold Model Inference Module**: Integrate SigLIP (1152-dim embeddings) and Depth-Anything-V2 ONNX models into `aesthetic-core`.
-3. **Golden Baseline Corpus Store**: High-speed binary storage and Cosine Similarity search against ingested reference films (*Skyfall*, etc.).
-4. **Cinematographer Fingerprint Matching**: Distance clustering against named master DP signatures.
+## Next Immediate Step (M5: Desktop UI & DirectML Inference)
+1. **GPU Acceleration**: Request crate approval for DirectML / ONNX tensor execution on Windows.
+2. **Desktop UI Integration**: Plan and scaffold high-performance UI shell with real-time waveform, RGB parade, and CIE 1931 scopes.
+3. **Web Ingest Integration**: Wire `yt-dlp` stream extraction for web URLs (YouTube, Vimeo).
 
 ---
 

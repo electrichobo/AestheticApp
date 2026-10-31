@@ -57,6 +57,42 @@ pub struct IngestedReferenceFilm {
     pub average_dynamic_range: f32,
 }
 
+/// A single reference shot stored in the Golden Baseline corpus.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReferenceShot {
+    pub shot_id: String,
+    pub film_title: String,
+    pub cinematographer: String,
+    pub timestamp_sec: f64,
+    /// 1152-dimensional SigLIP or vision embedding vector
+    pub embedding: Vec<f32>,
+    pub dynamic_range_stops: f32,
+    pub highlight_rolloff: f32,
+    pub sharpness_laplacian: f32,
+    pub key_fill_ratio: f32,
+    pub style_label: String,
+}
+
+/// A cluster representing a master cinematographer's visual signature.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CinematographerSignature {
+    pub dp_name: String,
+    pub representative_films: Vec<String>,
+    pub centroid_embedding: Vec<f32>,
+    pub average_key_fill: f32,
+    pub preferred_lighting_key: String,
+    pub preferred_motion_style: String,
+}
+
+/// The result of matching a candidate shot against master cinematographer signatures.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MasterMatchResult {
+    pub dp_name: String,
+    pub reference_film: String,
+    pub visual_similarity: f32, // 0.0 - 100.0
+    pub craft_explanation: String,
+}
+
 /// Overall baseline corpus manifest and distribution state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct BaselineCorpusManifest {

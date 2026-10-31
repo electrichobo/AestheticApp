@@ -36,9 +36,9 @@ AESTHETIC is currently undergoing a complete ground-up rebuild as a **Rust Core 
 | **M0: Protocol & Rebuild Setup** | Repository protocol initialization, legacy Python purge, clean Rust workspace | ✅ Done |
 | **M1: Data Models & Objective Metrics** | `aesthetic-models`, `aesthetic-metrics` (SIMD exposure, color, focus, sharpness) | ✅ Done |
 | **M2: Temporal Engine & Usable Windows** | `aesthetic-core` video demux, cut classification, continuous take evaluation | ✅ Done |
-| **M3: Model Inference & Baseline Vectors** | DirectML/ONNX depth, detection, and 1152-dim Golden Baseline similarity | 🔄 In Progress |
-| **M4: Headless CLI & Benchmark Harness** | Standalone executable for batch processing and pipeline validation | 🔲 Planned |
-| **M5: Desktop UI Integration** | High-performance desktop UI (waveform, parade, CIE scopes, timeline scrub) | 🔲 Planned |
+| **M3: Baseline Vector Store & DP Match** | `BaselineStore` vector similarity, master DP fingerprint matching, empirical calibration | ✅ Done |
+| **M4: Headless CLI & Benchmark Harness** | `aesthetic-cli`, 4K SIMD physics benchmark (1.70s 4K pass), demo take evaluation | ✅ Done |
+| **M5: Desktop UI Integration** | High-performance desktop UI (waveform, parade, CIE scopes, timeline scrub) | 🔄 In Progress |
 
 ---
 

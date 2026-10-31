@@ -116,3 +116,53 @@ fn test_evaluate_candidate_frame_4_outputs() {
     // Discovered style without PEBKAC
     assert!(!shot.style.lighting_key.is_empty());
 }
+
+#[test]
+fn test_baseline_store_search_and_master_match() {
+    use aesthetic_core::{cosine_similarity, BaselineStore};
+    use aesthetic_models::baseline::{CinematographerSignature, ReferenceShot};
+
+    let mut store = BaselineStore::new();
+
+    // Register a reference shot from Skyfall
+    store.add_reference_shot(ReferenceShot {
+        shot_id: "skyfall_01".to_string(),
+        film_title: "Skyfall".to_string(),
+        cinematographer: "Roger Deakins".to_string(),
+        timestamp_sec: 120.0,
+        embedding: vec![0.5, 0.5, 0.5, 0.5],
+        dynamic_range_stops: 13.5,
+        highlight_rolloff: 92.0,
+        sharpness_laplacian: 180.0,
+        key_fill_ratio: 4.0,
+        style_label: "Prestige Naturalism".to_string(),
+    });
+
+    // Register Roger Deakins signature
+    store.register_signature(CinematographerSignature {
+        dp_name: "Roger Deakins".to_string(),
+        representative_films: vec!["Skyfall".to_string(), "Blade Runner 2049".to_string()],
+        centroid_embedding: vec![0.5, 0.5, 0.5, 0.5],
+        average_key_fill: 4.0,
+        preferred_lighting_key: "Motivated Naturalistic".to_string(),
+        preferred_motion_style: "Disciplined Dolly".to_string(),
+    });
+
+    // Test cosine similarity of identical vectors is 100.0
+    let sim = cosine_similarity(&[1.0, 0.0], &[1.0, 0.0]);
+    assert!((sim - 100.0).abs() < 1e-4);
+
+    // Search nearest shots
+    let candidate = vec![0.49, 0.51, 0.50, 0.48];
+    let results = store.search_nearest(&candidate, 5);
+    assert_eq!(results.len(), 1);
+    assert!(results[0].1 > 95.0); // Very high similarity
+
+    // Match master cinematographer
+    let master_match = store.match_master_cinematographer(&candidate, 4.1);
+    assert!(master_match.is_some());
+    let mm = master_match.unwrap();
+    assert_eq!(mm.dp_name, "Roger Deakins");
+    assert!(mm.visual_similarity > 95.0);
+    assert!(mm.craft_explanation.contains("Roger Deakins"));
+}
