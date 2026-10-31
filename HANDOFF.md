@@ -7,18 +7,17 @@
 
 ---
 
-## Current Status: M10 (Stage 1 Showreel Assembly & Stage 2 Forensic Overlays)
-- Ed Lachman, ASC EL Zone System: 10-stop calibrated false color engine (18% Middle Gray Zone V = 0 EV).
-- Pretrained Shipped Baseline: 174 calibrated reference shots across 58 Master Cinematographers active out-of-the-box.
-- Stage 1 Showreel Selects Assembly: Dynamic candidates bin, interactive In/Out timeline handle trimming, one-click export (EDL, FCPXML, CSV, contact sheet).
-- Stage 2 Forensic Overlays: Real-time toggling between Picture, EL Zone false color heatmap, Focus Peaking, 3D Volumetric Light compass, and Eyeline & Gaze poise HUD.
-- 22/22 tests passing, zero clippy warnings, verified on local loopback server.
+## Current Status: M11 (Awards Registry & Shot-Separated Server Ingest)
+- Cinematography Awards Registry: 184 Oscar, ASC, and BSC award-winning & landmark films (1995–2025+) with fuzzy normalization matcher.
+- Shot-Separated Temporal Ingestion: `compute_motion_dynamics` and cut-boundary segmentation (`ingest_reference_film_shots`) isolating clean camera setups without cut artifacts.
+- Media Server Scanner (`aesthetic-cli ingest-server`): Auto-detects and matches award films on `M:\movies` (55 award films matched on dry run).
+- 23/23 tests passing, zero clippy warnings, rustfmt compliant.
 
 ---
 
-## Next Immediate Step (User Verification & Release Readiness)
-1. **Interactive Review**: Review candidate takes, EL Zone false color heatmaps, and 3D light vector HUD in UI.
-2. **Release Preparation (On User Approval)**: When user is fully satisfied with feature behavior, proceed with standalone distribution packaging.
+## Next Immediate Step (Media Server Ingestion Run)
+1. **Execute Ingestion**: Run `aesthetic-cli ingest-server M:\movies --limit <N>` to ingest real reference shots from target films into `assets/baseline/`.
+2. **Interactive UI Review**: Launch desktop UI to view expanded baseline comparisons and real-time overlays.
 
 ---
 

@@ -64,6 +64,17 @@ pub struct BaselineStore {
     pub master_signatures: Vec<CinematographerSignature>,
 }
 
+/// Metadata describing a film to be ingested via continuous shot segmentation.
+#[derive(Debug, Clone)]
+pub struct FilmIngestMeta<'a> {
+    pub title: &'a str,
+    pub cinematographer: &'a str,
+    pub director: Option<&'a str>,
+    pub year: u32,
+    pub style_family: &'a str,
+    pub max_shots: usize,
+}
+
 impl BaselineStore {
     /// Create a new baseline store pre-populated with cinema master signatures and pre-trained corpus.
     pub fn new() -> Self {
@@ -1178,6 +1189,132 @@ impl BaselineStore {
         Ok(IngestSummary {
             film_title: title.to_string(),
             cinematographer: cinematographer.to_string(),
+            shots_added: added_count,
+            total_corpus_shots: self.reference_shots.len(),
+            new_dynamic_range_p50: self.manifest.dynamic_range_quantiles.p50,
+            new_highlight_rolloff_p50: self.manifest.highlight_rolloff_quantiles.p50,
+            new_sharpness_p50: self.manifest.sharpness_quantiles.p50,
+        })
+    }
+
+    /// Ingest reference cinema film using continuous shot segmentation (cut detection).
+    /// Isolates individual camera setups, discards cut transitions, computes full
+    /// physics, craft, embeddings, and temporal dynamics inside each continuous shot.
+    pub fn ingest_reference_film_shots(
+        &mut self,
+        video_path: &Path,
+        meta_info: &FilmIngestMeta<'_>,
+    ) -> Result<IngestSummary, String> {
+        let meta = probe_video_metadata(video_path)?;
+        if meta.duration_sec <= 0.0 {
+            return Err("Reference video has zero duration".to_string());
+        }
+
+        let inference = ModelInferenceEngine::new();
+        let target_shots = meta_info.max_shots.clamp(1, 100);
+
+        let start_time = meta.duration_sec * 0.05;
+        let end_time = meta.duration_sec * 0.95;
+        let span = (end_time - start_time).max(10.0);
+        let sample_interval = span / ((target_shots * 3) as f64);
+
+        let mut dr_sum = 0.0f32;
+        let mut added_count = 0;
+        let fps = if meta.frame_rate > 0.0 {
+            meta.frame_rate
+        } else {
+            24.0
+        };
+        let dt = 1.0 / fps;
+
+        let mut current_t = start_time;
+        while current_t < end_time && added_count < target_shots {
+            if let Ok(frame_a) = extract_frame_rgb(video_path, current_t) {
+                if let Ok(frame_b) = extract_frame_rgb(video_path, current_t + dt) {
+                    let diff = crate::scene::compute_frame_difference(&frame_a, &frame_b);
+                    // Discard cuts and wipes (diff > 25.0)
+                    if diff < 25.0 {
+                        let test_t = current_t + 1.0;
+                        if test_t < end_time {
+                            if let Ok(frame_c) = extract_frame_rgb(video_path, test_t) {
+                                let span_diff =
+                                    crate::scene::compute_frame_difference(&frame_a, &frame_c);
+                                // Confirm single continuous camera angle/setup
+                                if span_diff < 35.0 {
+                                    let crop = detect_active_picture(&frame_a);
+                                    let active = if crop.width == frame_a.width()
+                                        && crop.height == frame_a.height()
+                                    {
+                                        frame_a.clone()
+                                    } else {
+                                        image::imageops::crop_imm(
+                                            &frame_a,
+                                            crop.x,
+                                            crop.y,
+                                            crop.width,
+                                            crop.height,
+                                        )
+                                        .to_image()
+                                    };
+
+                                    let physics = compute_objective_physics(&active);
+                                    let craft = inference.infer_craft(&active);
+                                    let embedding = inference.infer_embedding(&active);
+
+                                    let shot_id = format!(
+                                        "{}_shot_{:04}",
+                                        meta_info.title.to_lowercase().replace(' ', "_"),
+                                        added_count + 1
+                                    );
+                                    dr_sum += physics.exposure.dynamic_range_stops;
+
+                                    self.add_reference_shot(ReferenceShot {
+                                        shot_id,
+                                        film_title: meta_info.title.to_string(),
+                                        cinematographer: meta_info.cinematographer.to_string(),
+                                        timestamp_sec: current_t,
+                                        embedding,
+                                        dynamic_range_stops: physics.exposure.dynamic_range_stops,
+                                        highlight_rolloff: physics.exposure.highlight_rolloff,
+                                        sharpness_laplacian: physics.optics.sharpness_laplacian,
+                                        key_fill_ratio: craft.lighting.key_to_fill_ratio,
+                                        style_label: meta_info.style_family.to_string(),
+                                    });
+
+                                    added_count += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            current_t += sample_interval;
+        }
+
+        if added_count == 0 {
+            return Err(format!(
+                "Could not extract clean continuous shots from '{}'",
+                meta_info.title
+            ));
+        }
+
+        let avg_dr = dr_sum / (added_count as f32);
+        let aspect_ratio = format!("{}:{}", meta.width, meta.height);
+
+        self.manifest.films.push(IngestedReferenceFilm {
+            title: meta_info.title.to_string(),
+            cinematographer: meta_info.cinematographer.to_string(),
+            director: meta_info.director.map(|d| d.to_string()),
+            year: meta_info.year,
+            aspect_ratio,
+            shot_count: added_count,
+            average_dynamic_range: avg_dr,
+        });
+        self.manifest.total_films = self.manifest.films.len();
+
+        Ok(IngestSummary {
+            film_title: meta_info.title.to_string(),
+            cinematographer: meta_info.cinematographer.to_string(),
             shots_added: added_count,
             total_corpus_shots: self.reference_shots.len(),
             new_dynamic_range_p50: self.manifest.dynamic_range_quantiles.p50,

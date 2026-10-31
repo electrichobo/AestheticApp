@@ -8,6 +8,7 @@
 //! 4. Temporal & Editorial (usable window duration, pace, cut-points)
 //! 5. Forensic Diagnostics (non-punitive capture warning flags)
 
+pub mod awards;
 pub mod baseline;
 pub mod forensics;
 pub mod inferred;
@@ -17,6 +18,7 @@ pub mod subjective;
 pub mod temporal;
 pub mod window;
 
+pub use awards::{find_award_match, AwardRecord, CINEMATOGRAPHY_AWARDS_REGISTRY};
 pub use baseline::{
     BaselineCorpusManifest, CinematographerSignature, IngestedReferenceFilm, MasterMatchResult,
     MetricQuantiles, ReferenceShot,

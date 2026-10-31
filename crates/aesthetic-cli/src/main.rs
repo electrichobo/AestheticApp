@@ -28,6 +28,7 @@ fn main() {
     match args[1].as_str() {
         "benchmark" => run_benchmark(),
         "baseline-info" => print_baseline_info(),
+        "awards-list" => print_awards_list(),
         "demo" => run_demo_analysis(),
         "analyze" => {
             if args.len() < 3 {
@@ -46,6 +47,15 @@ fn main() {
             }
             let video_path = PathBuf::from(&args[2]);
             run_baseline_ingest(&video_path, &args[3..]);
+        }
+        "ingest-server" => {
+            if args.len() < 3 {
+                println!("Error: Missing media server movies directory.");
+                println!("Usage: aesthetic-cli ingest-server <server_movies_dir> [--limit <N>] [--shots <N>] [--dry-run]");
+                return;
+            }
+            let server_dir = PathBuf::from(&args[2]);
+            run_server_ingest(&server_dir, &args[3..]);
         }
         _ => {
             println!("Unknown command: {}", args[1]);
@@ -68,6 +78,14 @@ fn print_usage() {
     println!("      --step <seconds>       Sampling interval in seconds (default: 1.0)");
     println!("  ingest-baseline <file_or_dir> --title <title> --dp <cinematographer>");
     println!("                         Ingest reference film, still image, or directory into Golden Baseline");
+    println!("  ingest-server <dir>    Scan media server, match Oscar/ASC/BSC award titles, & ingest shots");
+    println!("    Options:");
+    println!("      --limit <N>            Limit to first N matched award films");
+    println!(
+        "      --shots <N>            Extract N clean continuous shots per film (default: 10)"
+    );
+    println!("      --dry-run              Catalog matched award titles without extracting shots");
+    println!("  awards-list            Display all 80+ Oscar, ASC, and BSC titles in the registry");
     println!("  baseline-info          Display current Golden Baseline statistics and films");
     println!("  benchmark              Run multi-threaded SIMD physics & vector search benchmarks");
     println!("  demo                   Run synthetic benchmark on high-resolution frame raster");
@@ -481,4 +499,233 @@ fn run_demo_analysis() {
     );
     println!("Concerns Detected:  {}", shot.concerns.len());
     println!("------------------------------------------------------------");
+}
+
+fn print_awards_list() {
+    use aesthetic_models::awards::CINEMATOGRAPHY_AWARDS_REGISTRY;
+
+    println!("\n============================================================");
+    println!("  AESTHETIC Cinematography Awards Registry (1995 – 2025+)");
+    println!(
+        "  Total Tracked Titles: {}",
+        CINEMATOGRAPHY_AWARDS_REGISTRY.len()
+    );
+    println!("============================================================");
+
+    for (idx, record) in CINEMATOGRAPHY_AWARDS_REGISTRY.iter().enumerate() {
+        println!(
+            "[{:02}] {:<32} ({}) — DP: {:<20} [Dir: {}] | Aspect: {:<6} | Style: {:<20} | {}",
+            idx + 1,
+            record.title,
+            record.year,
+            record.cinematographer,
+            record.director,
+            record.aspect_ratio,
+            record.style_family,
+            record.awards.join(", ")
+        );
+    }
+}
+
+fn parse_movie_folder_name(folder_name: &str) -> (String, Option<u32>) {
+    let s = folder_name.trim();
+    if let Some(open) = s.rfind('(') {
+        if let Some(close) = s.rfind(')') {
+            if close > open + 4 {
+                let yr_str = &s[open + 1..close];
+                if let Ok(y) = yr_str.parse::<u32>() {
+                    let title = s[..open].trim().to_string();
+                    return (title, Some(y));
+                }
+            }
+        }
+    }
+    (folder_name.to_string(), None)
+}
+
+fn find_primary_video_file(dir: &Path) -> Option<PathBuf> {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        let mut largest: Option<(PathBuf, u64)> = None;
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_file() {
+                    let p = entry.path();
+                    if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+                        let ext_lower = ext.to_lowercase();
+                        if matches!(
+                            ext_lower.as_str(),
+                            "mkv" | "mp4" | "mov" | "m4v" | "avi" | "ts"
+                        ) {
+                            let len = meta.len();
+                            if largest.as_ref().map(|l| len > l.1).unwrap_or(true) {
+                                largest = Some((p, len));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return largest.map(|l| l.0);
+    }
+    None
+}
+
+fn run_server_ingest(server_dir: &Path, flags: &[String]) {
+    use aesthetic_models::awards::{find_award_match, CINEMATOGRAPHY_AWARDS_REGISTRY};
+    use std::fs;
+
+    let mut limit: Option<usize> = None;
+    let mut shots_per_film = 10usize;
+    let mut dry_run = false;
+
+    let mut i = 0;
+    while i < flags.len() {
+        match flags[i].as_str() {
+            "--limit" if i + 1 < flags.len() => {
+                if let Ok(l) = flags[i + 1].parse::<usize>() {
+                    limit = Some(l);
+                }
+                i += 1;
+            }
+            "--shots-per-film" | "--shots" if i + 1 < flags.len() => {
+                if let Ok(s) = flags[i + 1].parse::<usize>() {
+                    shots_per_film = s;
+                }
+                i += 1;
+            }
+            "--dry-run" => {
+                dry_run = true;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    println!("\n============================================================");
+    println!("  AESTHETIC Media Server Baseline Ingestion");
+    println!("  Scanning: {}", server_dir.display());
+    println!(
+        "  Registry: {} Oscar / ASC / BSC Award & Landmark Titles",
+        CINEMATOGRAPHY_AWARDS_REGISTRY.len()
+    );
+    println!("============================================================");
+
+    if !server_dir.exists() {
+        eprintln!(
+            "Error: Server directory does not exist or is not accessible: {}",
+            server_dir.display()
+        );
+        return;
+    }
+
+    let entries = match fs::read_dir(server_dir) {
+        Ok(e) => e,
+        Err(err) => {
+            eprintln!("Failed to read directory {}: {}", server_dir.display(), err);
+            return;
+        }
+    };
+
+    let mut matched_jobs = Vec::new();
+
+    for entry in entries.flatten() {
+        if let Ok(file_type) = entry.file_type() {
+            if file_type.is_dir() {
+                let folder_name = entry.file_name().to_string_lossy().to_string();
+                let (title, year) = parse_movie_folder_name(&folder_name);
+                if let Some(award) = find_award_match(&title, year) {
+                    if let Some(video_file) = find_primary_video_file(&entry.path()) {
+                        matched_jobs.push((folder_name, video_file, award));
+                    }
+                }
+            }
+        }
+    }
+
+    println!(
+        "\nFound {} award-winning/nominated films in library:",
+        matched_jobs.len()
+    );
+    for (idx, (folder, _file, award)) in matched_jobs.iter().enumerate() {
+        println!(
+            "  [{:02}] {:<35} -> {} ({}, DP: {}) [Awards: {}]",
+            idx + 1,
+            folder,
+            award.title,
+            award.year,
+            award.cinematographer,
+            award.awards.join(", ")
+        );
+    }
+
+    if dry_run {
+        println!("\n[DRY RUN] Cataloging complete. Run without --dry-run to execute shot-separated ingest.");
+        return;
+    }
+
+    let to_process = if let Some(lim) = limit {
+        &matched_jobs[..lim.min(matched_jobs.len())]
+    } else {
+        &matched_jobs[..]
+    };
+
+    println!(
+        "\nStarting Shot-Separated Ingestion for {} films ({} hero shots/film)...",
+        to_process.len(),
+        shots_per_film
+    );
+
+    let mut store = BaselineStore::new();
+    let mut total_shots = 0;
+
+    for (idx, (folder, file_path, award)) in to_process.iter().enumerate() {
+        println!("\n[{}/{}] Ingesting: {}", idx + 1, to_process.len(), folder);
+        println!("  File: {}", file_path.display());
+        println!(
+            "  DP:   {} | Style: {}",
+            award.cinematographer, award.style_family
+        );
+
+        let ingest_meta = aesthetic_core::baseline_store::FilmIngestMeta {
+            title: award.title,
+            cinematographer: award.cinematographer,
+            director: Some(award.director),
+            year: award.year,
+            style_family: award.style_family,
+            max_shots: shots_per_film,
+        };
+
+        match store.ingest_reference_film_shots(file_path, &ingest_meta) {
+            Ok(summary) => {
+                println!(
+                    "  [✓] Extracted {} clean continuous shots (Corpus Total: {} shots)",
+                    summary.shots_added, summary.total_corpus_shots
+                );
+                println!(
+                    "      Dynamic Range p50: {:.2} stops | Roll-Off p50: {:.1}%",
+                    summary.new_dynamic_range_p50, summary.new_highlight_rolloff_p50
+                );
+                total_shots += summary.shots_added;
+            }
+            Err(err) => {
+                eprintln!("  [!] Failed to ingest {}: {}", folder, err);
+            }
+        }
+    }
+
+    let baseline_dir = Path::new("assets").join("baseline");
+    if let Err(e) = store.save_to_dir(&baseline_dir) {
+        eprintln!("Warning: Failed to save baseline to disk: {}", e);
+    } else {
+        println!(
+            "\n[✓] Golden Baseline successfully updated and saved to: {}",
+            baseline_dir.display()
+        );
+    }
+
+    println!(
+        "\nIngestion Complete! Ingested {} clean shots across {} award films.",
+        total_shots,
+        to_process.len()
+    );
 }

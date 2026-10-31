@@ -1,9 +1,9 @@
 # AESTHETIC — Development Status
 
-## Current Milestone: M10 — Stage 1 Showreel Assembly & Stage 2 Forensic Overlays
+## Current Milestone: M11 — Cinematography Awards Registry & Media Server Ingestion
 - **Phase**: Ground-Up Rebuild in Rust
 - **Target**: Windows x64 (primary), Linux, macOS
-- **Active Focus**: Ed Lachman, ASC EL Zone system, pretrained 58 Master Cinematographers baseline, interactive candidates bin & timeline handle trimming (Stage 1), real-time forensic overlays (EL Zone, peaking, 3D light vectors, eyeline poise) (Stage 2).
+- **Active Focus**: 184 Oscar, ASC, and BSC award-winning & landmark films (1995–2025+), continuous shot-boundary segmentation (cut-isolated setups), and Unraid network media server scanner (`M:\movies`).
 
 ---
 
@@ -22,6 +22,23 @@
 | **M8: Scoring Matrix & DP Comparison UI** | Side-by-Side Master DP Diagnostic Table, Empirical Improvement Action Cards, Port Binding Configuration, Craft Benchmark Integration | ✅ Done | Desktop UI diagnostic table, dynamic improvement recommendations & 4K craft benchmarks |
 | **M9: EL Zone & Pretrained Baseline** | Ed Lachman, ASC EL Zone 10-stop calibrated false color, 174 pretrained master shots across 58 films, Stage 1/2 UI groundwork | ✅ Done | Industry standard stop false color and out-of-the-box pre-trained baseline corpus |
 | **M10: Showreel Assembly & Forensic Overlays** | Stage 1 candidate selects bin, interactive In/Out handle trimming, Stage 2 real-time diagnostic viewport modes (EL Zone, Peaking, 3D Light, Eyeline/Gaze) | ✅ Done | Dynamic showreel assembly & forensic camera intelligence active in UI |
+| **M11: Awards Registry & Media Server Ingestion** | 184 Oscar, ASC, BSC & Landmark titles registry, shot-boundary segmentation (cut-isolated setups), network media server scanner (`M:\movies`) | ✅ Done | Auto-matching 55 award films on `M:\movies` with continuous setup extraction |
+
+---
+
+## Completed in M11
+- **Cinematography Awards Registry (1995 – 2025+)** (`crates/aesthetic-models/src/awards.rs`):
+  - Catalog of 184 award-recognized and landmark films covering Best Cinematography Oscar, ASC, and BSC winners/nominees plus historical masterworks.
+  - Robust fuzzy title and year matching function (`find_award_match`) accounting for punctuation, case, and subtitle variances.
+  - Exposed via CLI `aesthetic-cli awards-list`.
+- **Continuous Shot Segmentation & Optical Flow** (`crates/aesthetic-core/src/inference.rs`, `crates/aesthetic-core/src/baseline_store.rs`):
+  - `compute_motion_dynamics`: Multi-threaded block matching computing true optical flow velocity, velocity standard deviation, camera-to-subject motion ratio, micro-jitter, and judder risk.
+  - `ingest_reference_film_shots`: Detects edit boundaries and transition cuts (`classify_transition`), discarding transition frames and isolating clean continuous camera setups.
+- **Network Media Server Scanner** (`crates/aesthetic-cli/src/main.rs`):
+  - `aesthetic-cli ingest-server <dir>`: Scans library folders (e.g. `M:\movies`), matches award titles, parses primary video files, and executes shot-separated ingestion into `BaselineStore`.
+  - Dry run verified against `M:\movies`: matched 55 feature films.
+- **Testing**:
+  - 23/23 tests passing across workspace, zero clippy warnings, rustfmt compliant.
 
 ---
 

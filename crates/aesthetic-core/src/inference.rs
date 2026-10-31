@@ -538,6 +538,129 @@ pub fn infer_gaze_and_staging(img: &RgbImage, depth: &DepthMap) -> StagingEyelin
     }
 }
 
+/// Computes temporal motion dynamics and optical flow between consecutive frames.
+pub fn compute_motion_dynamics(
+    frame_a: &RgbImage,
+    frame_b: &RgbImage,
+    dt_sec: f32,
+    depth: Option<&DepthMap>,
+) -> MotionDynamics {
+    let (w, h) = frame_a.dimensions();
+    if w < 32 || h < 32 || frame_b.dimensions() != (w, h) {
+        return MotionDynamics::default();
+    }
+
+    let dt = if dt_sec <= 0.0 { 1.0 / 24.0 } else { dt_sec };
+
+    // 16x9 grid of probe points across the frame
+    let grid_x = 16usize;
+    let grid_y = 9usize;
+    let step_x = (w as usize / (grid_x + 1)).max(4);
+    let step_y = (h as usize / (grid_y + 1)).max(4);
+
+    let block_radius = 3i32; // 7x7 block SAD
+    let search_radius = 6i32; // search [-6, 6] window
+
+    let points: Vec<(usize, usize)> = (1..=grid_y)
+        .flat_map(|gy| (1..=grid_x).map(move |gx| (gx * step_x, gy * step_y)))
+        .collect();
+
+    let flow_vectors: Vec<(f32, f32)> = points
+        .par_iter()
+        .map(|&(px, py)| {
+            let cx = px as i32;
+            let cy = py as i32;
+            let mut best_dx = 0i32;
+            let mut best_dy = 0i32;
+            let mut min_sad = u64::MAX;
+
+            for sdy in -search_radius..=search_radius {
+                for sdx in -search_radius..=search_radius {
+                    let mut sad = 0u64;
+                    for by in -block_radius..=block_radius {
+                        for bx in -block_radius..=block_radius {
+                            let ax = (cx + bx).clamp(0, w as i32 - 1) as u32;
+                            let ay = (cy + by).clamp(0, h as i32 - 1) as u32;
+                            let bx_pos = (cx + bx + sdx).clamp(0, w as i32 - 1) as u32;
+                            let by_pos = (cy + by + sdy).clamp(0, h as i32 - 1) as u32;
+
+                            let pa = frame_a.get_pixel(ax, ay);
+                            let pb = frame_b.get_pixel(bx_pos, by_pos);
+                            let diff = (pa[0] as i32 - pb[0] as i32).unsigned_abs() as u64
+                                + (pa[1] as i32 - pb[1] as i32).unsigned_abs() as u64
+                                + (pa[2] as i32 - pb[2] as i32).unsigned_abs() as u64;
+                            sad += diff;
+                        }
+                    }
+                    if sad < min_sad {
+                        min_sad = sad;
+                        best_dx = sdx;
+                        best_dy = sdy;
+                    }
+                }
+            }
+            (best_dx as f32, best_dy as f32)
+        })
+        .collect();
+
+    if flow_vectors.is_empty() {
+        return MotionDynamics::default();
+    }
+
+    let mut mag_sum = 0.0f32;
+    let mut dx_sum = 0.0f32;
+    let mut dy_sum = 0.0f32;
+    let mut mags = Vec::with_capacity(flow_vectors.len());
+
+    for &(dx, dy) in &flow_vectors {
+        let mag = (dx * dx + dy * dy).sqrt();
+        mag_sum += mag;
+        dx_sum += dx;
+        dy_sum += dy;
+        mags.push(mag);
+    }
+
+    let n = flow_vectors.len() as f32;
+    let flow_mean = mag_sum / n;
+    let avg_dx = dx_sum / n;
+    let avg_dy = dy_sum / n;
+    let dominant_mag = (avg_dx * avg_dx + avg_dy * avg_dy).sqrt();
+
+    let var: f32 = mags.iter().map(|&m| (m - flow_mean).powi(2)).sum::<f32>() / n;
+    let flow_std = var.sqrt();
+
+    let camera_motion_ratio = if flow_mean > 0.1 {
+        (dominant_mag / flow_mean).clamp(0.0, 1.0)
+    } else {
+        1.0 // Static tripod shot has 100% camera alignment (0 motion)
+    };
+
+    let micro_jitter_score = if flow_mean > 0.5 {
+        (flow_std / flow_mean * 10.0).clamp(0.0, 100.0)
+    } else {
+        0.0
+    };
+
+    let judder_risk_score = if flow_mean > (w as f32 * 0.035) {
+        ((flow_mean - (w as f32 * 0.035)) / 10.0 * 100.0).clamp(0.0, 100.0)
+    } else {
+        0.0
+    };
+
+    let parallax = depth
+        .map(|d| d.depth_separation_score() * 0.8)
+        .unwrap_or(30.0);
+
+    MotionDynamics {
+        optical_flow_mean: (flow_mean / dt).clamp(0.0, 1000.0),
+        optical_flow_std: (flow_std / dt).clamp(0.0, 500.0),
+        camera_motion_ratio,
+        micro_jitter_score,
+        parallax_strength: parallax,
+        judder_risk_score,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -718,6 +841,38 @@ mod tests {
             catchlight > 0.0,
             "Catchlight specular peak should be detected: {}",
             catchlight
+        );
+    }
+
+    #[test]
+    fn test_motion_dynamics_computation() {
+        use image::Rgb;
+
+        let mut img_a = RgbImage::new(64, 64);
+        let mut img_b = RgbImage::new(64, 64);
+
+        // Put a pattern shifted by (dx=3, dy=0) between frame A and B
+        for y in 0..64 {
+            for x in 0..64 {
+                let v = if (x % 8) < 4 { 200 } else { 50 };
+                img_a.put_pixel(x, y, Rgb([v, v, v]));
+
+                let shift_x = (x + 64 - 3) % 64;
+                let vb = if (shift_x % 8) < 4 { 200 } else { 50 };
+                img_b.put_pixel(x, y, Rgb([vb, vb, vb]));
+            }
+        }
+
+        let motion = compute_motion_dynamics(&img_a, &img_b, 1.0 / 24.0, None);
+        assert!(
+            motion.optical_flow_mean > 0.0,
+            "Motion should be detected: {}",
+            motion.optical_flow_mean
+        );
+        assert!(
+            motion.camera_motion_ratio > 0.7,
+            "Coherent shift should have high camera ratio: {}",
+            motion.camera_motion_ratio
         );
     }
 }
