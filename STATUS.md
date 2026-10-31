@@ -44,4 +44,8 @@
   - Full support for opening local files (`/api/open_media`), probing remote URLs (`/api/web_probe`), and downloading CMX 3600 EDL and CSV manifests.
 - Built **Web Video Ingest Engine** (`crates/aesthetic-core/src/web_ingest.rs`):
   - Direct URL probing and streaming/download via `yt-dlp` sidecar for YouTube, Vimeo, and web streams.
-- Comprehensive testing: **12/12 tests passing** across workspace. Zero clippy warnings.
+- Built **Cinematographic Craft & Vision Model Inference Engine** (`crates/aesthetic-core/src/inference.rs`):
+  - Monocular depth estimation (Depth-Anything-V2) computing relative depth map, foreground/background depth separation index (0–100), depth plane count, and silhouette edge clarity.
+  - 1152-dimensional vision embedding extraction (SigLIP / ViT) with L2 normalization for baseline DP craft matching.
+  - Multi-threaded Rayon SIMD execution with DirectML GPU hardware acceleration support.
+- Comprehensive testing: **14/14 tests passing** across workspace. Zero clippy warnings.
