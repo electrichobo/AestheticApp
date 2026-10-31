@@ -12,3 +12,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 image = { workspace = true }
 rayon = { workspace = true }
+ort = { workspace = true, optional = true }
+
+[features]
+default = []
+directml = ["dep:ort"]

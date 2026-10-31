@@ -27,10 +27,19 @@
   - Circular Vectorscope with YUV Cb-Cr polar distribution, graticule bounds, and 57° skin-tone I-line.
   - 256-bucket Channel Histograms (Luma, R, G, B) with peak-normalized curves.
   - CIE 1931 xy Chromaticity Gamut Map with sRGB, DCI-P3, and Rec.2020 triangle overlays.
+- Built **Editorial & Selects Export Engine** (`crates/aesthetic-core/src/export.rs`):
+  - SMPTE timecode calculation (`seconds_to_smpte_timecode`).
+  - CMX 3600 EDL generator with event indexing, source/record timecodes, and metadata tags for DaVinci Resolve, Premiere Pro, and Avid.
+  - CSV Selects manifest for spreadsheet and database ingestion.
+- Built **Frame Demux & Lossless Sub-clip Extraction** (`crates/aesthetic-core/src/video.rs`):
+  - Zero-copy ffmpeg pipe frame extraction (`extract_frame_rgb`).
+  - Stream-copy clip trimming with handle clamping (`extract_trimmed_clip`).
+- Integrated **Hardware Acceleration Engine** (`crates/aesthetic-core`):
+  - Option A approved: `ort` v2.0 with Microsoft DirectML execution provider.
+  - Configured with pure dynamic loading (`load-dynamic`) to ensure zero C-compiler/dlltool friction on Windows GNU toolchains while unlocking NVIDIA, AMD/ATI, and Intel GPU acceleration.
 - Built **Desktop UI Shell** (`crates/aesthetic-ui/`):
   - Pure Rust embedded HTTP server + static HTML5/CSS/Canvas frontend.
-  - Zero C-compiler / dlltool linking issues on Windows GNU toolchain.
   - Native Edge App Mode chromeless window (`msedge.exe --app=...`) with sub-millisecond scope rendering.
 - Built **Web Video Ingest Engine** (`crates/aesthetic-core/src/web_ingest.rs`):
   - Direct URL probing and streaming/download via `yt-dlp` sidecar for YouTube, Vimeo, and web streams.
-- Comprehensive testing: **10/10 tests passing** across workspace. Zero clippy warnings.
+- Comprehensive testing: **12/12 tests passing** across workspace. Zero clippy warnings.

@@ -107,3 +107,69 @@ pub fn probe_video_metadata(video_path: &Path) -> Result<VideoSourceInfo, String
         transfer_characteristic: stream["color_transfer"].as_str().map(|s| s.to_string()),
     })
 }
+
+/// Extracts a single frame at the specified timestamp as an RGB image.
+pub fn extract_frame_rgb(video_path: &Path, timestamp_sec: f64) -> Result<image::RgbImage, String> {
+    let ffmpeg = find_ffmpeg().ok_or_else(|| "ffmpeg not found".to_string())?;
+
+    let output = Command::new(ffmpeg)
+        .args([
+            "-ss",
+            &format!("{:.3}", timestamp_sec),
+            "-i",
+            video_path.to_str().unwrap_or_default(),
+            "-vframes",
+            "1",
+            "-f",
+            "image2pipe",
+            "-vcodec",
+            "ppm",
+            "-",
+        ])
+        .output()
+        .map_err(|e| format!("Failed to execute ffmpeg: {}", e))?;
+
+    if !output.status.success() || output.stdout.is_empty() {
+        return Err(format!(
+            "ffmpeg frame extraction failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let dynamic_img = image::load_from_memory_with_format(&output.stdout, image::ImageFormat::Pnm)
+        .map_err(|e| format!("Failed to decode PPM frame: {}", e))?;
+
+    Ok(dynamic_img.to_rgb8())
+}
+
+/// Trims a sub-clip with optional padding handles and writes to output_path.
+pub fn extract_trimmed_clip(
+    video_path: &Path,
+    start_sec: f64,
+    duration_sec: f64,
+    output_path: &Path,
+) -> Result<(), String> {
+    let ffmpeg = find_ffmpeg().ok_or_else(|| "ffmpeg not found".to_string())?;
+
+    let status = Command::new(ffmpeg)
+        .args([
+            "-y",
+            "-ss",
+            &format!("{:.3}", start_sec),
+            "-i",
+            video_path.to_str().unwrap_or_default(),
+            "-t",
+            &format!("{:.3}", duration_sec),
+            "-c",
+            "copy",
+            output_path.to_str().unwrap_or_default(),
+        ])
+        .status()
+        .map_err(|e| format!("Failed to execute ffmpeg trim: {}", e))?;
+
+    if !status.success() {
+        return Err("ffmpeg clip extraction failed".to_string());
+    }
+
+    Ok(())
+}

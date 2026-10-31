@@ -7,21 +7,23 @@
 
 ---
 
-## Current Status: M5 (Broadcast Scopes & Desktop UI Complete)
+## Current Status: M5 (Broadcast Scopes, Export, Desktop UI & DirectML Complete)
 - Protocol initialized: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `START_HERE.md`, `STATUS.md`.
 - Workspace crates complete: `aesthetic-models`, `aesthetic-metrics`, `aesthetic-core`, `aesthetic-cli`, `aesthetic-ui`.
 - 5 Broadcast Scopes: Luma Waveform (100 IRE), RGB Parade, Circular Vectorscope (Cb-Cr + I-line), Channel Histograms, CIE 1931 xy Gamut.
+- Hardware Acceleration: Option A (`ort` with DirectML dynamic loading) approved and integrated for NVIDIA, AMD/ATI, Intel GPUs.
+- Selects & Editorial Export: CMX 3600 EDL generator with SMPTE timecode and CSV selects manifest.
+- Frame Demux & Trim: Pipe-based `extract_frame_rgb` and handle-aware lossless clip trimming.
 - Desktop UI shell: Embedded TCP/HTTP server + HTML5 Canvas frontend launched in native Edge App Mode (zero C-compiler/dlltool friction).
 - Web ingest: Remote URL probing & streaming via `yt-dlp`.
 - Standalone CLI verified: 4K 79-metric pass executes in 1.70s.
-- All 10 integration tests passing, zero clippy warnings, rustfmt compliant.
+- All 12 integration tests passing, zero clippy warnings, rustfmt compliant.
 
 ---
 
-## Next Immediate Step (M5: GPU Inference & Video Pipeline)
-1. **GPU Acceleration**: Request crate approval for DirectML / ONNX tensor execution across NVIDIA, AMD/ATI, Intel on Windows.
-2. **Video Pipeline Wire-up**: Connect file dialog & timeline scrubbing to video frame extraction and live scope broadcast.
-3. **Selects & Reel Export**: CMX 3600 EDL, CSV selects list, and trimmed video clip export with configurable handles.
+## Next Immediate Step (M5: UI Timeline Scrubbing & Inference Wiring)
+1. **Video Pipeline Wire-up**: Connect file dialog & timeline scrubbing to video frame extraction and live scope broadcast in `aesthetic-ui`.
+2. **Craft Layer Model Execution**: Wire ONNX model session runners for Depth-Anything-V2 and SigLIP vision embeddings via DirectML.
 
 ---
 

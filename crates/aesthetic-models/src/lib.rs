@@ -29,6 +29,7 @@ pub use manifest::{AnalysisRunMetadata, VideoSourceInfo};
 pub use physics::{ColorPhysics, ExposurePhysics, ObjectivePhysics, OpticalPhysics};
 pub use subjective::{CreativeAesthetic, StyleFamilyCluster};
 pub use temporal::{TakeEditorial, UsableWindow};
+pub use window::{DiscoveredStyle, PillarScores, ShotTake};
 
 use serde::{Deserialize, Serialize};
 
