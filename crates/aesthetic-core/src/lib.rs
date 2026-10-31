@@ -7,6 +7,7 @@ pub mod baseline_store;
 pub mod pipeline;
 pub mod scene;
 pub mod video;
+pub mod web_ingest;
 pub mod window;
 
 pub use baseline_store::{cosine_similarity, BaselineStore};

@@ -7,8 +7,13 @@ pub mod color;
 pub mod exposure;
 pub mod matte;
 pub mod optics;
+pub mod scopes;
 
 pub use matte::{detect_active_picture, ActiveCropBounds};
+pub use scopes::{
+    compute_cie_chromaticity_map, compute_histograms, compute_parade, compute_vectorscope,
+    compute_waveform, ChannelHistogram, CieChromaticityMap, LumaWaveform, RgbParade, Vectorscope,
+};
 
 use aesthetic_models::physics::ObjectivePhysics;
 use image::RgbImage;

@@ -51,6 +51,47 @@ fn test_color_gamut_coverage() {
 }
 
 #[test]
+fn test_scopes_computation() {
+    use aesthetic_metrics::{
+        compute_cie_chromaticity_map, compute_histograms, compute_parade, compute_vectorscope,
+        compute_waveform,
+    };
+
+    let img = RgbImage::from_pixel(64, 64, Rgb([128, 64, 200]));
+
+    // 1. Luma Waveform
+    let wf = compute_waveform(&img, 32);
+    assert_eq!(wf.columns, 32);
+    assert_eq!(wf.ire_levels, 100);
+    assert_eq!(wf.density.len(), 32 * 100);
+
+    // 2. RGB Parade
+    let parade = compute_parade(&img, 32);
+    assert_eq!(parade.columns, 32);
+    assert_eq!(parade.r_density.len(), 32 * 100);
+    assert_eq!(parade.g_density.len(), 32 * 100);
+    assert_eq!(parade.b_density.len(), 32 * 100);
+
+    // 3. Vectorscope
+    let vec_scope = compute_vectorscope(&img, 64);
+    assert_eq!(vec_scope.resolution, 64);
+    assert_eq!(vec_scope.density.len(), 64 * 64);
+    assert_eq!(vec_scope.skin_tone_angle_deg, 57.0);
+
+    // 4. Channel Histograms
+    let hist = compute_histograms(&img);
+    assert_eq!(hist.luma.iter().sum::<u32>(), 64 * 64);
+    assert_eq!(hist.r[128], 64 * 64);
+    assert_eq!(hist.g[64], 64 * 64);
+    assert_eq!(hist.b[200], 64 * 64);
+
+    // 5. CIE 1931 Chromaticity Map
+    let cie = compute_cie_chromaticity_map(&img, 32);
+    assert_eq!(cie.grid_size, 32);
+    assert_eq!(cie.density.len(), 32 * 32);
+}
+
+#[test]
 fn test_native_aspect_ratio_no_crop() {
     // Native frame with content filling all borders
     let img = RgbImage::from_pixel(120, 50, Rgb([100, 150, 200]));

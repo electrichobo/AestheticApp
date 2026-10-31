@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AESTHETIC — Cinematography Intelligence</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-group">
+        <span class="logo-mark">Æ</span>
+        <h1 class="logo-title">AESTHETIC</h1>
+        <span class="version-tag">Core Engine v0.1.0 (Rust)</span>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-secondary" id="btn-web-url">+ Web URL</button>
+        <button class="btn btn-secondary" id="btn-baseline">+ Baseline Film</button>
+        <button class="btn btn-primary" id="btn-open-file">+ Open Media</button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="workspace-grid">
+      <!-- Left Panel: Selects / Takes Navigator -->
+      <aside class="panel panel-takes">
+        <div class="panel-header">
+          <h2>Candidate Selects</h2>
+          <span class="badge" id="take-count-badge">0 Takes</span>
+        </div>
+        <div class="takes-list" id="takes-list">
+          <!-- Populated dynamically -->
+          <div class="empty-state">No media loaded. Open a finished film or enter a URL.</div>
+        </div>
+      </aside>
+
+      <!-- Center Panel: Video Viewport & Timeline Scrub -->
+      <section class="panel panel-viewport">
+        <div class="viewport-canvas-container">
+          <video id="video-player" class="video-player" controls preload="metadata"></video>
+          <div class="video-overlay" id="video-overlay"></div>
+        </div>
+        
+        <!-- Timeline Controls -->
+        <div class="timeline-container">
+          <div class="timeline-timecodes">
+            <span id="tc-current">00:00:00:00</span>
+            <span id="tc-window-info">Window: 0.0s [Handles: 1.0s]</span>
+            <span id="tc-total">00:00:00:00</span>
+          </div>
+          <div class="timeline-scrubber-track" id="timeline-track">
+            <div class="timeline-handle in-handle" id="in-handle"></div>
+            <div class="timeline-window-highlight" id="window-highlight"></div>
+            <div class="timeline-handle out-handle" id="out-handle"></div>
+            <div class="timeline-playhead" id="playhead"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Panel: The 4-Output Cinematographic Matrix -->
+      <aside class="panel panel-matrix">
+        <div class="panel-header">
+          <h2>Evaluation Matrix</h2>
+          <span class="badge badge-accent" id="overall-score-badge">-- / 100</span>
+        </div>
+
+        <div class="matrix-content">
+          <!-- 1. Tangible Scores -->
+          <section class="matrix-section">
+            <h3 class="section-title">Pillar Scores</h3>
+            <div class="score-bars">
+              <div class="score-row">
+                <span>Technical</span>
+                <div class="progress-track"><div class="progress-fill" id="tech-fill"></div></div>
+                <span id="tech-val">--</span>
+              </div>
+              <div class="score-row">
+                <span>Creative</span>
+                <div class="progress-track"><div class="progress-fill fill-creative" id="creat-fill"></div></div>
+                <span id="creat-val">--</span>
+              </div>
+              <div class="score-row">
+                <span>Temporal</span>
+                <div class="progress-track"><div class="progress-fill fill-temporal" id="temp-fill"></div></div>
+                <span id="temp-val">--</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- 2. Discovered Style & Master DP Match -->
+          <section class="matrix-section">
+            <h3 class="section-title">Discovered Style & Craft Signature</h3>
+            <div class="style-card" id="style-card">
+              <div class="style-tag" id="lighting-key-tag">Lighting: --</div>
+              <div class="style-tag" id="motion-pacing-tag">Motion: --</div>
+              <div class="master-banner" id="master-banner">
+                <span class="master-icon">★</span>
+                <span class="master-text" id="master-text">Cinematographer match pending analysis...</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- 3. Broadcast Scopes Deck -->
+          <section class="matrix-section">
+            <div class="scopes-header">
+              <h3 class="section-title">Broadcast Scopes</h3>
+              <div class="scope-tabs">
+                <button class="scope-tab active" data-scope="waveform">Waveform</button>
+                <button class="scope-tab" data-scope="parade">Parade</button>
+                <button class="scope-tab" data-scope="vectorscope">Vectorscope</button>
+                <button class="scope-tab" data-scope="histogram">Histogram</button>
+                <button class="scope-tab" data-scope="cie">CIE 1931</button>
+              </div>
+            </div>
+            <div class="scope-display-container">
+              <canvas id="scope-canvas" class="scope-canvas" width="320" height="180"></canvas>
+            </div>
+          </section>
+
+          <!-- 4. Technical Concerns / Forensics -->
+          <section class="matrix-section">
+            <h3 class="section-title">Technical Concerns & Advisory Flags</h3>
+            <div class="concerns-list" id="concerns-list">
+              <div class="concern-item clean">No technical defects or clipping concerns detected.</div>
+            </div>
+          </section>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

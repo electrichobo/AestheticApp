@@ -71,7 +71,7 @@ fn test_evaluate_candidate_frame_4_outputs() {
     // Add black letterbox bars (top 16 rows, bottom 16 rows)
     for y in 0..128 {
         for x in 0..128 {
-            if y < 16 || y >= 112 {
+            if !(16..112).contains(&y) {
                 img.put_pixel(x, y, Rgb([0, 0, 0]));
             } else {
                 img.put_pixel(x, y, Rgb([160, 140, 120])); // warm midtone

@@ -38,7 +38,7 @@ AESTHETIC is currently undergoing a complete ground-up rebuild as a **Rust Core 
 | **M2: Temporal Engine & Usable Windows** | `aesthetic-core` video demux, cut classification, continuous take evaluation | ✅ Done |
 | **M3: Baseline Vector Store & DP Match** | `BaselineStore` vector similarity, master DP fingerprint matching, empirical calibration | ✅ Done |
 | **M4: Headless CLI & Benchmark Harness** | `aesthetic-cli`, 4K SIMD physics benchmark (1.70s 4K pass), demo take evaluation | ✅ Done |
-| **M5: Desktop UI Integration** | High-performance desktop UI (waveform, parade, CIE scopes, timeline scrub) | 🔄 In Progress |
+| **M5: Desktop UI Integration** | 5 Broadcast Scopes (Waveform, Parade, Vectorscope, Histogram, CIE 1931), Web Ingest, Desktop UI Shell | 🔄 In Progress |
 
 ---
 

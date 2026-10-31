@@ -7,20 +7,21 @@
 
 ---
 
-## Current Status: M3 & M4 Complete → M5 In Progress
+## Current Status: M5 (Broadcast Scopes & Desktop UI Complete)
 - Protocol initialized: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `START_HERE.md`, `STATUS.md`.
-- Workspace crates complete: `aesthetic-models`, `aesthetic-metrics`, `aesthetic-core`, `aesthetic-cli`.
-- 4-Output architecture operational: Tangible 0-100 scores, auto style discovery, raw 79 physics metrics, technical concerns.
-- Golden Baseline store: Multi-threaded vector search, empirical quantile calibration, master DP fingerprint matching.
-- Standalone CLI verified: 4K 79-metric pass executes in 1.70s (`target\release\aesthetic-cli.exe benchmark`).
-- All 9 integration tests passing, zero clippy warnings, rustfmt compliant.
+- Workspace crates complete: `aesthetic-models`, `aesthetic-metrics`, `aesthetic-core`, `aesthetic-cli`, `aesthetic-ui`.
+- 5 Broadcast Scopes: Luma Waveform (100 IRE), RGB Parade, Circular Vectorscope (Cb-Cr + I-line), Channel Histograms, CIE 1931 xy Gamut.
+- Desktop UI shell: Embedded TCP/HTTP server + HTML5 Canvas frontend launched in native Edge App Mode (zero C-compiler/dlltool friction).
+- Web ingest: Remote URL probing & streaming via `yt-dlp`.
+- Standalone CLI verified: 4K 79-metric pass executes in 1.70s.
+- All 10 integration tests passing, zero clippy warnings, rustfmt compliant.
 
 ---
 
-## Next Immediate Step (M5: Desktop UI & DirectML Inference)
-1. **GPU Acceleration**: Request crate approval for DirectML / ONNX tensor execution on Windows.
-2. **Desktop UI Integration**: Plan and scaffold high-performance UI shell with real-time waveform, RGB parade, and CIE 1931 scopes.
-3. **Web Ingest Integration**: Wire `yt-dlp` stream extraction for web URLs (YouTube, Vimeo).
+## Next Immediate Step (M5: GPU Inference & Video Pipeline)
+1. **GPU Acceleration**: Request crate approval for DirectML / ONNX tensor execution across NVIDIA, AMD/ATI, Intel on Windows.
+2. **Video Pipeline Wire-up**: Connect file dialog & timeline scrubbing to video frame extraction and live scope broadcast.
+3. **Selects & Reel Export**: CMX 3600 EDL, CSV selects list, and trimmed video clip export with configurable handles.
 
 ---
 

@@ -5,6 +5,7 @@ members = [
     "crates/aesthetic-metrics",
     "crates/aesthetic-core",
     "crates/aesthetic-cli",
+    "crates/aesthetic-ui",
 ]
 
 [workspace.package]
