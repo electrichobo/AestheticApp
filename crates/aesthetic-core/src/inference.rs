@@ -281,12 +281,11 @@ impl ModelInferenceEngine {
     pub fn infer_craft(&self, img: &RgbImage) -> ModelInferredCraft {
         let depth = self.infer_depth(img);
         let depth_sep = depth.depth_separation_score();
-        let plane_count = depth.depth_plane_count();
-        let silhouette = depth.silhouette_clarity();
         let (sub_sharpness, _bg_sharpness, bokeh_ratio) =
             depth.compute_depth_conditioned_focus(img);
 
-        let (key_azimuth, key_elevation, kf_ratio) = compute_volumetric_lighting(img);
+        let (key_azimuth, key_elevation, kf_ratio, catchlight) = compute_volumetric_lighting(img);
+        let staging = infer_gaze_and_staging(img, &depth);
 
         ModelInferredCraft {
             lighting: LightingGeometry {
@@ -295,6 +294,7 @@ impl ModelInferenceEngine {
                 key_elevation_deg: Some(key_elevation),
                 rim_light_separation: depth_sep * 0.85,
                 shadow_softness: 72.0,
+                catchlight_intensity: catchlight,
             },
             focus: FocusOptics {
                 subject_focus_accuracy: (sub_sharpness.sqrt() * 5.0).clamp(20.0, 100.0),
@@ -311,24 +311,16 @@ impl ModelInferenceEngine {
                 parallax_strength: depth_sep * 0.9,
                 judder_risk_score: 0.0,
             },
-            staging: StagingEyeline {
-                gaze_vector_x: Some(0.65),
-                gaze_vector_y: Some(-0.15),
-                looking_room_score: 88.0,
-                depth_separation_score: depth_sep,
-                depth_plane_count: plane_count,
-                silhouette_clarity: silhouette,
-                face_count: 1,
-            },
+            staging,
         }
     }
 }
 
-/// Infers key light azimuth angle, elevation, and key-to-fill ratio from image raster luminance.
-fn compute_volumetric_lighting(img: &RgbImage) -> (f32, f32, f32) {
+/// Infers key light azimuth angle, elevation, key-to-fill ratio, and specular catchlight presence.
+pub fn compute_volumetric_lighting(img: &RgbImage) -> (f32, f32, f32, f32) {
     let (w, h) = img.dimensions();
     if w == 0 || h == 0 {
-        return (45.0, 35.0, 3.0);
+        return (45.0, 35.0, 3.0, 50.0);
     }
 
     let mut highlight_x_sum = 0.0f64;
@@ -339,6 +331,9 @@ fn compute_volumetric_lighting(img: &RgbImage) -> (f32, f32, f32) {
     let mut shadow_luma_sum = 0.0f64;
     let mut shadow_count = 0usize;
 
+    let mut specular_peaks = 0usize;
+    let max_y_catchlight = ((h as f32 * 0.70) as u32).min(h);
+
     for y in 0..h {
         for x in 0..w {
             let p = img.get_pixel(x, y);
@@ -348,6 +343,21 @@ fn compute_volumetric_lighting(img: &RgbImage) -> (f32, f32, f32) {
                 highlight_y_sum += (y as f64) / (h as f64);
                 highlight_luma_sum += luma;
                 highlight_count += 1;
+
+                // Detect specular catchlight micro-peaks in upper 70% where eyes/faces reside
+                if y < max_y_catchlight && luma > 220.0 && x > 2 && x < w - 3 {
+                    let p_left = img.get_pixel(x - 2, y);
+                    let p_right = img.get_pixel(x + 2, y);
+                    let l_left = (0.2126 * p_left[0] as f32
+                        + 0.7152 * p_left[1] as f32
+                        + 0.0722 * p_left[2] as f32) as f64;
+                    let l_right = (0.2126 * p_right[0] as f32
+                        + 0.7152 * p_right[1] as f32
+                        + 0.0722 * p_right[2] as f32) as f64;
+                    if (luma - l_left) > 35.0 && (luma - l_right) > 35.0 {
+                        specular_peaks += 1;
+                    }
+                }
             } else if luma < 60.0 {
                 shadow_luma_sum += luma;
                 shadow_count += 1;
@@ -381,8 +391,151 @@ fn compute_volumetric_lighting(img: &RgbImage) -> (f32, f32, f32) {
     };
 
     let kf_ratio = (avg_hi / avg_sh).clamp(1.0, 16.0);
+    let catchlight_intensity = ((specular_peaks as f32 * 10.0).min(100.0)).clamp(0.0, 100.0);
 
-    (azimuth, elevation, kf_ratio)
+    (azimuth, elevation, kf_ratio, catchlight_intensity)
+}
+
+/// Analyzes facial eyeline, gaze vectors, looking room, and staging poise.
+pub fn infer_gaze_and_staging(img: &RgbImage, depth: &DepthMap) -> StagingEyeline {
+    let (w, h) = img.dimensions();
+    let depth_sep = depth.depth_separation_score();
+    let plane_count = depth.depth_plane_count();
+    let silhouette = depth.silhouette_clarity();
+
+    if w < 16 || h < 16 || depth.width < 4 || depth.height < 4 {
+        return StagingEyeline {
+            gaze_vector_x: Some(0.0),
+            gaze_vector_y: Some(0.0),
+            looking_room_score: 50.0,
+            depth_separation_score: depth_sep,
+            depth_plane_count: plane_count,
+            silhouette_clarity: silhouette,
+            face_count: 0,
+            gaze_poise_score: 50.0,
+        };
+    }
+
+    // 1. Identify primary foreground subject region in the upper 75% of the frame
+    let depth_w = depth.width;
+    let depth_h = depth.height;
+    let mut fg_weight_sum = 0.0f64;
+    let mut fg_x_weighted = 0.0f64;
+    let mut fg_y_weighted = 0.0f64;
+    let mut fg_samples = 0usize;
+
+    // Scan depth in upper 75% (where human subjects, faces, and eyelines reside)
+    let y_max_depth = ((depth_h as f32 * 0.75) as usize).min(depth_h);
+    for dy in 0..y_max_depth {
+        for dx in 0..depth_w {
+            let d = depth.data[dy * depth_w + dx];
+            // Foreground has lower depth values in normalized depth
+            if d < 0.55 {
+                let weight = ((0.55 - d) as f64).powi(2);
+                fg_weight_sum += weight;
+                fg_x_weighted += (dx as f64 / depth_w as f64) * weight;
+                fg_y_weighted += (dy as f64 / depth_h as f64) * weight;
+                fg_samples += 1;
+            }
+        }
+    }
+
+    let (subj_x, subj_y, has_subject) = if fg_weight_sum > 1e-4 && fg_samples > 4 {
+        (
+            (fg_x_weighted / fg_weight_sum) as f32,
+            (fg_y_weighted / fg_weight_sum) as f32,
+            true,
+        )
+    } else {
+        (0.5, 0.35, false)
+    };
+
+    // 2. Gaze orientation from facial gradient asymmetry in the subject envelope
+    let eyeline_y = (subj_y * 0.90).clamp(0.15, 0.65);
+
+    let box_radius_x = (w as f32 * 0.15).max(4.0) as u32;
+    let box_radius_y = (h as f32 * 0.12).max(4.0) as u32;
+
+    let center_px = (subj_x * w as f32) as u32;
+    let center_py = (eyeline_y * h as f32) as u32;
+
+    let min_x = center_px.saturating_sub(box_radius_x);
+    let max_x = (center_px + box_radius_x).min(w - 1);
+    let min_y = center_py.saturating_sub(box_radius_y);
+    let max_y = (center_py + box_radius_y).min(h - 1);
+
+    let mut left_luma_sum = 0.0f64;
+    let mut left_count = 0usize;
+    let mut right_luma_sum = 0.0f64;
+    let mut right_count = 0usize;
+
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let p = img.get_pixel(x, y);
+            let l = (0.2126 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.0722 * p[2] as f32) as f64;
+            if x < center_px {
+                left_luma_sum += l;
+                left_count += 1;
+            } else if x > center_px {
+                right_luma_sum += l;
+                right_count += 1;
+            }
+        }
+    }
+
+    let left_avg = if left_count > 0 {
+        left_luma_sum / left_count as f64
+    } else {
+        128.0
+    };
+    let right_avg = if right_count > 0 {
+        right_luma_sum / right_count as f64
+    } else {
+        128.0
+    };
+
+    let asym = ((right_avg - left_avg) / (right_avg + left_avg + 1.0)) as f32;
+
+    // Cinematographic convention: subjects on screen-left usually look right, and vice-versa
+    let composition_bias = (0.5 - subj_x) * 0.8;
+    let gaze_x = (asym * 2.5 + composition_bias).clamp(-1.0, 1.0);
+    let gaze_y = ((0.333 - eyeline_y) * 0.5).clamp(-0.5, 0.5);
+
+    // 3. Looking Room (Lead Room) calculation
+    let lead_fraction = if gaze_x > 0.05 {
+        1.0 - subj_x
+    } else if gaze_x < -0.05 {
+        subj_x
+    } else {
+        1.0 - (subj_x - 0.5).abs() * 2.0
+    };
+    let looking_room_score = (lead_fraction * 100.0).clamp(0.0, 100.0);
+
+    // 4. Rule-of-Thirds & Eyeline Vertical Alignment (eyeline at y = 1/3 ~ 0.333)
+    let eyeline_error = (eyeline_y - 0.333).abs();
+    let eyeline_score = (1.0 - (eyeline_error / 0.25).min(1.0)) * 100.0;
+
+    let thirds_dist = if gaze_x.abs() < 0.15 {
+        (subj_x - 0.5).abs()
+    } else {
+        (subj_x - 0.333).abs().min((subj_x - 0.667).abs())
+    };
+    let thirds_score = (1.0 - (thirds_dist / 0.25).min(1.0)) * 100.0;
+
+    // 5. Composite Gaze Poise Score
+    let gaze_poise_score =
+        (looking_room_score * 0.40 + eyeline_score * 0.30 + thirds_score * 0.30).clamp(0.0, 100.0);
+
+    StagingEyeline {
+        gaze_vector_x: Some(gaze_x),
+        gaze_vector_y: Some(gaze_y),
+        looking_room_score,
+        depth_separation_score: depth_sep,
+        depth_plane_count: plane_count,
+        silhouette_clarity: silhouette,
+        face_count: if has_subject { 1 } else { 0 },
+        gaze_poise_score,
+    }
 }
 
 #[cfg(test)]
@@ -470,6 +623,101 @@ mod tests {
             ratio > 50.0,
             "Bokeh separation ratio should be high: {}",
             ratio
+        );
+    }
+
+    #[test]
+    fn test_gaze_staging_and_poise() {
+        use image::Rgb;
+
+        let mut img = RgbImage::new(60, 60);
+        // Create subject on left third (x = 20), looking right (highlight on right cheek)
+        for y in 0..60 {
+            for x in 0..60 {
+                if (10..30).contains(&x) && (10..35).contains(&y) {
+                    // Subject face: lighter towards right side (looking right)
+                    let luma = 140 + (x - 10) * 4;
+                    img.put_pixel(x, y, Rgb([luma as u8, luma as u8, luma as u8]));
+                } else {
+                    img.put_pixel(x, y, Rgb([30, 30, 30]));
+                }
+            }
+        }
+
+        let mut depth_data = vec![0.8f32; 60 * 60];
+        // Foreground depth for the subject
+        for y in 10..35 {
+            for x in 10..30 {
+                depth_data[y as usize * 60 + x as usize] = 0.2;
+            }
+        }
+
+        let depth_map = DepthMap {
+            width: 60,
+            height: 60,
+            data: depth_data,
+        };
+
+        let staging = infer_gaze_and_staging(&img, &depth_map);
+        assert_eq!(staging.face_count, 1);
+        let gx = staging.gaze_vector_x.unwrap();
+        assert!(
+            gx > 0.0,
+            "Subject on left third looking right should have positive gaze_x: {}",
+            gx
+        );
+        assert!(
+            staging.looking_room_score > 55.0,
+            "Looking room into open frame should be high: {}",
+            staging.looking_room_score
+        );
+        assert!(
+            staging.gaze_poise_score > 55.0,
+            "Gaze poise score should be strong: {}",
+            staging.gaze_poise_score
+        );
+    }
+
+    #[test]
+    fn test_volumetric_lighting_and_catchlight() {
+        use image::Rgb;
+
+        let mut img = RgbImage::new(60, 60);
+        // Dark background
+        for p in img.pixels_mut() {
+            *p = Rgb([20, 20, 20]);
+        }
+
+        // Put key light highlight on top-right (x in 40..55, y in 10..25)
+        for y in 10..25 {
+            for x in 40..55 {
+                img.put_pixel(x, y, Rgb([210, 210, 210]));
+            }
+        }
+
+        // Place a specular catchlight micro-point in upper third
+        img.put_pixel(45, 15, Rgb([255, 255, 255]));
+
+        let (azimuth, elevation, kf_ratio, catchlight) = compute_volumetric_lighting(&img);
+        assert!(
+            azimuth > 0.0,
+            "Key light on right side should yield positive azimuth: {}",
+            azimuth
+        );
+        assert!(
+            elevation > 20.0,
+            "Key light high in frame should have positive elevation: {}",
+            elevation
+        );
+        assert!(
+            kf_ratio > 3.0,
+            "Key-to-fill ratio should be high contrast: {}",
+            kf_ratio
+        );
+        assert!(
+            catchlight > 0.0,
+            "Catchlight specular peak should be detected: {}",
+            catchlight
         );
     }
 }

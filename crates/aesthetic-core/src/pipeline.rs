@@ -190,13 +190,19 @@ pub fn analyze_video_file(
 
             // Craft & embedding matching
             let craft = inference.infer_craft(&frame);
-            take.scores.creative = (craft.staging.depth_separation_score * 0.4
-                + craft.staging.silhouette_clarity * 0.4
-                + 20.0)
+            let depth_quality = (craft.staging.depth_separation_score * 0.5
+                + craft.staging.silhouette_clarity * 0.5)
                 .clamp(0.0, 100.0);
-            take.scores.overall = (take.scores.technical * 0.40
-                + take.scores.creative * 0.35
-                + take.scores.temporal * 0.25)
+            let color_harmony = take.measured.color.harmonic_palette_score;
+            let staging_poise = craft.staging.gaze_poise_score;
+            let lighting_quality = ((craft.lighting.catchlight_intensity * 0.20)
+                + (craft.lighting.key_to_fill_ratio.min(8.0) / 8.0) * 80.0)
+                .clamp(0.0, 100.0);
+
+            take.scores.creative = (depth_quality * 0.25
+                + color_harmony * 0.25
+                + staging_poise * 0.30
+                + lighting_quality * 0.20)
                 .clamp(0.0, 100.0);
 
             let emb = inference.infer_embedding(&frame);
@@ -207,7 +213,14 @@ pub fn analyze_video_file(
                     Some(format!("{} ({})", dp.dp_name, dp.reference_film));
                 take.style.match_confidence = dp.visual_similarity;
                 take.style.style_family = dp.style_family;
+                take.scores.creative =
+                    (take.scores.creative * 0.70 + dp.visual_similarity * 30.0).clamp(0.0, 100.0);
             }
+
+            take.scores.overall = (take.scores.technical * 0.45
+                + take.scores.creative * 0.35
+                + take.scores.temporal * 0.20)
+                .clamp(0.0, 100.0);
 
             takes.push(take);
         }

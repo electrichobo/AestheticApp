@@ -17,6 +17,9 @@ pub struct LightingGeometry {
     pub rim_light_separation: f32,
     /// Shadow boundary gradient width (soft vs hard light)
     pub shadow_softness: f32,
+    /// Catchlight specular reflection intensity in subject eyes/face (0.0 - 100.0)
+    #[serde(default)]
+    pub catchlight_intensity: f32,
 }
 
 /// Focus behavior and optical transitions inferred over time.
@@ -54,6 +57,9 @@ pub struct StagingEyeline {
     pub depth_plane_count: u32,
     pub silhouette_clarity: f32,
     pub face_count: u32,
+    /// Gaze poise score (0.0 - 100.0) balancing headroom, lead room, and eyeline on thirds
+    #[serde(default)]
+    pub gaze_poise_score: f32,
 }
 
 /// Combined Model-Inferred Craft bundle.

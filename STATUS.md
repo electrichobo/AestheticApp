@@ -18,41 +18,27 @@
 | **M4: CLI Driver & Benchmark Harness** | `aesthetic-cli`, 4K SIMD physics benchmark (1.70s 4K pass), demo take evaluation | ✅ Done | Standalone executable verified in debug and release |
 | **M5: Desktop UI, Scopes & Release** | 5 Broadcast Scopes, CMX 3600 EDL/CSV Export, Desktop UI Shell, DirectML Acceleration | ✅ Done | Release binaries verified (`aesthetic-cli`, `aesthetic-ui`) |
 | **M6: Editorial Deliverables & Stills Ingest** | JSON Shot Sidecars, Top-$N$ Breakout & Visual Contact Sheet, Native File Browser, Still Images Baseline Ingest, NLE XML/EDL Round-Trip | ✅ Done | Stills ingest, HTML contact sheets, JSON sidecars, FCPXML & native OS picker |
-| **M7: Advanced Cinematographic Intelligence** | Depth-Conditioned Z-Plane Focus (Bokeh MTF), Volumetric Key-Fill & Catchlight Geometry, Split-Toning in ACES/Linear Space, Gaze-Anchored Cinematic Poise, Style-Family Manifold Geodesics | 🔄 In Progress | Learned subjective heads & perceptual optical modeling |
+| **M7: Advanced Cinematographic Intelligence** | Depth-Conditioned Z-Plane Focus (Bokeh MTF), Volumetric Key-Fill & Catchlight Geometry, Split-Toning in ACES/Linear Space, Gaze-Anchored Cinematic Poise, Style-Family Manifold Geodesics | ✅ Done | Subject/bokeh MTF, catchlights, gaze vectors, looking room, ACES split-toning & 6 style clusters |
 
 ---
 
-## Completed in M6
-- **Still Image Baseline Ingestion** (`crates/aesthetic-core/src/baseline_store.rs`):
-  - Ingests reference cinema still frames (`.png`, `.jpg`, `.tiff`, `.exr`, `.webp`, `.bmp`) individually or by entire directories.
-  - Automatically computes 79 objective physics metrics, vision embeddings, appends to baseline corpus, and dynamically recalibrates empirical quantiles.
-- **Editorial Deliverables & Top-$N$ Breakout** (`crates/aesthetic-core/src/export.rs`):
-  - **FCPXML Timeline Export**: Final Cut Pro and DaVinci Resolve readable timeline project with source timecode cuts, hero frame markers, and score metadata notes.
-  - **Visual HTML Contact Sheet**: Responsive dark-themed grid breakout showcasing top $N$ selects with timecodes, composite score badges, score breakdown bars, style tags, and Master DP banners.
-  - **JSON Shot Sidecars**: Exports structured sidecar files at `<dir>/metrics/<take_id>.json` containing full 79 raw measurements, classifications, and scores for zero-redundancy re-scoring.
-- **Native OS File & Directory Browser** (`crates/aesthetic-ui/src/main.rs`, `ui/app.js`):
-  - Cross-platform native file and folder open dialogs wired into UI buttons ("+ Open Media", "+ Baseline Media") replacing manual path inputs.
-  - One-click export buttons in UI header for Contact Sheet, FCPXML, EDL, and CSV.
-- **CLI Commands Extended** (`crates/aesthetic-cli/src/main.rs`):
-  - `analyze`: `--top <N>`, `--edl <file>`, `--csv <file>`, `--xml <file>`, `--contact-sheet <file>`, `--sidecars <dir>`, `--clips <dir>`.
-  - `ingest-baseline`: accepts video files, still images, and directories of stills.
-- **Testing & Quality Assurance**:
-  - 17/17 tests passing across the workspace. Zero clippy warnings with `-D warnings`. `cargo fmt --check` passes cleanly.
-
----
-
-## Completed in M7 (So Far)
+## Completed in M7
 - **Depth-Conditioned Focus & Bokeh Quality** (`crates/aesthetic-core/src/inference.rs`):
   - `compute_depth_conditioned_focus`: Evaluates high-frequency Laplacian sharpness specifically along the subject depth plane while measuring the smoothness of the background bokeh plane.
   - Generates the `bokeh_separation_ratio`, accurately rewarding shallow depth-of-field cinematography ($f/1.2$, $f/1.4$) without falsely penalizing intentional optical defocus.
-- **Volumetric Lighting Geometry** (`crates/aesthetic-core/src/inference.rs`):
+- **Volumetric Lighting & Catchlight Geometry** (`crates/aesthetic-core/src/inference.rs`):
   - `compute_volumetric_lighting`: Infers 3D key-light azimuth angle (-90° to +90° horizontal key placement) and elevation angle (10° to 85° top-down modeling) from highlight vs shadow spatial distributions.
   - Automatically calculates physical key-to-fill contrast ratios across candidate frames.
+  - Detects specular catchlight micro-peaks in upper 70% facial envelope, measuring `catchlight_intensity` to evaluate lifelike reflections in the subject's eyes.
+- **Gaze-Anchored Cinematic Poise & Looking Room** (`crates/aesthetic-core/src/inference.rs`):
+  - `infer_gaze_and_staging`: Evaluates subject centroid $(C_x, C_y)$ from foreground depth clusters, directional gaze vectors $(G_x, G_y)$ from facial luminance/chrominance gradient asymmetry, looking room score (rewarding breathing space in the look direction, penalizing short-siding), eyeline vertical elevation on rule-of-thirds ($y \approx 0.333$), and composite `gaze_poise_score`.
 - **Harmonic Complementary Split-Toning** (`crates/aesthetic-metrics/src/color.rs`):
   - `split_toning_separation_deg`: Chromatic angle between highlight and shadow vectors in $Y C_b C_r$ space. Detects and scores complementary color schemes (e.g. orange/teal separation at 140°–180°).
   - `harmonic_palette_score`: Composite palette score rewarding harmonic split-toning balance and controlled color entropy.
 - **6 Canonical Style-Family Clusters** (`crates/aesthetic-models/src/baseline.rs`, `crates/aesthetic-core/src/baseline_store.rs`):
   - Dynamic classification across *Chiaroscuro Noir*, *Prestige Naturalism*, *Expressive Color*, *High-Key Symmetrical*, *Documentary Vérité*, and *Atmospheric Immersion*.
   - Surface style-family tags in `DiscoveredStyle`, `MasterMatchResult`, HTML contact sheet, and UI.
+- **Holistic 3-Pillar Scoring Fusion** (`crates/aesthetic-core/src/pipeline.rs`):
+  - Dynamically synthesizes objective technical measurements, deep craft inference (depth separation, silhouette clarity, gaze poise, looking room, volumetric key-to-fill, catchlight presence, color harmony, and master DP manifold distance), and temporal continuity.
 - **Testing**:
-  - 19/19 tests passing across workspace, zero clippy warnings, rustfmt compliant.
+  - 21/21 tests passing across workspace, zero clippy warnings, rustfmt compliant.

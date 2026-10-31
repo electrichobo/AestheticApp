@@ -7,22 +7,22 @@
 
 ---
 
-## Current Status: M7 (Style Families, Split-Toning & Volumetric Lighting Complete)
+## Current Status: M7 (Advanced Cinematographic Intelligence Complete)
 - Protocol initialized: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `START_HERE.md`, `STATUS.md`.
 - Workspace crates complete: `aesthetic-models`, `aesthetic-metrics`, `aesthetic-core`, `aesthetic-cli`, `aesthetic-ui`.
 - Depth-Conditioned Focus: `compute_depth_conditioned_focus` evaluates subject-plane MTF sharpness vs background bokeh roll-off ratio.
-- Volumetric Lighting: Inferred 3D key light azimuth, elevation angle, and key-to-fill modeling ratio from spatial highlight/shadow distribution.
+- Volumetric Lighting & Catchlights: 3D key azimuth, elevation, key-to-fill ratio, and facial specular catchlight detection.
+- Gaze-Anchored Staging & Poise: Subject centroid, directional gaze vector, looking room (lead room), thirds alignment, and composite poise score.
 - Harmonic Split-Toning: Perceptual chromatic separation angle (140°-180° complementary balance) and palette harmony scoring.
 - Style-Family Clusters: 6 canonical aesthetic clusters (Chiaroscuro Noir, Prestige Naturalism, Expressive Color, High-Key Symmetrical, Documentary Vérité, Atmospheric Immersion).
 - Editorial Deliverables: Top-$N$ visual contact sheets, JSON sidecars, FCPXML, CMX 3600 EDL, still/video baseline ingestion, native OS dialogs.
-- 19/19 tests passing, zero clippy warnings, rustfmt compliant.
+- 21/21 tests passing, zero clippy warnings, rustfmt compliant.
 
 ---
 
-## Next Immediate Step (M7 Release Builds & End-to-End Verification)
-1. **Commit & Push M7 Progress**: Commit uncommitted changes per user request.
-2. **Release Build Verification**: Build optimized binaries (`cargo build --release -p aesthetic-cli -p aesthetic-ui`).
-3. **End-to-End Media Test**: Verify CLI analysis against real reference media with contact sheet, FCPXML, and JSON sidecars.
+## Next Immediate Step (Production Packaging & DirectML Acceleration)
+1. **DirectML Acceleration Option**: Profile DirectML on Windows vs Rayon SIMD CPU on 4K/8K media.
+2. **End-to-End Media Ingest Test**: Run sample video and still directory through `aesthetic-cli analyze` and inspect exported selects.
 
 ---
 
