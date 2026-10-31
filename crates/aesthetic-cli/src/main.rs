@@ -358,6 +358,37 @@ fn run_benchmark() {
         physics.color.gamut_coverage_rec2020
     );
 
+    let engine = aesthetic_core::inference::ModelInferenceEngine::new();
+    println!("\nInference Architecture: {}", engine.backend_name);
+    let start_craft = Instant::now();
+    let craft = engine.infer_craft(&img);
+    let emb = engine.infer_embedding(&img);
+    let craft_time = start_craft.elapsed();
+    println!(
+        "4K Monocular Depth & Craft Inference Time: {:.2?}",
+        craft_time
+    );
+    println!(
+        "  - Depth Separation Score:   {:.2}",
+        craft.staging.depth_separation_score
+    );
+    println!(
+        "  - Key-to-Fill Contrast:     {:.2}:1",
+        craft.lighting.key_to_fill_ratio
+    );
+    println!(
+        "  - Inferred Key Azimuth:     {:.1} deg",
+        craft.lighting.key_azimuth_deg.unwrap_or(0.0)
+    );
+    println!(
+        "  - Gaze Staging Poise:       {:.1} / 100",
+        craft.staging.gaze_poise_score
+    );
+    println!(
+        "  - 1152-dim Embedding Norm:  {:.4}",
+        emb.iter().map(|v| v * v).sum::<f32>().sqrt()
+    );
+
     let mut store = BaselineStore::new();
     for i in 0..5000 {
         store.add_reference_shot(ReferenceShot {

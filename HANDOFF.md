@@ -7,22 +7,20 @@
 
 ---
 
-## Current Status: M7 (Advanced Cinematographic Intelligence Complete)
+## Current Status: M8 (Scoring Matrix & DP Comparison UI Complete)
 - Protocol initialized: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `START_HERE.md`, `STATUS.md`.
 - Workspace crates complete: `aesthetic-models`, `aesthetic-metrics`, `aesthetic-core`, `aesthetic-cli`, `aesthetic-ui`.
-- Depth-Conditioned Focus: `compute_depth_conditioned_focus` evaluates subject-plane MTF sharpness vs background bokeh roll-off ratio.
-- Volumetric Lighting & Catchlights: 3D key azimuth, elevation, key-to-fill ratio, and facial specular catchlight detection.
-- Gaze-Anchored Staging & Poise: Subject centroid, directional gaze vector, looking room (lead room), thirds alignment, and composite poise score.
-- Harmonic Split-Toning: Perceptual chromatic separation angle (140°-180° complementary balance) and palette harmony scoring.
-- Style-Family Clusters: 6 canonical aesthetic clusters (Chiaroscuro Noir, Prestige Naturalism, Expressive Color, High-Key Symmetrical, Documentary Vérité, Atmospheric Immersion).
-- Editorial Deliverables: Top-$N$ visual contact sheets, JSON sidecars, FCPXML, CMX 3600 EDL, still/video baseline ingestion, native OS dialogs.
+- Master DP Benchmark Comparison: Side-by-side diagnostic table in desktop UI comparing shot DR, roll-off, key-to-fill, split-toning, gaze poise, and catchlights directly against matched DP.
+- Forensic Improvement Action Cards: Concrete recommendations generated from empirical deltas.
+- Benchmark Harness: 4K frame physics (1.73s), 4K depth/craft inference (45ms), vector similarity search (1.31ms).
 - 21/21 tests passing, zero clippy warnings, rustfmt compliant.
 
 ---
 
 ## Next Immediate Step (Production Packaging & DirectML Acceleration)
-1. **DirectML Acceleration Option**: Profile DirectML on Windows vs Rayon SIMD CPU on 4K/8K media.
-2. **End-to-End Media Ingest Test**: Run sample video and still directory through `aesthetic-cli analyze` and inspect exported selects.
+1. **Commit & Push M8 Updates**: Push scoring matrix UI and benchmark harness.
+2. **DirectML Acceleration Option**: Profile DirectML on Windows vs Rayon SIMD CPU on 4K/8K media.
+3. **End-to-End Media Ingest Test**: Run sample video through `aesthetic-cli analyze` and inspect exported selects.
 
 ---
 

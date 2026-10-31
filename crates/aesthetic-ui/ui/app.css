@@ -377,3 +377,125 @@ body {
   color: var(--text-muted);
   font-style: italic;
 }
+
+/* Benchmark Comparison Table */
+.matrix-benchmark-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.dp-tag-badge {
+  font-size: 10px;
+  background: rgba(229, 169, 59, 0.2);
+  color: var(--accent-gold);
+  border: 1px solid rgba(229, 169, 59, 0.4);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.benchmark-table-container {
+  overflow-x: auto;
+}
+
+.benchmark-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.benchmark-table th {
+  text-align: left;
+  padding: 6px 4px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+  font-weight: 500;
+}
+
+.benchmark-table td {
+  padding: 6px 4px;
+  border-bottom: 1px solid rgba(37, 45, 61, 0.4);
+}
+
+.benchmark-table tr:last-child td {
+  border-bottom: none;
+}
+
+.status-pill {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.status-optimal {
+  background: rgba(0, 255, 102, 0.15);
+  color: var(--accent-green);
+}
+
+.status-warning {
+  background: rgba(229, 169, 59, 0.15);
+  color: var(--accent-gold);
+}
+
+.status-alert {
+  background: rgba(255, 85, 85, 0.15);
+  color: var(--accent-warning);
+}
+
+/* Improvement Action Cards */
+.action-cards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.action-card {
+  background: #11151e;
+  border-left: 3px solid var(--accent-cyan);
+  padding: 8px 10px;
+  border-radius: 0 4px 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.action-card.creative {
+  border-left-color: var(--accent-gold);
+}
+
+.action-card.technical {
+  border-left-color: var(--accent-cyan);
+}
+
+.action-card.optimal {
+  border-left-color: var(--accent-green);
+}
+
+.action-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.action-card-category {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.action-card-pillar {
+  font-size: 9px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.action-card-text {
+  font-size: 11px;
+  color: #c9d1d9;
+  line-height: 1.4;
+}

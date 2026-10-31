@@ -54,8 +54,9 @@ async function fetchFrameData(timeSec) {
 }
 
 // Update the 4-Output Cinematographic Matrix UI
-function updateEvaluationUI(data) {
-  if (!data) return;
+function updateEvaluationUI(resData) {
+  if (!resData) return;
+  const data = resData.take || resData;
 
   // 1. Pillar Scores
   if (data.scores) {
@@ -101,7 +102,59 @@ function updateEvaluationUI(data) {
     }
   }
 
-  // 3. Technical Concerns
+  // 3. Benchmark Comparison Table
+  const dpBadge = document.getElementById('benchmark-dp-badge');
+  const tableBody = document.getElementById('benchmark-table-body');
+  if (tableBody) {
+    tableBody.innerHTML = '';
+    const comp = resData.comparison;
+    if (comp && comp.rows) {
+      if (dpBadge) dpBadge.textContent = `${comp.dp_name} [${comp.reference_film}] (${comp.similarity}% Match)`;
+      comp.rows.forEach(r => {
+        const tr = document.createElement('tr');
+        let pillClass = 'status-optimal';
+        if (r.status.includes('Needs') || r.status.includes('Steep') || r.status.includes('Short-Sided')) {
+          pillClass = 'status-warning';
+        } else if (r.status.includes('Subdued') || r.status.includes('Clip')) {
+          pillClass = 'status-alert';
+        }
+        tr.innerHTML = `
+          <td><strong>${r.metric}</strong></td>
+          <td>${r.shot_val}</td>
+          <td>${r.target_val}</td>
+          <td><span class="status-pill ${pillClass}">${r.status}</span></td>
+        `;
+        tableBody.appendChild(tr);
+      });
+    }
+  }
+
+  // 4. Cinematographic Improvement Action Cards
+  const actionsList = document.getElementById('action-cards-list');
+  if (actionsList) {
+    actionsList.innerHTML = '';
+    const actions = resData.actions || [];
+    if (actions.length === 0) {
+      actionsList.innerHTML = '<div class="concern-item clean">All metrics align closely with Golden Baseline standards.</div>';
+    } else {
+      actions.forEach(a => {
+        const card = document.createElement('div');
+        const pillType = (a.priority || '').toLowerCase();
+        const pilClass = a.pillar === 'Technical' ? 'technical' : (pillType === 'optimal' ? 'optimal' : 'creative');
+        card.className = `action-card ${pilClass}`;
+        card.innerHTML = `
+          <div class="action-card-header">
+            <span class="action-card-category">${a.category}</span>
+            <span class="action-card-pillar">${a.pillar} · ${a.priority}</span>
+          </div>
+          <div class="action-card-text">${a.recommendation}</div>
+        `;
+        actionsList.appendChild(card);
+      });
+    }
+  }
+
+  // 5. Technical Concerns
   const concernsList = document.getElementById('concerns-list');
   if (concernsList) {
     concernsList.innerHTML = '';

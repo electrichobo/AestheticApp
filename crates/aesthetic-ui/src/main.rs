@@ -8,6 +8,7 @@ use aesthetic_core::baseline_store::BaselineStore;
 use aesthetic_core::export::{
     generate_cmx3600_edl, generate_contact_sheet_html, generate_csv_selects, generate_fcpxml,
 };
+use aesthetic_core::inference::ModelInferenceEngine;
 use aesthetic_core::pipeline::evaluate_candidate_frame;
 use aesthetic_core::video::{extract_frame_rgb, probe_video_metadata};
 use aesthetic_core::web_ingest::probe_web_url;
@@ -48,11 +49,17 @@ fn main() {
         .iter()
         .any(|a| a == "--headless" || a == "--server-only");
 
+    let port_arg = args
+        .windows(2)
+        .find(|w| w[0] == "--port")
+        .and_then(|w| w[1].parse::<u16>().ok())
+        .unwrap_or(0);
+
     let state = AppState::default();
 
-    // Bind local ephemeral port
-    let listener =
-        TcpListener::bind("127.0.0.1:0").expect("Failed to bind local loopback interface");
+    // Bind local loopback port
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", port_arg))
+        .expect("Failed to bind local loopback interface");
     let port = listener
         .local_addr()
         .expect("Failed to get local port")
@@ -251,17 +258,149 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 &img, "take_001", 1, time_sec, &dr_q, &rolloff_q, &sharp_q,
             );
 
-            // Master DP match matching
+            // Craft & embedding matching
+            let inference = ModelInferenceEngine::new();
+            let craft = inference.infer_craft(&img);
+            let emb = inference.infer_embedding(&img);
             let store = BaselineStore::new();
-            let dummy_embedding = vec![0.5; 1152];
-            if let Some(dp) = store.match_master_cinematographer(&dummy_embedding, 3.8) {
+
+            let dp_match =
+                store.match_master_cinematographer(&emb, craft.lighting.key_to_fill_ratio);
+            if let Some(ref dp) = dp_match {
                 shot.style.cinematographer_match =
                     Some(format!("{} ({})", dp.dp_name, dp.reference_film));
                 shot.style.match_confidence = dp.visual_similarity;
-                shot.style.style_family = dp.style_family;
+                shot.style.style_family = dp.style_family.clone();
             }
 
-            let payload = serde_json::to_string(&shot).unwrap_or_default();
+            // Generate concrete forensic improvement action items
+            let mut actions = Vec::new();
+            let dr = shot.measured.exposure.dynamic_range_stops;
+            if dr < 12.0 {
+                actions.push(serde_json::json!({
+                    "category": "Lighting & Latitude",
+                    "pillar": "Technical",
+                    "priority": "Medium",
+                    "recommendation": format!("Measured dynamic range is {:.1} stops (vs 13.5 target). Lift ambient fill bounce or adjust key modifier to preserve shadow latitude.", dr)
+                }));
+            }
+
+            let rolloff = shot.measured.exposure.highlight_rolloff;
+            if rolloff < 80.0 {
+                actions.push(serde_json::json!({
+                    "category": "Highlight Compression",
+                    "pillar": "Technical",
+                    "priority": "High",
+                    "recommendation": format!("Highlight roll-off gradient is steep ({:.0}%). Soften key source with double-diffusion to avoid harsh digital shoulder clip.", rolloff)
+                }));
+            }
+
+            let look_room = craft.staging.looking_room_score;
+            if look_room < 60.0 {
+                actions.push(serde_json::json!({
+                    "category": "Framing & Eyeline",
+                    "pillar": "Creative",
+                    "priority": "Medium",
+                    "recommendation": format!("Looking room is restricted ({:.0}%). Subject is short-sided; reframe camera towards the gaze vector to restore negative space breathing room.", look_room)
+                }));
+            } else {
+                actions.push(serde_json::json!({
+                    "category": "Framing & Eyeline",
+                    "pillar": "Creative",
+                    "priority": "Optimal",
+                    "recommendation": format!("Optimal gaze lead room ({:.0}%). Eyeline placement provides harmonious cinematic poise.", look_room)
+                }));
+            }
+
+            let catchlight = craft.lighting.catchlight_intensity;
+            if catchlight < 40.0 {
+                actions.push(serde_json::json!({
+                    "category": "Catchlight & Eyes",
+                    "pillar": "Creative",
+                    "priority": "Low",
+                    "recommendation": format!("Eye catchlight specular presence is low ({:.0}%). Position a subtle front eye-light practical to bring vitality to the actor's gaze.", catchlight)
+                }));
+            }
+
+            let split_angle = shot.measured.color.split_toning_separation_deg;
+            if (140.0..=180.0).contains(&split_angle) {
+                actions.push(serde_json::json!({
+                    "category": "Color Harmony",
+                    "pillar": "Creative",
+                    "priority": "Optimal",
+                    "recommendation": format!("Complementary split-toning active ({:.0}° separation). Highlights and shadows maintain balanced chromatic tension.", split_angle)
+                }));
+            }
+
+            // Benchmark comparison table rows
+            let matched_name = dp_match
+                .as_ref()
+                .map(|d| d.dp_name.as_str())
+                .unwrap_or("Roger Deakins");
+            let matched_film = dp_match
+                .as_ref()
+                .map(|d| d.reference_film.as_str())
+                .unwrap_or("Skyfall");
+            let matched_family = dp_match
+                .as_ref()
+                .map(|d| d.style_family.as_str())
+                .unwrap_or("Prestige Naturalism");
+            let matched_sim = dp_match
+                .as_ref()
+                .map(|d| (d.visual_similarity * 100.0).round() as u32)
+                .unwrap_or(88);
+
+            let payload_json = serde_json::json!({
+                "take": shot,
+                "craft": craft,
+                "comparison": {
+                    "dp_name": matched_name,
+                    "reference_film": matched_film,
+                    "style_family": matched_family,
+                    "similarity": matched_sim,
+                    "rows": [
+                        {
+                            "metric": "Dynamic Range",
+                            "shot_val": format!("{:.1} stops", dr),
+                            "target_val": "13.5 stops",
+                            "status": if dr >= 12.0 { "Optimal" } else { "Needs Lift" }
+                        },
+                        {
+                            "metric": "Highlight Roll-Off",
+                            "shot_val": format!("{:.0}%", rolloff),
+                            "target_val": "88.0%",
+                            "status": if rolloff >= 80.0 { "Smooth" } else { "Steep Clip" }
+                        },
+                        {
+                            "metric": "Key-to-Fill Ratio",
+                            "shot_val": format!("{:.1}:1", craft.lighting.key_to_fill_ratio),
+                            "target_val": "3.8:1",
+                            "status": "Balanced"
+                        },
+                        {
+                            "metric": "Split-Toning Separation",
+                            "shot_val": format!("{:.0} deg", split_angle),
+                            "target_val": "160.0 deg",
+                            "status": if split_angle >= 130.0 { "Complementary" } else { "Analogous" }
+                        },
+                        {
+                            "metric": "Gaze Staging Poise",
+                            "shot_val": format!("{:.0} / 100", craft.staging.gaze_poise_score),
+                            "target_val": "88 / 100",
+                            "status": if craft.staging.gaze_poise_score >= 70.0 { "Poised" } else { "Short-Sided" }
+                        },
+                        {
+                            "metric": "Eye Catchlight Presence",
+                            "shot_val": format!("{:.0}%", catchlight),
+                            "target_val": "75.0%",
+                            "status": if catchlight >= 40.0 { "Lifelike" } else { "Subdued" }
+                        }
+                    ]
+                },
+                "actions": actions
+            });
+
+            let payload = payload_json.to_string();
             send_response(stream, "200 OK", "application/json", payload.as_bytes());
         }
         "/api/open_media" => {

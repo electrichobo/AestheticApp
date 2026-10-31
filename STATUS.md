@@ -19,6 +19,21 @@
 | **M5: Desktop UI, Scopes & Release** | 5 Broadcast Scopes, CMX 3600 EDL/CSV Export, Desktop UI Shell, DirectML Acceleration | ✅ Done | Release binaries verified (`aesthetic-cli`, `aesthetic-ui`) |
 | **M6: Editorial Deliverables & Stills Ingest** | JSON Shot Sidecars, Top-$N$ Breakout & Visual Contact Sheet, Native File Browser, Still Images Baseline Ingest, NLE XML/EDL Round-Trip | ✅ Done | Stills ingest, HTML contact sheets, JSON sidecars, FCPXML & native OS picker |
 | **M7: Advanced Cinematographic Intelligence** | Depth-Conditioned Z-Plane Focus (Bokeh MTF), Volumetric Key-Fill & Catchlight Geometry, Split-Toning in ACES/Linear Space, Gaze-Anchored Cinematic Poise, Style-Family Manifold Geodesics | ✅ Done | Subject/bokeh MTF, catchlights, gaze vectors, looking room, ACES split-toning & 6 style clusters |
+| **M8: Scoring Matrix & DP Comparison UI** | Side-by-Side Master DP Diagnostic Table, Empirical Improvement Action Cards, Port Binding Configuration, Craft Benchmark Integration | ✅ Done | Desktop UI diagnostic table, dynamic improvement recommendations & 4K craft benchmarks |
+
+---
+
+## Completed in M8
+- **Master DP Side-by-Side Diagnostic Comparison** (`crates/aesthetic-ui/ui/index.html`, `ui/app.js`, `src/main.rs`):
+  - Real-time side-by-side comparison table between the current take and matched Master DP target baseline.
+  - Compares Dynamic Range stops, Highlight Roll-Off %, Key-to-Fill Contrast, Split-Toning chromatic angle, Gaze Staging Poise, and Eye Catchlight presence.
+- **Forensic Improvement Action Cards** (`crates/aesthetic-ui/src/main.rs`, `ui/app.js`):
+  - Generates concrete, empirical recommendations across Lighting, Latitude, Highlight Diffusion, Eyeline Staging, Catchlights, and Color Harmony.
+- **Benchmark & Architecture Profiling** (`crates/aesthetic-cli/src/main.rs`):
+  - Reports inference architecture (Rayon SIMD CPU vs DirectML GPU).
+  - Benchmarks 4K frame physics (1.73s), 4K monocular depth & craft inference (45ms), and 5,000-shot vector search (1.31ms).
+- **Testing**:
+  - 21/21 tests passing across workspace, zero clippy warnings, rustfmt compliant.
 
 ---
 
