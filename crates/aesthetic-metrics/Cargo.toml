@@ -1,0 +1,11 @@
+[package]
+name = "aesthetic-metrics"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+aesthetic-models = { path = "../aesthetic-models" }
+image = { workspace = true }
+rayon = { workspace = true }

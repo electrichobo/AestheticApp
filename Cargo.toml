@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/aesthetic-models",
+    "crates/aesthetic-metrics",
+    "crates/aesthetic-core",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Aesthetic Team"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+rayon = "1.10"

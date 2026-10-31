@@ -1,4 +1,9 @@
-# Python
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Python (legacy)
 __pycache__/
 *.py[cod]
 *.pyo

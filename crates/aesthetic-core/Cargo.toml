@@ -1,0 +1,14 @@
+[package]
+name = "aesthetic-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+aesthetic-models = { path = "../aesthetic-models" }
+aesthetic-metrics = { path = "../aesthetic-metrics" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+image = { workspace = true }
+rayon = { workspace = true }
