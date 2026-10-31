@@ -1106,6 +1106,212 @@ impl BaselineStore {
         })
     }
 
+    /// Ingest a single reference cinema still image (.png, .jpg, .tiff, .exr, etc.)
+    /// into the Golden Baseline corpus.
+    pub fn ingest_reference_still(
+        &mut self,
+        still_path: &Path,
+        title: &str,
+        cinematographer: &str,
+        year: Option<u32>,
+    ) -> Result<IngestSummary, String> {
+        if !still_path.exists() {
+            return Err(format!(
+                "Still image does not exist: {}",
+                still_path.display()
+            ));
+        }
+
+        let dyn_img = image::open(still_path)
+            .map_err(|e| format!("Failed to open image '{}': {}", still_path.display(), e))?;
+        let frame = dyn_img.to_rgb8();
+
+        let crop = detect_active_picture(&frame);
+        let active = if crop.width == frame.width() && crop.height == frame.height() {
+            frame.clone()
+        } else {
+            image::imageops::crop_imm(&frame, crop.x, crop.y, crop.width, crop.height).to_image()
+        };
+
+        let physics = compute_objective_physics(&active);
+        let inference = ModelInferenceEngine::new();
+        let embedding = inference.infer_embedding(&active);
+
+        let shot_id = format!(
+            "{}_still_{:04}",
+            title.to_lowercase().replace(' ', "_"),
+            self.reference_shots.len() + 1
+        );
+
+        self.add_reference_shot(ReferenceShot {
+            shot_id,
+            film_title: title.to_string(),
+            cinematographer: cinematographer.to_string(),
+            timestamp_sec: 0.0,
+            embedding,
+            dynamic_range_stops: physics.exposure.dynamic_range_stops,
+            highlight_rolloff: physics.exposure.highlight_rolloff,
+            sharpness_laplacian: physics.optics.sharpness_laplacian,
+            key_fill_ratio: 3.5,
+            style_label: "Still Frame Reference".to_string(),
+        });
+
+        // Update manifest catalog
+        let existing = self
+            .manifest
+            .films
+            .iter_mut()
+            .find(|f| f.title.eq_ignore_ascii_case(title));
+        if let Some(film) = existing {
+            film.shot_count += 1;
+        } else {
+            self.manifest.films.push(IngestedReferenceFilm {
+                title: title.to_string(),
+                cinematographer: cinematographer.to_string(),
+                director: None,
+                year: year.unwrap_or(2024),
+                aspect_ratio: format!(
+                    "{:.2}:1",
+                    active.width() as f32 / active.height().max(1) as f32
+                ),
+                shot_count: 1,
+                average_dynamic_range: physics.exposure.dynamic_range_stops,
+            });
+        }
+
+        self.manifest.total_reference_shots = self.reference_shots.len();
+        self.manifest.total_films = self.manifest.films.len();
+
+        self.recompute_quantiles();
+
+        Ok(IngestSummary {
+            film_title: title.to_string(),
+            cinematographer: cinematographer.to_string(),
+            shots_added: 1,
+            total_corpus_shots: self.reference_shots.len(),
+            new_dynamic_range_p50: self.manifest.dynamic_range_quantiles.p50,
+            new_highlight_rolloff_p50: self.manifest.highlight_rolloff_quantiles.p50,
+            new_sharpness_p50: self.manifest.sharpness_quantiles.p50,
+        })
+    }
+
+    /// Ingest an entire directory of reference cinema still images.
+    pub fn ingest_reference_directory(
+        &mut self,
+        dir_path: &Path,
+        title: &str,
+        cinematographer: &str,
+        year: Option<u32>,
+    ) -> Result<IngestSummary, String> {
+        if !dir_path.is_dir() {
+            return Err(format!("Path is not a directory: {}", dir_path.display()));
+        }
+
+        let entries = std::fs::read_dir(dir_path)
+            .map_err(|e| format!("Failed to read directory '{}': {}", dir_path.display(), e))?;
+
+        let mut valid_paths = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                let ext_lower = ext.to_lowercase();
+                if matches!(
+                    ext_lower.as_str(),
+                    "png" | "jpg" | "jpeg" | "tiff" | "tif" | "exr" | "webp" | "bmp"
+                ) {
+                    valid_paths.push(path);
+                }
+            }
+        }
+
+        if valid_paths.is_empty() {
+            return Err(format!(
+                "No supported still image files found in '{}'",
+                dir_path.display()
+            ));
+        }
+
+        valid_paths.sort();
+
+        let mut added = 0;
+        let inference = ModelInferenceEngine::new();
+
+        for path in &valid_paths {
+            if let Ok(dyn_img) = image::open(path) {
+                let frame = dyn_img.to_rgb8();
+                let crop = detect_active_picture(&frame);
+                let active = if crop.width == frame.width() && crop.height == frame.height() {
+                    frame.clone()
+                } else {
+                    image::imageops::crop_imm(&frame, crop.x, crop.y, crop.width, crop.height)
+                        .to_image()
+                };
+
+                let physics = compute_objective_physics(&active);
+                let embedding = inference.infer_embedding(&active);
+
+                let shot_id = format!(
+                    "{}_still_{:04}",
+                    title.to_lowercase().replace(' ', "_"),
+                    self.reference_shots.len() + 1
+                );
+
+                self.add_reference_shot(ReferenceShot {
+                    shot_id,
+                    film_title: title.to_string(),
+                    cinematographer: cinematographer.to_string(),
+                    timestamp_sec: 0.0,
+                    embedding,
+                    dynamic_range_stops: physics.exposure.dynamic_range_stops,
+                    highlight_rolloff: physics.exposure.highlight_rolloff,
+                    sharpness_laplacian: physics.optics.sharpness_laplacian,
+                    key_fill_ratio: 3.5,
+                    style_label: "Still Frame Reference".to_string(),
+                });
+                added += 1;
+            }
+        }
+
+        if added == 0 {
+            return Err("Failed to decode any images in the directory".to_string());
+        }
+
+        // Update manifest catalog
+        let existing = self
+            .manifest
+            .films
+            .iter_mut()
+            .find(|f| f.title.eq_ignore_ascii_case(title));
+        if let Some(film) = existing {
+            film.shot_count += added;
+        } else {
+            self.manifest.films.push(IngestedReferenceFilm {
+                title: title.to_string(),
+                cinematographer: cinematographer.to_string(),
+                director: None,
+                year: year.unwrap_or(2024),
+                aspect_ratio: "Varied".to_string(),
+                shot_count: added,
+                average_dynamic_range: 13.0,
+            });
+        }
+
+        self.manifest.total_reference_shots = self.reference_shots.len();
+        self.manifest.total_films = self.manifest.films.len();
+
+        self.recompute_quantiles();
+
+        Ok(IngestSummary {
+            film_title: title.to_string(),
+            cinematographer: cinematographer.to_string(),
+            shots_added: added,
+            total_corpus_shots: self.reference_shots.len(),
+            new_dynamic_range_p50: self.manifest.dynamic_range_quantiles.p50,
+            new_highlight_rolloff_p50: self.manifest.highlight_rolloff_quantiles.p50,
+            new_sharpness_p50: self.manifest.sharpness_quantiles.p50,
+        })
+    }
+
     /// Recompute empirical distribution quantiles across all reference shots.
     pub fn recompute_quantiles(&mut self) {
         if self.reference_shots.is_empty() {
@@ -1254,5 +1460,41 @@ mod tests {
         assert!((store.manifest.dynamic_range_quantiles.min - 0.1).abs() < 1e-3);
         assert!((store.manifest.dynamic_range_quantiles.max - 10.0).abs() < 1e-3);
         assert!(store.manifest.dynamic_range_quantiles.p50 > 4.5);
+    }
+
+    #[test]
+    fn test_ingest_reference_still() {
+        use image::{Rgb, RgbImage};
+
+        let temp_dir = std::env::temp_dir().join("aesthetic_test_stills");
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let test_img_path = temp_dir.join("test_still.png");
+
+        let mut img = RgbImage::new(64, 64);
+        for y in 0..64 {
+            for x in 0..64 {
+                img.put_pixel(x, y, Rgb([x as u8 * 4, y as u8 * 4, 128]));
+            }
+        }
+        img.save(&test_img_path).expect("Failed to save test image");
+
+        let mut store = BaselineStore::new();
+        let initial_shots = store.reference_shots.len();
+
+        let summary = store
+            .ingest_reference_still(
+                &test_img_path,
+                "Test Master Film",
+                "Roger Deakins",
+                Some(2024),
+            )
+            .expect("Ingest still should succeed");
+
+        assert_eq!(summary.shots_added, 1);
+        assert_eq!(store.reference_shots.len(), initial_shots + 1);
+        assert_eq!(store.manifest.films.len(), 1);
+        assert_eq!(store.manifest.films[0].title, "Test Master Film");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

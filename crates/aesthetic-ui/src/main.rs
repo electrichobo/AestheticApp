@@ -5,7 +5,9 @@
 //! and interactive UI via embedded native WebView (Edge App Mode / Chromium).
 
 use aesthetic_core::baseline_store::BaselineStore;
-use aesthetic_core::export::{generate_cmx3600_edl, generate_csv_selects};
+use aesthetic_core::export::{
+    generate_cmx3600_edl, generate_contact_sheet_html, generate_csv_selects, generate_fcpxml,
+};
 use aesthetic_core::pipeline::evaluate_candidate_frame;
 use aesthetic_core::video::{extract_frame_rgb, probe_video_metadata};
 use aesthetic_core::web_ingest::probe_web_url;
@@ -348,6 +350,55 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
             let csv = generate_csv_selects("FEATURE_MASTER.MOV", &takes, 24.0);
             send_response(stream, "200 OK", "text/csv; charset=UTF-8", csv.as_bytes());
         }
+        "/api/export_fcpxml" => {
+            let takes = get_demo_takes();
+            let xml = generate_fcpxml("AESTHETIC_SELECTS", "FEATURE_MASTER.MOV", &takes, 24.0);
+            send_response(
+                stream,
+                "200 OK",
+                "application/xml; charset=UTF-8",
+                xml.as_bytes(),
+            );
+        }
+        "/api/export_contact_sheet" => {
+            let takes = get_demo_takes();
+            let html =
+                generate_contact_sheet_html("AESTHETIC_SELECTS", "FEATURE_MASTER.MOV", &takes, 12);
+            send_response(
+                stream,
+                "200 OK",
+                "text/html; charset=UTF-8",
+                html.as_bytes(),
+            );
+        }
+        "/api/browse_file" => {
+            let selected = open_native_file_dialog();
+            let json = if let Some(path) = selected {
+                serde_json::json!({ "success": true, "path": path })
+            } else {
+                serde_json::json!({ "success": false, "cancelled": true })
+            };
+            send_response(
+                stream,
+                "200 OK",
+                "application/json",
+                json.to_string().as_bytes(),
+            );
+        }
+        "/api/browse_dir" => {
+            let selected = open_native_dir_dialog();
+            let json = if let Some(path) = selected {
+                serde_json::json!({ "success": true, "path": path })
+            } else {
+                serde_json::json!({ "success": false, "cancelled": true })
+            };
+            send_response(
+                stream,
+                "200 OK",
+                "application/json",
+                json.to_string().as_bytes(),
+            );
+        }
         "/api/baseline" => {
             let store = BaselineStore::new();
             let payload = serde_json::to_string(&store.manifest).unwrap_or_default();
@@ -464,4 +515,73 @@ fn send_response(stream: &mut TcpStream, status: &str, content_type: &str, body:
     let _ = stream.write_all(header.as_bytes());
     let _ = stream.write_all(body);
     let _ = stream.flush();
+}
+
+fn open_native_file_dialog() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        let ps_script = r#"[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; $f = New-Object System.Windows.Forms.OpenFileDialog; $f.Title = 'Select Finished Video or Reference Image'; $f.Filter = 'Media Files (*.mov;*.mp4;*.mkv;*.png;*.jpg;*.tiff;*.exr)|*.mov;*.mp4;*.mkv;*.png;*.jpg;*.tiff;*.exr|All Files (*.*)|*.*'; if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.FileName }"#;
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-Command", ps_script])
+            .output()
+            .ok()?;
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            Some(path)
+        } else {
+            None
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let script =
+            r#"POSIX path of (choose file with prompt "Select Finished Video or Reference Image")"#;
+        let output = Command::new("osascript")
+            .args(["-e", script])
+            .output()
+            .ok()?;
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            Some(path)
+        } else {
+            None
+        }
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let output = Command::new("zenity")
+            .args([
+                "--file-selection",
+                "--title=Select Finished Video or Reference Image",
+            ])
+            .output()
+            .ok()?;
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            Some(path)
+        } else {
+            None
+        }
+    }
+}
+
+fn open_native_dir_dialog() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        let ps_script = r#"[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description = 'Select Reference Stills Directory'; if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }"#;
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-Command", ps_script])
+            .output()
+            .ok()?;
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            Some(path)
+        } else {
+            None
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
 }

@@ -4,7 +4,10 @@
 //! 4-output structuring, and batch video analysis.
 
 use crate::baseline_store::BaselineStore;
-use crate::export::{generate_cmx3600_edl, generate_csv_selects};
+use crate::export::{
+    export_shot_sidecars, generate_cmx3600_edl, generate_contact_sheet_html, generate_csv_selects,
+    generate_fcpxml,
+};
 use crate::inference::ModelInferenceEngine;
 use crate::video::{extract_frame_rgb, extract_trimmed_clip, probe_video_metadata};
 use aesthetic_metrics::compute_objective_physics;
@@ -23,8 +26,12 @@ pub struct BatchOptions {
     pub max_take_duration_sec: f64,
     pub sample_step_sec: f64,
     pub handle_sec: f64,
+    pub top_n: Option<usize>,
     pub export_edl_path: Option<PathBuf>,
     pub export_csv_path: Option<PathBuf>,
+    pub export_fcpxml_path: Option<PathBuf>,
+    pub export_contact_sheet_path: Option<PathBuf>,
+    pub export_sidecars_dir: Option<PathBuf>,
     pub export_clips_dir: Option<PathBuf>,
 }
 
@@ -35,8 +42,12 @@ impl Default for BatchOptions {
             max_take_duration_sec: 4.0,
             sample_step_sec: 1.0,
             handle_sec: 0.5,
+            top_n: None,
             export_edl_path: None,
             export_csv_path: None,
+            export_fcpxml_path: None,
+            export_contact_sheet_path: None,
+            export_sidecars_dir: None,
             export_clips_dir: None,
         }
     }
@@ -49,6 +60,9 @@ pub struct BatchAnalysisResult {
     pub ranked_takes: Vec<ShotTake>,
     pub edl_content: String,
     pub csv_content: String,
+    pub fcpxml_content: Option<String>,
+    pub contact_sheet_html: Option<String>,
+    pub sidecars_count: usize,
     pub extracted_clips_count: usize,
 }
 
@@ -204,6 +218,12 @@ pub fn analyze_video_file(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    if let Some(n) = options.top_n {
+        if n > 0 && n < takes.len() {
+            takes.truncate(n);
+        }
+    }
+
     let title = video_path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -226,6 +246,32 @@ pub fn analyze_video_file(
             .map_err(|e| format!("Failed to write CSV: {}", e))?;
     }
 
+    let mut fcpxml_content = None;
+    if let Some(ref fcpxml_path) = options.export_fcpxml_path {
+        let xml = generate_fcpxml(
+            title,
+            &video_path.to_string_lossy(),
+            &takes,
+            video_info.frame_rate,
+        );
+        std::fs::write(fcpxml_path, &xml).map_err(|e| format!("Failed to write FCPXML: {}", e))?;
+        fcpxml_content = Some(xml);
+    }
+
+    let mut contact_sheet_html = None;
+    if let Some(ref cs_path) = options.export_contact_sheet_path {
+        let html =
+            generate_contact_sheet_html(title, clip_name, &takes, options.top_n.unwrap_or(0));
+        std::fs::write(cs_path, &html)
+            .map_err(|e| format!("Failed to write Contact Sheet: {}", e))?;
+        contact_sheet_html = Some(html);
+    }
+
+    let mut sidecars_count = 0;
+    if let Some(ref sidecars_dir) = options.export_sidecars_dir {
+        sidecars_count = export_shot_sidecars(sidecars_dir, clip_name, &takes)?;
+    }
+
     let mut extracted_clips_count = 0;
     if let Some(ref clips_dir) = options.export_clips_dir {
         std::fs::create_dir_all(clips_dir)
@@ -246,6 +292,9 @@ pub fn analyze_video_file(
         ranked_takes: takes,
         edl_content,
         csv_content,
+        fcpxml_content,
+        contact_sheet_html,
+        sidecars_count,
         extracted_clips_count,
     })
 }

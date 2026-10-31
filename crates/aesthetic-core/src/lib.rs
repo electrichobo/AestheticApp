@@ -13,7 +13,10 @@ pub mod web_ingest;
 pub mod window;
 
 pub use baseline_store::{cosine_similarity, BaselineStore, IngestSummary};
-pub use export::{generate_cmx3600_edl, generate_csv_selects, seconds_to_smpte_timecode};
+pub use export::{
+    export_shot_sidecars, generate_cmx3600_edl, generate_contact_sheet_html, generate_csv_selects,
+    generate_fcpxml, seconds_to_smpte_timecode,
+};
 pub use inference::{DepthMap, ModelInferenceEngine};
 pub use video::{extract_frame_rgb, extract_trimmed_clip, probe_video_metadata};
 

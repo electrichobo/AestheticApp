@@ -58,12 +58,16 @@ fn print_usage() {
     println!("\nCommands:");
     println!("  analyze <video_file>   Analyze video and generate 4-output candidate selects");
     println!("    Options:");
+    println!("      --top <N>              Limit candidate selects to top N hero shots");
     println!("      --edl <file.edl>       Export CMX 3600 standard EDL");
     println!("      --csv <file.csv>       Export CSV selects manifest");
+    println!("      --xml <file.xml>       Export FCPXML timeline for DaVinci Resolve / FCP");
+    println!("      --contact-sheet <file> Export visual HTML contact sheet");
+    println!("      --sidecars <dir>       Export JSON shot sidecars to <dir>/metrics/*.json");
     println!("      --clips <dir>          Export trimmed select clips with handles");
     println!("      --step <seconds>       Sampling interval in seconds (default: 1.0)");
-    println!("  ingest-baseline <video_file> --title <title> --dp <cinematographer>");
-    println!("                         Ingest reference master film and recalibrate quantiles");
+    println!("  ingest-baseline <file_or_dir> --title <title> --dp <cinematographer>");
+    println!("                         Ingest reference film, still image, or directory into Golden Baseline");
     println!("  baseline-info          Display current Golden Baseline statistics and films");
     println!("  benchmark              Run multi-threaded SIMD physics & vector search benchmarks");
     println!("  demo                   Run synthetic benchmark on high-resolution frame raster");
@@ -80,12 +84,30 @@ fn run_video_analysis(video_path: &Path, flags: &[String]) {
     let mut i = 0;
     while i < flags.len() {
         match flags[i].as_str() {
+            "--top" | "--top-n" if i + 1 < flags.len() => {
+                if let Ok(n) = flags[i + 1].parse::<usize>() {
+                    options.top_n = Some(n);
+                }
+                i += 1;
+            }
             "--edl" if i + 1 < flags.len() => {
                 options.export_edl_path = Some(PathBuf::from(&flags[i + 1]));
                 i += 1;
             }
             "--csv" if i + 1 < flags.len() => {
                 options.export_csv_path = Some(PathBuf::from(&flags[i + 1]));
+                i += 1;
+            }
+            "--xml" | "--fcpxml" if i + 1 < flags.len() => {
+                options.export_fcpxml_path = Some(PathBuf::from(&flags[i + 1]));
+                i += 1;
+            }
+            "--contact-sheet" if i + 1 < flags.len() => {
+                options.export_contact_sheet_path = Some(PathBuf::from(&flags[i + 1]));
+                i += 1;
+            }
+            "--sidecars" if i + 1 < flags.len() => {
+                options.export_sidecars_dir = Some(PathBuf::from(&flags[i + 1]));
                 i += 1;
             }
             "--clips" if i + 1 < flags.len() => {
@@ -130,7 +152,7 @@ fn run_video_analysis(video_path: &Path, flags: &[String]) {
             );
             println!("{}", "-".repeat(84));
 
-            for (idx, take) in result.ranked_takes.iter().take(10).enumerate() {
+            for (idx, take) in result.ranked_takes.iter().enumerate() {
                 let in_tc = seconds_to_smpte_timecode(take.start_sec, result.video_info.frame_rate);
                 let out_tc = seconds_to_smpte_timecode(take.end_sec, result.video_info.frame_rate);
                 let dp_match = take
@@ -157,6 +179,15 @@ fn run_video_analysis(video_path: &Path, flags: &[String]) {
             if let Some(ref p) = options.export_csv_path {
                 println!("[✓] CSV Selects manifest exported to: {}", p.display());
             }
+            if let Some(ref p) = options.export_fcpxml_path {
+                println!("[✓] FCPXML timeline project exported to: {}", p.display());
+            }
+            if let Some(ref p) = options.export_contact_sheet_path {
+                println!("[✓] Visual HTML contact sheet exported to: {}", p.display());
+            }
+            if options.export_sidecars_dir.is_some() {
+                println!("[✓] Exported {} JSON shot sidecars.", result.sidecars_count);
+            }
             if options.export_clips_dir.is_some() {
                 println!(
                     "[✓] Extracted {} trimmed sub-clips with handles.",
@@ -171,8 +202,8 @@ fn run_video_analysis(video_path: &Path, flags: &[String]) {
     }
 }
 
-fn run_baseline_ingest(video_path: &Path, flags: &[String]) {
-    let mut title = "Reference Film".to_string();
+fn run_baseline_ingest(media_path: &Path, flags: &[String]) {
+    let mut title = "Reference Cinema".to_string();
     let mut dp = "Cinema Master".to_string();
     let mut year = 2024;
     let mut step = 2.0;
@@ -205,15 +236,39 @@ fn run_baseline_ingest(video_path: &Path, flags: &[String]) {
         i += 1;
     }
 
-    println!("\nIngesting Reference Film into Golden Baseline:");
-    println!("  * Video Path:       {}", video_path.display());
+    let mut store = BaselineStore::new();
+
+    let is_dir = media_path.is_dir();
+    let is_still = if let Some(ext) = media_path.extension().and_then(|e| e.to_str()) {
+        matches!(
+            ext.to_lowercase().as_str(),
+            "png" | "jpg" | "jpeg" | "tiff" | "tif" | "exr" | "webp" | "bmp"
+        )
+    } else {
+        false
+    };
+
+    println!("\nIngesting into Golden Baseline Corpus:");
+    println!("  * Source Path:      {}", media_path.display());
     println!("  * Title:            {}", title);
     println!("  * Cinematographer:  {}", dp);
     println!("  * Release Year:     {}", year);
-    println!("  * Sample Interval:  {:.1}s", step);
 
-    let mut store = BaselineStore::new();
-    match store.ingest_reference_film(video_path, &title, &dp, None, year, step) {
+    let res = if is_dir {
+        println!("  * Mode:             Directory of Still Reference Frames");
+        store.ingest_reference_directory(media_path, &title, &dp, Some(year))
+    } else if is_still {
+        println!("  * Mode:             Single Reference Still Image");
+        store.ingest_reference_still(media_path, &title, &dp, Some(year))
+    } else {
+        println!(
+            "  * Mode:             Reference Film / Video (sample step: {:.1}s)",
+            step
+        );
+        store.ingest_reference_film(media_path, &title, &dp, None, year, step)
+    };
+
+    match res {
         Ok(summary) => {
             println!("\n[✓] Ingestion Successful!");
             println!("  * Reference Shots Ingested: {}", summary.shots_added);

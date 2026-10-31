@@ -7,21 +7,20 @@
 
 ---
 
-## Current Status: M6 (Editorial Deliverables & Golden Baseline Stills Ingest)
+## Current Status: M6 (Editorial Deliverables & Golden Baseline Stills Ingest Complete)
 - Protocol initialized: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `START_HERE.md`, `STATUS.md`.
 - Workspace crates complete: `aesthetic-models`, `aesthetic-metrics`, `aesthetic-core`, `aesthetic-cli`, `aesthetic-ui`.
-- 58 Master DP Signatures active in `BaselineStore` with dynamic empirical quantiles.
-- 5 Broadcast Scopes Deck: Luma Waveform, RGB Parade, Vectorscope (57° I-line), Histograms, CIE 1931 xy Gamut.
-- End-to-End Batch Pipeline & DirectML hardware acceleration verified in release builds.
-- 16/16 tests passing, zero clippy warnings, rustfmt compliant.
+- Still Image Baseline Ingestion: `ingest_reference_still` and `ingest_reference_directory` for `.png`, `.jpg`, `.tiff`, `.exr`.
+- Editorial Deliverables: JSON shot sidecars (`<dir>/metrics/*.json`), Top-$N$ visual HTML contact sheet, FCPXML and CMX 3600 EDL timeline exports.
+- Native File/Folder Browser: Native OS file/directory dialogs wired into `aesthetic-ui`.
+- 17/17 tests passing, zero clippy warnings, rustfmt compliant.
 
 ---
 
-## Next Immediate Step (M6 Implementation)
-1. **Still Image Ingestion for Golden Baseline**: Ingest `.png`/`.jpg`/`.tiff`/`.exr` reference stills into `BaselineStore`.
-2. **Shot Sidecars & Top-$N$ Contact Sheet**: Export `jobs/<job_id>/metrics/<shot_id>.json` sidecars and HTML/PNG contact sheet collage.
-3. **Native File & Folder Browser**: Add native file picker dialogs to `aesthetic-ui` for finished media & stills.
-4. **NLE Timeline Round-Trip**: CMX 3600 EDL + FCPXML/Resolve XML exports.
+## Next Immediate Step (M7 Depth-Conditioned Focus & Style Geodesics)
+1. **Depth-Conditioned Focus**: Sharpness evaluation conditioned on subject depth plane vs background bokeh roll-off.
+2. **Volumetric Lighting**: Key-to-fill modeling ratio and specular catchlight geometry.
+3. **Style-Family Clusters**: Segment baseline into style families for within-genre grading comparison.
 
 ---
 

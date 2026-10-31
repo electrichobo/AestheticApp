@@ -354,10 +354,12 @@ function drawScopeGraticule(c, w, h, labels) {
 const btnOpen = document.getElementById('btn-open-file');
 if (btnOpen) {
   btnOpen.addEventListener('click', async () => {
-    const filePath = prompt('Enter absolute path to video mezzanine file (ProRes, DNxHR, MP4):');
-    if (!filePath) return;
-
     try {
+      const browseRes = await fetch('/api/browse_file');
+      const browseData = await browseRes.json();
+      if (!browseData.success || !browseData.path) return;
+
+      const filePath = browseData.path;
       const res = await fetch(`/api/open_media?path=${encodeURIComponent(filePath)}`);
       const data = await res.json();
       if (data.success && data.media) {
@@ -370,6 +372,55 @@ if (btnOpen) {
     } catch (err) {
       alert(`Error opening media: ${err}`);
     }
+  });
+}
+
+const btnBaseline = document.getElementById('btn-baseline');
+if (btnBaseline) {
+  btnBaseline.addEventListener('click', async () => {
+    try {
+      const choice = confirm('Click OK to select a Reference Stills Directory, or Cancel to select a single Video or Still File.');
+      const endpoint = choice ? '/api/browse_dir' : '/api/browse_file';
+      const browseRes = await fetch(endpoint);
+      const browseData = await browseRes.json();
+      if (!browseData.success || !browseData.path) return;
+
+      alert(`Selected for Baseline Ingestion: ${browseData.path}\nReady for baseline calibration.`);
+    } catch (err) {
+      alert(`Error browsing baseline media: ${err}`);
+    }
+  });
+}
+
+// Wire Export Buttons
+const btnExportSheet = document.getElementById('btn-export-sheet');
+if (btnExportSheet) {
+  btnExportSheet.addEventListener('click', () => {
+    window.open('/api/export_contact_sheet', '_blank');
+  });
+}
+
+const btnExportXml = document.getElementById('btn-export-xml');
+if (btnExportXml) {
+  btnExportXml.addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.href = '/api/export_fcpxml';
+    a.download = 'AESTHETIC_SELECTS.fcpxml';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  });
+}
+
+const btnExportEdl = document.getElementById('btn-export-edl');
+if (btnExportEdl) {
+  btnExportEdl.addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.href = '/api/export_edl';
+    a.download = 'AESTHETIC_SELECTS.edl';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   });
 }
 
