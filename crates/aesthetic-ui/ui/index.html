@@ -11,8 +11,7 @@
     <!-- Header -->
     <header class="app-header">
       <div class="logo-group">
-        <span class="logo-mark">Æ</span>
-        <h1 class="logo-title">AESTHETIC</h1>
+        <img src="/logo_wide.png" alt="AESTHETIC" class="app-logo-wide">
         <span class="version-tag">Core Engine v0.1.0 (Rust)</span>
       </div>
       <div class="header-actions">
@@ -41,9 +40,36 @@
 
       <!-- Center Panel: Video Viewport & Timeline Scrub -->
       <section class="panel panel-viewport">
-        <div class="viewport-canvas-container">
+        <!-- Viewport Diagnostic Controls -->
+        <div class="viewport-toolbar">
+          <div class="viewport-mode-group">
+            <button class="vp-btn active" data-mode="picture" title="Normal Master Picture">Picture</button>
+            <button class="vp-btn vp-btn-elzone" data-mode="el_zone" title="Ed Lachman, ASC EL Zone System (Stops relative to 18% Gray)">EL Zone</button>
+            <button class="vp-btn" data-mode="peaking" title="Depth-Conditioned Focus Peaking">Peaking</button>
+            <button class="vp-btn" data-mode="volumetric" title="3D Volumetric Light Vectors">3D Light</button>
+            <button class="vp-btn" data-mode="gaze" title="Eyeline & Directional Gaze Grid">Eyeline & Gaze</button>
+          </div>
+        </div>
+
+        <div class="viewport-canvas-container" id="viewport-container">
           <video id="video-player" class="video-player" controls preload="metadata"></video>
-          <div class="video-overlay" id="video-overlay"></div>
+          <img id="diagnostic-overlay-img" class="viewport-overlay-img" alt="Diagnostic Overlay" style="display: none;">
+          <canvas id="viewport-vector-canvas" class="viewport-vector-canvas"></canvas>
+          
+          <!-- EL Zone Photographic Stops Legend Bar -->
+          <div id="el-zone-legend" class="el-zone-legend" style="display: none;">
+            <div class="el-legend-item" style="background: #000000; color: #ffffff;">-5+ Blk</div>
+            <div class="el-legend-item" style="background: #660099; color: #ffffff;">-4 Pur</div>
+            <div class="el-legend-item" style="background: #0044cc; color: #ffffff;">-3 Blu</div>
+            <div class="el-legend-item" style="background: #00bedc; color: #000000;">-2 Cya</div>
+            <div class="el-legend-item" style="background: #558822; color: #ffffff;">-1 Olv</div>
+            <div class="el-legend-item el-legend-mid" style="background: #808080; color: #ffffff;">0 EV Gray (18%)</div>
+            <div class="el-legend-item" style="background: #d4af37; color: #000000;">+1 Khk</div>
+            <div class="el-legend-item" style="background: #ffff00; color: #000000;">+2 Yel</div>
+            <div class="el-legend-item" style="background: #ff8000; color: #000000;">+3 Org</div>
+            <div class="el-legend-item" style="background: #ff0000; color: #ffffff;">+4 Red</div>
+            <div class="el-legend-item" style="background: #ff00ff; color: #ffffff;">+5+ Mag</div>
+          </div>
         </div>
         
         <!-- Timeline Controls -->

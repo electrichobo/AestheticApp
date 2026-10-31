@@ -3,7 +3,7 @@
 //! Evaluates distribution across false color zones, highlight roll-off shoulder,
 //! true dynamic range in stops, and signal-to-noise ratio.
 
-use aesthetic_models::physics::{ExposurePhysics, FalseColorZones};
+use aesthetic_models::physics::{ElZoneDistribution, ExposurePhysics, FalseColorZones};
 use image::RgbImage;
 use rayon::prelude::*;
 
@@ -15,6 +15,68 @@ const LUMA_B: f32 = 0.0722;
 #[inline(always)]
 pub fn rgb_to_luma(r: u8, g: u8, b: u8) -> f32 {
     LUMA_R * (r as f32) + LUMA_G * (g as f32) + LUMA_B * (b as f32)
+}
+
+/// Evaluates photographic stop offset (EV) relative to 18% Middle Gray (0 EV).
+#[inline(always)]
+pub fn luma_to_el_zone_stops(luma: f32) -> f32 {
+    if luma <= 1.0 {
+        return -8.0;
+    }
+    // Gamma 2.4 Rec.709 model: 18% gray is at ~124.5 in 8-bit space
+    let lin_y = (luma / 255.0).powf(2.4);
+    (lin_y / 0.18).log2()
+}
+
+/// Standardized Ed Lachman, ASC EL Zone System palette mapping.
+/// Zone V = 0 EV (18% Middle Gray).
+#[inline(always)]
+pub fn el_zone_color_for_stops(ev: f32) -> [u8; 3] {
+    if ev <= -4.5 {
+        [0, 0, 0] // Zone 0: <= -5 stops (Black / Sensor floor)
+    } else if ev <= -3.5 {
+        [102, 0, 153] // Zone 1: -4 stops (Deep Purple)
+    } else if ev <= -2.5 {
+        [0, 68, 204] // Zone 2: -3 stops (Medium Blue)
+    } else if ev <= -1.5 {
+        [0, 190, 220] // Zone 3: -2 stops (Cyan)
+    } else if ev <= -0.5 {
+        [85, 136, 34] // Zone 4: -1 stop (Olive Green)
+    } else if ev <= 0.5 {
+        [128, 128, 128] // Zone 5: 0 EV (18% Middle Gray)
+    } else if ev <= 1.5 {
+        [212, 175, 55] // Zone 6: +1 stop (Light Khaki / Caucasian skin tone)
+    } else if ev <= 2.5 {
+        [255, 255, 0] // Zone 7: +2 stops (Yellow / Bright skin highlight)
+    } else if ev <= 3.5 {
+        [255, 128, 0] // Zone 8: +3 stops (Orange / High-key)
+    } else if ev <= 4.5 {
+        [255, 0, 0] // Zone 9: +4 stops (Red / Near clip)
+    } else {
+        [255, 0, 255] // Zone 10: >= +5 stops (Magenta / Specular clipping)
+    }
+}
+
+/// Generates an exact Ed Lachman, ASC EL Zone System false-color image raster.
+pub fn compute_el_zone_map(img: &RgbImage) -> RgbImage {
+    let (w, h) = img.dimensions();
+    let raw_in = img.as_raw();
+    let mut raw_out = vec![0u8; (w * h * 3) as usize];
+
+    raw_out
+        .par_chunks_exact_mut(3)
+        .enumerate()
+        .for_each(|(i, out_pixel)| {
+            let in_idx = i * 3;
+            let luma = rgb_to_luma(raw_in[in_idx], raw_in[in_idx + 1], raw_in[in_idx + 2]);
+            let ev = luma_to_el_zone_stops(luma);
+            let c = el_zone_color_for_stops(ev);
+            out_pixel[0] = c[0];
+            out_pixel[1] = c[1];
+            out_pixel[2] = c[2];
+        });
+
+    RgbImage::from_raw(w, h, raw_out).unwrap_or_else(|| RgbImage::new(w, h))
 }
 
 /// Analyze exposure physics for an RGB image.
@@ -136,6 +198,51 @@ pub fn analyze_exposure(img: &RgbImage) -> ExposurePhysics {
         specular_clip_pct: (specular_count as f32 / total_pixels as f32) * 100.0,
     };
 
+    // Ed Lachman, ASC EL Zone System occupancy (stops relative to 18% gray)
+    let mut el_counts = [0u32; 11];
+    for (bin, &count) in hist.iter().enumerate() {
+        let ev = luma_to_el_zone_stops(bin as f32);
+        let zone_idx = if ev <= -4.5 {
+            0
+        } else if ev <= -3.5 {
+            1
+        } else if ev <= -2.5 {
+            2
+        } else if ev <= -1.5 {
+            3
+        } else if ev <= -0.5 {
+            4
+        } else if ev <= 0.5 {
+            5
+        } else if ev <= 1.5 {
+            6
+        } else if ev <= 2.5 {
+            7
+        } else if ev <= 3.5 {
+            8
+        } else if ev <= 4.5 {
+            9
+        } else {
+            10
+        };
+        el_counts[zone_idx] += count;
+    }
+
+    let tot_f = total_pixels as f32;
+    let el_zones = ElZoneDistribution {
+        zone_0_black_pct: (el_counts[0] as f32 / tot_f) * 100.0,
+        zone_1_purple_pct: (el_counts[1] as f32 / tot_f) * 100.0,
+        zone_2_blue_pct: (el_counts[2] as f32 / tot_f) * 100.0,
+        zone_3_cyan_pct: (el_counts[3] as f32 / tot_f) * 100.0,
+        zone_4_olive_pct: (el_counts[4] as f32 / tot_f) * 100.0,
+        zone_5_gray_pct: (el_counts[5] as f32 / tot_f) * 100.0,
+        zone_6_khaki_pct: (el_counts[6] as f32 / tot_f) * 100.0,
+        zone_7_yellow_pct: (el_counts[7] as f32 / tot_f) * 100.0,
+        zone_8_orange_pct: (el_counts[8] as f32 / tot_f) * 100.0,
+        zone_9_red_pct: (el_counts[9] as f32 / tot_f) * 100.0,
+        zone_10_magenta_pct: (el_counts[10] as f32 / tot_f) * 100.0,
+    };
+
     // Highlight roll-off gradient calculation:
     // Measures the transition smoothly from 217 (85% IRE) through 255.
     // If pixels bunch up at 254-255 with zero slope, it's a harsh clip (low score).
@@ -167,6 +274,7 @@ pub fn analyze_exposure(img: &RgbImage) -> ExposurePhysics {
         snr_luma,
         snr_chroma: snr_luma * 0.9, // baseline proxy until full chroma patch analysis
         false_color_zones,
+        el_zones,
     }
 }
 

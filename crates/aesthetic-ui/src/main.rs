@@ -9,9 +9,12 @@ use aesthetic_core::export::{
     generate_cmx3600_edl, generate_contact_sheet_html, generate_csv_selects, generate_fcpxml,
 };
 use aesthetic_core::inference::ModelInferenceEngine;
-use aesthetic_core::pipeline::evaluate_candidate_frame;
+use aesthetic_core::pipeline::{
+    analyze_video_file, evaluate_candidate_frame, BatchAnalysisResult, BatchOptions,
+};
 use aesthetic_core::video::{extract_frame_rgb, probe_video_metadata};
 use aesthetic_core::web_ingest::probe_web_url;
+use aesthetic_metrics::compute_el_zone_map;
 use aesthetic_metrics::scopes::{
     compute_cie_chromaticity_map, compute_histograms, compute_parade, compute_vectorscope,
     compute_waveform,
@@ -21,7 +24,7 @@ use aesthetic_models::manifest::VideoSourceInfo;
 use aesthetic_models::{DiscoveredStyle, PillarScores, ShotTake};
 use image::{Rgb, RgbImage};
 use std::env;
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -32,10 +35,13 @@ use std::thread;
 const HTML_CONTENT: &str = include_str!("../ui/index.html");
 const CSS_CONTENT: &str = include_str!("../ui/app.css");
 const JS_CONTENT: &str = include_str!("../ui/app.js");
+const LOGO_WIDE: &[u8] = include_bytes!("../ui/logo_wide.png");
+const LOGO_ICON: &[u8] = include_bytes!("../ui/logo_icon.png");
 
 #[derive(Clone, Default)]
 struct AppState {
     loaded_media: Arc<RwLock<Option<VideoSourceInfo>>>,
+    current_analysis: Arc<RwLock<Option<BatchAnalysisResult>>>,
 }
 
 fn main() {
@@ -193,6 +199,57 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 "application/javascript; charset=UTF-8",
                 JS_CONTENT.as_bytes(),
             );
+        }
+        "/logo_wide.png" => {
+            send_response(stream, "200 OK", "image/png", LOGO_WIDE);
+        }
+        "/logo_icon.png" => {
+            send_response(stream, "200 OK", "image/png", LOGO_ICON);
+        }
+        "/api/frame_el_zone" => {
+            let time_sec: f64 = query_map
+                .get("time")
+                .and_then(|t| t.parse().ok())
+                .unwrap_or(0.0);
+            let img = get_frame_for_time(state, time_sec);
+            let el_map = compute_el_zone_map(&img);
+            let mut bytes = Vec::new();
+            let _ = el_map.write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png);
+            send_response(stream, "200 OK", "image/png", &bytes);
+        }
+        "/api/frame_peaking" => {
+            let time_sec: f64 = query_map
+                .get("time")
+                .and_then(|t| t.parse().ok())
+                .unwrap_or(0.0);
+            let img = get_frame_for_time(state, time_sec);
+            let (w, h) = img.dimensions();
+            let mut peaking = RgbImage::new(w, h);
+            for y in 1..h.saturating_sub(1) {
+                for x in 1..w.saturating_sub(1) {
+                    let p = img.get_pixel(x, y);
+                    let p_right = img.get_pixel(x + 1, y);
+                    let p_down = img.get_pixel(x, y + 1);
+                    let l =
+                        (0.2126 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.0722 * p[2] as f32) as i32;
+                    let lr = (0.2126 * p_right[0] as f32
+                        + 0.7152 * p_right[1] as f32
+                        + 0.0722 * p_right[2] as f32) as i32;
+                    let ld = (0.2126 * p_down[0] as f32
+                        + 0.7152 * p_down[1] as f32
+                        + 0.0722 * p_down[2] as f32) as i32;
+                    let grad = (l - lr).abs() + (l - ld).abs();
+                    if grad > 35 {
+                        peaking.put_pixel(x, y, Rgb([0, 255, 128]));
+                    } else {
+                        let dim = (l / 3) as u8;
+                        peaking.put_pixel(x, y, Rgb([dim, dim, dim]));
+                    }
+                }
+            }
+            let mut bytes = Vec::new();
+            let _ = peaking.write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png);
+            send_response(stream, "200 OK", "image/png", &bytes);
         }
         "/api/scopes" => {
             let time_sec: f64 = query_map
@@ -475,8 +532,106 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 );
             }
         }
+        "/api/analyze" => {
+            if let Some(path_str) = query_map.get("path") {
+                let path = Path::new(path_str);
+                let top_n = query_map
+                    .get("top")
+                    .and_then(|n| n.parse::<usize>().ok())
+                    .or(Some(20));
+                let step = query_map
+                    .get("step")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(1.0);
+
+                let options = BatchOptions {
+                    sample_step_sec: step,
+                    top_n,
+                    ..Default::default()
+                };
+
+                match analyze_video_file(path, &options) {
+                    Ok(res) => {
+                        if let Ok(info) = probe_video_metadata(path) {
+                            let mut loaded = state.loaded_media.write().unwrap();
+                            *loaded = Some(info);
+                        }
+                        let takes = res.ranked_takes.clone();
+                        {
+                            let mut ca = state.current_analysis.write().unwrap();
+                            *ca = Some(res);
+                        }
+                        let json = serde_json::json!({
+                            "success": true,
+                            "takes_count": takes.len(),
+                            "takes": takes
+                        });
+                        send_response(
+                            stream,
+                            "200 OK",
+                            "application/json",
+                            json.to_string().as_bytes(),
+                        );
+                    }
+                    Err(err) => {
+                        let json = serde_json::json!({ "success": false, "error": err });
+                        send_response(
+                            stream,
+                            "500 Internal Server Error",
+                            "application/json",
+                            json.to_string().as_bytes(),
+                        );
+                    }
+                }
+            } else {
+                let json =
+                    serde_json::json!({ "success": false, "error": "Missing 'path' parameter" });
+                send_response(
+                    stream,
+                    "400 Bad Request",
+                    "application/json",
+                    json.to_string().as_bytes(),
+                );
+            }
+        }
+        "/api/selects" => {
+            let ca = state.current_analysis.read().unwrap();
+            if let Some(ref res) = *ca {
+                let json = serde_json::json!({
+                    "source": res.video_info.file_path,
+                    "duration": res.video_info.duration_sec,
+                    "fps": res.video_info.frame_rate,
+                    "takes": res.ranked_takes
+                });
+                send_response(
+                    stream,
+                    "200 OK",
+                    "application/json",
+                    json.to_string().as_bytes(),
+                );
+            } else {
+                let takes = get_demo_takes();
+                let json = serde_json::json!({
+                    "source": "DEMO_PORTFOLIO_REEL.MOV",
+                    "duration": 60.0,
+                    "fps": 24.0,
+                    "takes": takes
+                });
+                send_response(
+                    stream,
+                    "200 OK",
+                    "application/json",
+                    json.to_string().as_bytes(),
+                );
+            }
+        }
         "/api/export_edl" => {
-            let takes = get_demo_takes();
+            let ca = state.current_analysis.read().unwrap();
+            let takes = if let Some(ref res) = *ca {
+                res.ranked_takes.clone()
+            } else {
+                get_demo_takes()
+            };
             let edl = generate_cmx3600_edl("AESTHETIC_SELECTS", "FEATURE_MASTER.MOV", &takes, 24.0);
             send_response(
                 stream,
@@ -486,12 +641,22 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
             );
         }
         "/api/export_csv" => {
-            let takes = get_demo_takes();
+            let ca = state.current_analysis.read().unwrap();
+            let takes = if let Some(ref res) = *ca {
+                res.ranked_takes.clone()
+            } else {
+                get_demo_takes()
+            };
             let csv = generate_csv_selects("FEATURE_MASTER.MOV", &takes, 24.0);
             send_response(stream, "200 OK", "text/csv; charset=UTF-8", csv.as_bytes());
         }
         "/api/export_fcpxml" => {
-            let takes = get_demo_takes();
+            let ca = state.current_analysis.read().unwrap();
+            let takes = if let Some(ref res) = *ca {
+                res.ranked_takes.clone()
+            } else {
+                get_demo_takes()
+            };
             let xml = generate_fcpxml("AESTHETIC_SELECTS", "FEATURE_MASTER.MOV", &takes, 24.0);
             send_response(
                 stream,
@@ -501,7 +666,12 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
             );
         }
         "/api/export_contact_sheet" => {
-            let takes = get_demo_takes();
+            let ca = state.current_analysis.read().unwrap();
+            let takes = if let Some(ref res) = *ca {
+                res.ranked_takes.clone()
+            } else {
+                get_demo_takes()
+            };
             let html =
                 generate_contact_sheet_html("AESTHETIC_SELECTS", "FEATURE_MASTER.MOV", &takes, 12);
             send_response(

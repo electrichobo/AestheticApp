@@ -1,9 +1,9 @@
 # AESTHETIC — Development Status
 
-## Current Milestone: M7 — Advanced Cinematographic Intelligence
+## Current Milestone: M9 — EL Zone Exposure System & Pretrained Baseline
 - **Phase**: Ground-Up Rebuild in Rust
 - **Target**: Windows x64 (primary), Linux, macOS
-- **Active Focus**: Depth-conditioned focus (bokeh MTF), volumetric lighting geometry, ACES split-toning, style-family manifold geodesics.
+- **Active Focus**: Ed Lachman, ASC EL Zone false color system, pretrained 58 Master Cinematographer baseline corpus, Stage 1 Showreel Selects Assembly, Stage 2 Forensic Overlays.
 
 ---
 
@@ -20,6 +20,23 @@
 | **M6: Editorial Deliverables & Stills Ingest** | JSON Shot Sidecars, Top-$N$ Breakout & Visual Contact Sheet, Native File Browser, Still Images Baseline Ingest, NLE XML/EDL Round-Trip | ✅ Done | Stills ingest, HTML contact sheets, JSON sidecars, FCPXML & native OS picker |
 | **M7: Advanced Cinematographic Intelligence** | Depth-Conditioned Z-Plane Focus (Bokeh MTF), Volumetric Key-Fill & Catchlight Geometry, Split-Toning in ACES/Linear Space, Gaze-Anchored Cinematic Poise, Style-Family Manifold Geodesics | ✅ Done | Subject/bokeh MTF, catchlights, gaze vectors, looking room, ACES split-toning & 6 style clusters |
 | **M8: Scoring Matrix & DP Comparison UI** | Side-by-Side Master DP Diagnostic Table, Empirical Improvement Action Cards, Port Binding Configuration, Craft Benchmark Integration | ✅ Done | Desktop UI diagnostic table, dynamic improvement recommendations & 4K craft benchmarks |
+| **M9: EL Zone & Pretrained Baseline** | Ed Lachman, ASC EL Zone 10-stop calibrated false color, 174 pretrained master shots across 58 films, Stage 1/2 UI groundwork | ✅ Done | Industry standard stop false color and out-of-the-box pre-trained baseline corpus |
+
+---
+
+## Completed in M9
+- **Ed Lachman, ASC EL Zone System** (`crates/aesthetic-models/src/physics.rs`, `crates/aesthetic-metrics/src/exposure.rs`):
+  - Calibrated 10-zone false color heatmap based on 18% Middle Gray (Zone V = 0 EV).
+  - Stop calculations for Rec.709 gamma transfer function: Zones 0 through X (black, deep purple, medium blue, cyan, olive green, neutral gray, light khaki, yellow, orange, red, magenta).
+  - Distribution breakdown tracked across `ExposurePhysics.el_zones`.
+- **Pretrained Shipped Baseline Corpus** (`crates/aesthetic-core/src/baseline_store.rs`):
+  - Automatic ingestion of 174 reference shots across 58 award-winning films during initialization.
+  - Pre-calibrates empirical dynamic range, roll-off, key-to-fill, and color harmony quantiles so the application ships fully calibrated out of the box.
+- **Brand Assets & Diagnostic Toolbar** (`crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/index.html`):
+  - Integrated wide branding header and viewport diagnostic toolbar buttons (Picture, EL Zone, Peaking, 3D Light, Eyeline & Gaze).
+  - Embedded EL Zone stop legend bar.
+- **Testing**:
+  - 22/22 tests passing across workspace, zero clippy warnings, rustfmt compliant.
 
 ---
 

@@ -22,6 +22,34 @@ pub struct FalseColorZones {
     pub specular_clip_pct: f32,
 }
 
+/// Distribution across the Ed Lachman, ASC EL Zone System (stops relative to 18% Middle Gray).
+/// Zone V is 18% gray (0 EV).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ElZoneDistribution {
+    /// Zone 0: <= -5 stops below 18% gray (Black / Sensor floor)
+    pub zone_0_black_pct: f32,
+    /// Zone I: -4 stops (Deep Purple)
+    pub zone_1_purple_pct: f32,
+    /// Zone II: -3 stops (Medium Blue)
+    pub zone_2_blue_pct: f32,
+    /// Zone III: -2 stops (Cyan)
+    pub zone_3_cyan_pct: f32,
+    /// Zone IV: -1 stop (Olive Green)
+    pub zone_4_olive_pct: f32,
+    /// Zone V: 0 EV 18% Middle Gray (Neutral Gray)
+    pub zone_5_gray_pct: f32,
+    /// Zone VI: +1 stop (Light Khaki / Caucasian Skin Key)
+    pub zone_6_khaki_pct: f32,
+    /// Zone VII: +2 stops (Yellow / Bright Skin Highlight)
+    pub zone_7_yellow_pct: f32,
+    /// Zone VIII: +3 stops (Orange / High Key Textures)
+    pub zone_8_orange_pct: f32,
+    /// Zone IX: +4 stops (Red / Near Clip)
+    pub zone_9_red_pct: f32,
+    /// Zone X: >= +5 stops above 18% gray (Magenta / Specular Clip)
+    pub zone_10_magenta_pct: f32,
+}
+
 /// Exposure and tonal physics measurements.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct ExposurePhysics {
@@ -38,6 +66,8 @@ pub struct ExposurePhysics {
     pub snr_luma: f32,
     pub snr_chroma: f32,
     pub false_color_zones: FalseColorZones,
+    #[serde(default)]
+    pub el_zones: ElZoneDistribution,
 }
 
 /// Optical, sharpness, and lens physics measurements.

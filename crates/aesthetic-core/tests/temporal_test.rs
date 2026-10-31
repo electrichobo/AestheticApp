@@ -122,7 +122,7 @@ fn test_baseline_store_search_and_master_match() {
     use aesthetic_core::{cosine_similarity, BaselineStore};
     use aesthetic_models::baseline::{CinematographerSignature, ReferenceShot};
 
-    let mut store = BaselineStore::new();
+    let mut store = BaselineStore::default();
 
     // Register a reference shot from Skyfall
     store.add_reference_shot(ReferenceShot {

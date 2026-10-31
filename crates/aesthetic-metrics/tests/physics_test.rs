@@ -131,3 +131,42 @@ fn test_split_toning_harmony() {
         physics.color.harmonic_palette_score
     );
 }
+
+#[test]
+fn test_el_zone_system() {
+    use aesthetic_metrics::{compute_el_zone_map, el_zone_color_for_stops, luma_to_el_zone_stops};
+    use image::{Rgb, RgbImage};
+
+    // 18% middle gray test (approx luma 124 in 8-bit gamma 2.4)
+    let ev_18 = luma_to_el_zone_stops(124.5);
+    assert!(
+        ev_18.abs() < 0.2,
+        "18% gray should correspond to ~0 EV (Zone V): {}",
+        ev_18
+    );
+    let color_18 = el_zone_color_for_stops(ev_18);
+    assert_eq!(color_18, [128, 128, 128], "Zone V must be neutral gray");
+
+    // Specular highlight test (+5 stops)
+    let ev_high = luma_to_el_zone_stops(255.0);
+    assert!(
+        ev_high >= 2.4,
+        "Full white is high stop offset: {}",
+        ev_high
+    );
+    let color_high = el_zone_color_for_stops(5.5);
+    assert_eq!(color_high, [255, 0, 255], "Zone X must be magenta");
+
+    // Black floor test (Zone 0)
+    let color_low = el_zone_color_for_stops(-6.0);
+    assert_eq!(color_low, [0, 0, 0], "Zone 0 must be black");
+
+    // Generate EL Zone false-color raster
+    let mut img = RgbImage::new(10, 10);
+    for p in img.pixels_mut() {
+        *p = Rgb([125, 125, 125]);
+    }
+    let el_map = compute_el_zone_map(&img);
+    assert_eq!(el_map.dimensions(), (10, 10));
+    assert_eq!(el_map.get_pixel(5, 5), &Rgb([128, 128, 128]));
+}
