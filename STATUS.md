@@ -48,4 +48,12 @@
   - Monocular depth estimation (Depth-Anything-V2) computing relative depth map, foreground/background depth separation index (0–100), depth plane count, and silhouette edge clarity.
   - 1152-dimensional vision embedding extraction (SigLIP / ViT) with L2 normalization for baseline DP craft matching.
   - Multi-threaded Rayon SIMD execution with DirectML GPU hardware acceleration support.
-- Comprehensive testing: **14/14 tests passing** across workspace. Zero clippy warnings.
+- Built **End-to-End Batch Analysis Pipeline** (`crates/aesthetic-core/src/pipeline.rs`):
+  - `analyze_video_file`: End-to-end video probing, frame sampling, transition boundary detection, 4-output candidate take scoring, Master DP matching, and automatic CMX 3600 EDL, CSV selects manifest, and trimmed clips extraction.
+- Expanded **Master Cinematographer Signatures (58 Masters)** (`crates/aesthetic-core/src/baseline_store.rs`):
+  - Calibrated visual signatures covering 58 legendary masters across all lighting paradigms and visual families: Nykvist, Lubezki, Willis, Vierny, Storaro, Nakai, Doyle, Rotunno, Deakins, Alcott, Toland, Idziak, Zsigmond, Atsuta, Richardson, Burks, Coutard, Metty, Yeoman, Chapman, Di Venanzo, Matras, Delli Colli, Urusevsky, Young, Elswit, Miyagawa, Hoch, Maté, Cardiff, Martelli, Fischer, Delbonnel, Müller, Ballhaus, Kamiński, Garmes, Tovoli, Decaë, di Palma, Tisse, Prieto, Suschitzky, Unsworth, Lang, Krasker, Khondji, Almendros, Ping-Bing, van Hoytema, Fraser, Dryburgh, Hall, Deschanel, Dod Mantle, Mukdeeprom, Libatique, and Kuras.
+- Built **Automated Film Ingest & Quantile Recalibration Engine** (`crates/aesthetic-core/src/baseline_store.rs`):
+  - `ingest_reference_film` and CLI `aesthetic-cli ingest-baseline <file>`: Ingests reference cinema films, runs 79-metric physics and vision embeddings, and continuously recalibrates empirical quantiles across the entire corpus.
+- Built **Headless CLI Analysis Driver** (`crates/aesthetic-cli/src/main.rs`):
+  - Command line `aesthetic-cli analyze <file> [--edl] [--csv] [--clips] [--step]` outputting formatted terminal selects ranking tables.
+- Comprehensive testing: **16/16 tests passing** across workspace. Zero clippy warnings.

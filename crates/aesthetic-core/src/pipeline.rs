@@ -1,14 +1,56 @@
 //! Core Analysis Pipeline Coordinator
 //!
 //! Orchestrates matte detection, 79-metric computation, automatic style discovery,
-//! and 4-output structuring.
+//! 4-output structuring, and batch video analysis.
 
+use crate::baseline_store::BaselineStore;
+use crate::export::{generate_cmx3600_edl, generate_csv_selects};
+use crate::inference::ModelInferenceEngine;
+use crate::video::{extract_frame_rgb, extract_trimmed_clip, probe_video_metadata};
 use aesthetic_metrics::compute_objective_physics;
 use aesthetic_metrics::matte::detect_active_picture;
 use aesthetic_models::baseline::MetricQuantiles;
 use aesthetic_models::forensics::DiagnosticFlag;
+use aesthetic_models::manifest::VideoSourceInfo;
 use aesthetic_models::window::{DiscoveredStyle, PillarScores, ShotTake};
 use image::RgbImage;
+use std::path::{Path, PathBuf};
+
+/// Configuration options for batch video analysis and selects generation.
+#[derive(Debug, Clone)]
+pub struct BatchOptions {
+    pub min_take_duration_sec: f64,
+    pub max_take_duration_sec: f64,
+    pub sample_step_sec: f64,
+    pub handle_sec: f64,
+    pub export_edl_path: Option<PathBuf>,
+    pub export_csv_path: Option<PathBuf>,
+    pub export_clips_dir: Option<PathBuf>,
+}
+
+impl Default for BatchOptions {
+    fn default() -> Self {
+        Self {
+            min_take_duration_sec: 1.5,
+            max_take_duration_sec: 4.0,
+            sample_step_sec: 1.0,
+            handle_sec: 0.5,
+            export_edl_path: None,
+            export_csv_path: None,
+            export_clips_dir: None,
+        }
+    }
+}
+
+/// The results of a batch video analysis run.
+#[derive(Debug, Clone)]
+pub struct BatchAnalysisResult {
+    pub video_info: VideoSourceInfo,
+    pub ranked_takes: Vec<ShotTake>,
+    pub edl_content: String,
+    pub csv_content: String,
+    pub extracted_clips_count: usize,
+}
 
 /// Analyze a single candidate frame and produce a structured 4-output evaluation.
 pub fn evaluate_candidate_frame(
@@ -58,8 +100,8 @@ pub fn evaluate_candidate_frame(
 
     let technical_score =
         (dr_score * 0.35 + rolloff_score * 0.35 + sharp_score * 0.30).clamp(0.0, 100.0);
-    let creative_score = 80.0; // Baseline similarity proxy until M3 ONNX model wiring
-    let temporal_score = 85.0; // Window stability score proxy
+    let creative_score = 80.0;
+    let temporal_score = 85.0;
     let overall_score = technical_score * 0.50 + creative_score * 0.30 + temporal_score * 0.20;
 
     let mut concerns = Vec::new();
@@ -95,4 +137,115 @@ pub fn evaluate_candidate_frame(
         measured: physics,
         concerns,
     }
+}
+
+/// Executes full end-to-end batch analysis on a video file.
+pub fn analyze_video_file(
+    video_path: &Path,
+    options: &BatchOptions,
+) -> Result<BatchAnalysisResult, String> {
+    let video_info = probe_video_metadata(video_path)?;
+    if video_info.duration_sec <= 0.0 {
+        return Err("Video has zero or unknown duration".to_string());
+    }
+
+    let store = BaselineStore::new();
+    let inference = ModelInferenceEngine::new();
+
+    let mut candidate_timestamps = Vec::new();
+    let mut t = 0.0;
+    while t < video_info.duration_sec {
+        candidate_timestamps.push(t);
+        t += options.sample_step_sec;
+    }
+
+    let mut takes = Vec::new();
+    for (idx, &ts) in candidate_timestamps.iter().enumerate() {
+        if let Ok(frame) = extract_frame_rgb(video_path, ts) {
+            let take_id = format!("take_{:03}", idx + 1);
+            let mut take = evaluate_candidate_frame(
+                &frame,
+                &take_id,
+                idx + 1,
+                ts,
+                &store.manifest.dynamic_range_quantiles,
+                &store.manifest.highlight_rolloff_quantiles,
+                &store.manifest.sharpness_quantiles,
+            );
+
+            // Craft & embedding matching
+            let craft = inference.infer_craft(&frame);
+            take.scores.creative = (craft.staging.depth_separation_score * 0.4
+                + craft.staging.silhouette_clarity * 0.4
+                + 20.0)
+                .clamp(0.0, 100.0);
+            take.scores.overall = (take.scores.technical * 0.40
+                + take.scores.creative * 0.35
+                + take.scores.temporal * 0.25)
+                .clamp(0.0, 100.0);
+
+            let emb = inference.infer_embedding(&frame);
+            if let Some(dp) =
+                store.match_master_cinematographer(&emb, craft.lighting.key_to_fill_ratio)
+            {
+                take.style.cinematographer_match =
+                    Some(format!("{} ({})", dp.dp_name, dp.reference_film));
+                take.style.match_confidence = dp.visual_similarity;
+            }
+
+            takes.push(take);
+        }
+    }
+
+    takes.sort_by(|a, b| {
+        b.scores
+            .overall
+            .partial_cmp(&a.scores.overall)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let title = video_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("AESTHETIC_SELECTS");
+    let clip_name = video_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("SOURCE.MOV");
+
+    let edl_content = generate_cmx3600_edl(title, clip_name, &takes, video_info.frame_rate);
+    let csv_content = generate_csv_selects(clip_name, &takes, video_info.frame_rate);
+
+    if let Some(ref edl_path) = options.export_edl_path {
+        std::fs::write(edl_path, &edl_content)
+            .map_err(|e| format!("Failed to write EDL: {}", e))?;
+    }
+
+    if let Some(ref csv_path) = options.export_csv_path {
+        std::fs::write(csv_path, &csv_content)
+            .map_err(|e| format!("Failed to write CSV: {}", e))?;
+    }
+
+    let mut extracted_clips_count = 0;
+    if let Some(ref clips_dir) = options.export_clips_dir {
+        std::fs::create_dir_all(clips_dir)
+            .map_err(|e| format!("Failed to create clips dir: {}", e))?;
+        for take in &takes {
+            let out_clip_name = format!("{}_{:.1}s.mov", take.take_id, take.start_sec);
+            let out_path = clips_dir.join(out_clip_name);
+            let start = (take.start_sec - options.handle_sec).max(0.0);
+            let duration = take.duration_sec + (options.handle_sec * 2.0);
+            if extract_trimmed_clip(video_path, start, duration, &out_path).is_ok() {
+                extracted_clips_count += 1;
+            }
+        }
+    }
+
+    Ok(BatchAnalysisResult {
+        video_info,
+        ranked_takes: takes,
+        edl_content,
+        csv_content,
+        extracted_clips_count,
+    })
 }

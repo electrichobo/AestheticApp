@@ -7,23 +7,22 @@
 
 ---
 
-## Current Status: M5 (Desktop Scopes Deck & Inference Engine Complete)
+## Current Status: M5 (58 Master Cinema Signatures & Automated Baseline Ingest)
 - Protocol initialized: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `START_HERE.md`, `STATUS.md`.
 - Workspace crates complete: `aesthetic-models`, `aesthetic-metrics`, `aesthetic-core`, `aesthetic-cli`, `aesthetic-ui`.
-- 5 Broadcast Scopes Deck: Luma Waveform, RGB Parade, Circular Vectorscope (57° I-line), Histograms, CIE 1931 xy Gamut rendered live via HTML5 Canvas.
-- Real-Time Scrub & Pipeline: Interactive timeline scrubber wired to frame demuxing, live scope calculations, and 4-output cinematographic matrix updates.
-- Inference Engine: Depth-Anything-V2 depth separation & SigLIP 1152-dim vision embeddings with DirectML GPU acceleration and Rayon SIMD fallback.
-- Selects & Editorial Export: CMX 3600 EDL generator with SMPTE timecode and CSV selects manifest.
-- Frame Demux & Trim: Pipe-based `extract_frame_rgb` and handle-aware clip trimming.
-- Web Ingest: Remote URL probing & streaming via `yt-dlp`.
-- Standalone CLI: 4K 79-metric pass executes in 1.70s.
-- All 14 integration tests passing, zero clippy warnings, rustfmt compliant.
+- 58 Master DP Signatures: 50 masters specified by user + 8 canonical masters (Nykvist, Lubezki, Willis, Vierny, Storaro, Nakai, Doyle, Rotunno, Deakins, Alcott, Toland, Idziak, Zsigmond, Atsuta, Richardson, Burks, Coutard, Metty, Yeoman, Chapman, Di Venanzo, Matras, Delli Colli, Urusevsky, Young, Elswit, Miyagawa, Hoch, Maté, Cardiff, Martelli, Fischer, Delbonnel, Müller, Ballhaus, Kamiński, Garmes, Tovoli, Decaë, di Palma, Tisse, Prieto, Suschitzky, Unsworth, Lang, Krasker, Khondji, Almendros, Ping-Bing, van Hoytema, Fraser, Dryburgh, Hall, Deschanel, Dod Mantle, Mukdeeprom, Libatique, Kuras).
+- Automated Baseline Ingest: `ingest_reference_film` and `aesthetic-cli ingest-baseline` break down full films to continuously grow dataset and recalibrate quantiles.
+- End-to-End Batch Engine: `analyze_video_file` demuxes, evaluates 4 outputs, matches masters, and exports CMX 3600 EDL, CSV manifest, and trimmed clips.
+- 5 Broadcast Scopes Deck: Luma Waveform, RGB Parade, Vectorscope (57° I-line), Histograms, CIE 1931 xy Gamut.
+- Real-Time Scrub & Pipeline: Interactive timeline scrubber wired to frame demuxing and 4-output matrix updates.
+- Inference Engine: Depth-Anything-V2 depth separation & SigLIP 1152-dim vision embeddings with DirectML acceleration.
+- All 16 integration tests passing, zero clippy warnings, rustfmt compliant.
 
 ---
 
-## Next Immediate Step (M5: End-to-End Batch Pipeline & Packaging)
-1. **End-to-End Batch Ingest**: Wire full video demuxing, transition detection, golden window extraction, model inference, and EDL/CSV selects packaging into a single automated CLI/UI command.
-2. **Golden Baseline Corpus Expansion**: Expand reference film signatures (*Skyfall*, *Dune*, *The Piano*, *Blade Runner 2049*).
+## Next Immediate Step (M5 Validation & Release Packaging)
+1. **Validation & Verification**: Run batch probe on local reference mezzanine media or YouTube URL.
+2. **Release Build Optimization**: Verify `--release` artifacts for `aesthetic-cli` and `aesthetic-ui`.
 
 ---
 

@@ -12,12 +12,14 @@ pub mod video;
 pub mod web_ingest;
 pub mod window;
 
-pub use baseline_store::{cosine_similarity, BaselineStore};
+pub use baseline_store::{cosine_similarity, BaselineStore, IngestSummary};
 pub use export::{generate_cmx3600_edl, generate_csv_selects, seconds_to_smpte_timecode};
 pub use inference::{DepthMap, ModelInferenceEngine};
 pub use video::{extract_frame_rgb, extract_trimmed_clip, probe_video_metadata};
 
-pub use pipeline::evaluate_candidate_frame;
+pub use pipeline::{
+    analyze_video_file, evaluate_candidate_frame, BatchAnalysisResult, BatchOptions,
+};
 pub use scene::{
     classify_transition, compute_frame_difference, detect_directional_wipe, TransitionType,
 };
