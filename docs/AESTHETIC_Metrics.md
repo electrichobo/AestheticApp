@@ -54,6 +54,7 @@ All weights are configurable in `config.yaml`.
 | SNR chroma | ✅ | ✅ | SNR on Lab a*/b* channels |
 | Temporal exposure consistency | ⏱ | ✅ | Std of histogram mean across shot frames |
 | Exposure intent | ✅ | ✅ | Rule-based: penalises clipping, rewards tonal spread |
+| EL Zone System (EV stops) | ✅ | ✅ | Ed Lachman, ASC 10-stop calibrated false color mapped to 18% gray (EV 0) |
 
 ---
 
@@ -65,6 +66,8 @@ All weights are configurable in `config.yaml`.
 |---|---|---|---|
 | Dynamic range in stops | ✅ | ✅ | Log₂ of p2–p98 luminance range |
 | Key to fill ratio | ✅ | ✅ | Bright zone mean vs shadow zone mean |
+| Key light azimuth & elevation | ✅ | ✅ | 3D dominant directional light angle inferred from luminance asymmetry |
+| Specular catchlight intensity | ✅ | ✅ | Specular micro-peaks in upper 25% subject facial bounding box |
 | Colour temperature (Kelvin) | ✅ | ✅ | Blue/red channel ratio proxy |
 | Colour temperature deviation | ✅ | ✅ | Delta from 5600K neutral |
 | Shadow detail | ✅ | ✅ | Mean luminance in shadow zone |
@@ -104,11 +107,13 @@ All weights are configurable in `config.yaml`.
 
 | Metric | Status | Feeds into score | Notes |
 |---|---|---|---|
-| Optical flow mean | ✅ | ✅ | Farneback dense flow magnitude |
+| Optical flow mean | ✅ | ✅ | Multi-threaded Rayon block matching / Farneback flow magnitude |
+| Camera motion ratio | ✅ | ✅ | Proportion of motion caused by camera movement vs independent subject movement |
 | Optical flow std | ✅ | ✅ | Inverted — high variance = inconsistent movement penalty |
 | Smoothness | ✅ | ✅ | Inverse of jerkiness |
 | Jerkiness | ✅ | ✅ | Spatial variance of flow — inverted in scoring |
-| Stabilisation | ✅ | ✅ | Residual micro-jitter after global motion removal |
+| Stabilisation / Micro-Jitter | ✅ | ✅ | Residual micro-jitter after global motion removal |
+| Judder risk score | ✅ | ✅ | Risk of strobe or judder from excessive pan/tilt angular velocity at frame rate |
 | Motion blur amount | ✅ | ✅ | High-frequency energy ratio — rewards 10–40 range (180° shutter) |
 | Motion blur direction | ✅ | 🟨 | Dominant gradient orientation — available, not yet in pillar score |
 | Movement type | ✅ | ✅ | Priority: metrics-engine result → smoothness/stabilisation → flow consistency ratio |

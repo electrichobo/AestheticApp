@@ -84,6 +84,7 @@ fn print_usage() {
     println!(
         "      --shots <N>            Extract N clean continuous shots per film (default: 10)"
     );
+    println!("      --force                Re-ingest films even if already present in baseline");
     println!("      --dry-run              Catalog matched award titles without extracting shots");
     println!("  awards-list            Display all 80+ Oscar, ASC, and BSC titles in the registry");
     println!("  baseline-info          Display current Golden Baseline statistics and films");
@@ -420,6 +421,8 @@ fn run_benchmark() {
             sharpness_laplacian: 140.0,
             key_fill_ratio: 3.5,
             style_label: "Moody".to_string(),
+            motion_optical_flow: None,
+            camera_motion_ratio: None,
         });
     }
 
@@ -527,48 +530,7 @@ fn print_awards_list() {
     }
 }
 
-fn parse_movie_folder_name(folder_name: &str) -> (String, Option<u32>) {
-    let s = folder_name.trim();
-    if let Some(open) = s.rfind('(') {
-        if let Some(close) = s.rfind(')') {
-            if close > open + 4 {
-                let yr_str = &s[open + 1..close];
-                if let Ok(y) = yr_str.parse::<u32>() {
-                    let title = s[..open].trim().to_string();
-                    return (title, Some(y));
-                }
-            }
-        }
-    }
-    (folder_name.to_string(), None)
-}
-
-fn find_primary_video_file(dir: &Path) -> Option<PathBuf> {
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        let mut largest: Option<(PathBuf, u64)> = None;
-        for entry in entries.flatten() {
-            if let Ok(meta) = entry.metadata() {
-                if meta.is_file() {
-                    let p = entry.path();
-                    if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
-                        let ext_lower = ext.to_lowercase();
-                        if matches!(
-                            ext_lower.as_str(),
-                            "mkv" | "mp4" | "mov" | "m4v" | "avi" | "ts"
-                        ) {
-                            let len = meta.len();
-                            if largest.as_ref().map(|l| len > l.1).unwrap_or(true) {
-                                largest = Some((p, len));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return largest.map(|l| l.0);
-    }
-    None
-}
+use aesthetic_core::{find_primary_video_file, parse_movie_folder_name};
 
 fn run_server_ingest(server_dir: &Path, flags: &[String]) {
     use aesthetic_models::awards::{find_award_match, CINEMATOGRAPHY_AWARDS_REGISTRY};
@@ -577,6 +539,7 @@ fn run_server_ingest(server_dir: &Path, flags: &[String]) {
     let mut limit: Option<usize> = None;
     let mut shots_per_film = 10usize;
     let mut dry_run = false;
+    let mut force = false;
 
     let mut i = 0;
     while i < flags.len() {
@@ -595,6 +558,9 @@ fn run_server_ingest(server_dir: &Path, flags: &[String]) {
             }
             "--dry-run" => {
                 dry_run = true;
+            }
+            "--force" => {
+                force = true;
             }
             _ => {}
         }
@@ -663,10 +629,41 @@ fn run_server_ingest(server_dir: &Path, flags: &[String]) {
         return;
     }
 
-    let to_process = if let Some(lim) = limit {
-        &matched_jobs[..lim.min(matched_jobs.len())]
+    let mut store = BaselineStore::new();
+
+    let pending_jobs: Vec<_> = if force {
+        matched_jobs
     } else {
-        &matched_jobs[..]
+        let mut pending = Vec::new();
+        let mut skipped = 0;
+        for job in matched_jobs {
+            let award_title = job.2.title;
+            let award_year = job.2.year;
+            let exists = store.manifest.films.iter().any(|f| {
+                f.title.eq_ignore_ascii_case(award_title)
+                    && (f.year == award_year
+                        || f.year == 0
+                        || (f.year as i32 - award_year as i32).abs() <= 1)
+            });
+            if exists {
+                skipped += 1;
+            } else {
+                pending.push(job);
+            }
+        }
+        if skipped > 0 {
+            println!(
+                "\nDeduplication: Skipping {} already-ingested films in baseline (pass --force to re-ingest).",
+                skipped
+            );
+        }
+        pending
+    };
+
+    let to_process = if let Some(lim) = limit {
+        &pending_jobs[..lim.min(pending_jobs.len())]
+    } else {
+        &pending_jobs[..]
     };
 
     println!(
@@ -674,8 +671,6 @@ fn run_server_ingest(server_dir: &Path, flags: &[String]) {
         to_process.len(),
         shots_per_film
     );
-
-    let mut store = BaselineStore::new();
     let mut total_shots = 0;
 
     for (idx, (folder, file_path, award)) in to_process.iter().enumerate() {

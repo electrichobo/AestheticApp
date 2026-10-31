@@ -12,7 +12,10 @@ pub mod video;
 pub mod web_ingest;
 pub mod window;
 
-pub use baseline_store::{cosine_similarity, BaselineStore, IngestSummary};
+pub use baseline_store::{
+    cosine_similarity, find_primary_video_file, parse_movie_folder_name,
+    scan_and_ingest_media_server, BaselineStore, IngestSummary, ServerIngestReport,
+};
 pub use export::{
     export_shot_sidecars, generate_cmx3600_edl, generate_contact_sheet_html, generate_csv_selects,
     generate_fcpxml, seconds_to_smpte_timecode,

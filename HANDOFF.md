@@ -7,17 +7,17 @@
 
 ---
 
-## Current Status: M11 (Awards Registry & Shot-Separated Server Ingest)
-- Cinematography Awards Registry: 184 Oscar, ASC, and BSC award-winning & landmark films (1995–2025+) with fuzzy normalization matcher.
-- Shot-Separated Temporal Ingestion: `compute_motion_dynamics` and cut-boundary segmentation (`ingest_reference_film_shots`) isolating clean camera setups without cut artifacts.
-- Media Server Scanner (`aesthetic-cli ingest-server`): Auto-detects and matches award films on `M:\movies` (55 award films matched on dry run).
-- 23/23 tests passing, zero clippy warnings, rustfmt compliant.
+## Current Status: M11 (Motion Dynamics & Deduplicated Server Ingest)
+- Cinematography Awards Registry: 184 Oscar, ASC, and BSC award-winning & landmark titles (1995–2025+) with fuzzy normalization matcher.
+- Motion Dynamics Recorded: True multi-threaded block matching optical flow (`motion_optical_flow`, `camera_motion_ratio`) stored on all baseline reference setups.
+- Deduplication & Force Controls: Automatic skip of already-ingested films in both CLI (`--force`) and Desktop UI modal (`#server-ingest-force` checkbox).
+- 24/24 tests passing, zero clippy warnings, rustfmt compliant.
 
 ---
 
-## Next Immediate Step (Media Server Ingestion Run)
-1. **Execute Ingestion**: Run `aesthetic-cli ingest-server M:\movies --limit <N>` to ingest real reference shots from target films into `assets/baseline/`.
-2. **Interactive UI Review**: Launch desktop UI to view expanded baseline comparisons and real-time overlays.
+## Next Immediate Step (Corpus Expansion & Full Server Ingestion)
+1. **Full/Batch Ingestion**: Run `aesthetic-cli ingest-server M:\movies --limit 55 --shots 5` (or desired subset) to expand Golden Baseline with all matched films.
+2. **Interactive UI Review**: Launch desktop UI (`aesthetic-ui`) to test live candidate evaluation against the real cinema corpus.
 
 ---
 

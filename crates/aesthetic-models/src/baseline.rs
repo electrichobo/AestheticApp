@@ -71,6 +71,12 @@ pub struct ReferenceShot {
     pub sharpness_laplacian: f32,
     pub key_fill_ratio: f32,
     pub style_label: String,
+    /// Inferred optical flow velocity across continuous shot burst
+    #[serde(default)]
+    pub motion_optical_flow: Option<f32>,
+    /// Ratio of motion caused by camera movement vs independent subject movement
+    #[serde(default)]
+    pub camera_motion_ratio: Option<f32>,
 }
 
 /// A cluster representing a master cinematographer's visual signature.

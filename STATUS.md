@@ -22,7 +22,7 @@
 | **M8: Scoring Matrix & DP Comparison UI** | Side-by-Side Master DP Diagnostic Table, Empirical Improvement Action Cards, Port Binding Configuration, Craft Benchmark Integration | ✅ Done | Desktop UI diagnostic table, dynamic improvement recommendations & 4K craft benchmarks |
 | **M9: EL Zone & Pretrained Baseline** | Ed Lachman, ASC EL Zone 10-stop calibrated false color, 174 pretrained master shots across 58 films, Stage 1/2 UI groundwork | ✅ Done | Industry standard stop false color and out-of-the-box pre-trained baseline corpus |
 | **M10: Showreel Assembly & Forensic Overlays** | Stage 1 candidate selects bin, interactive In/Out handle trimming, Stage 2 real-time diagnostic viewport modes (EL Zone, Peaking, 3D Light, Eyeline/Gaze) | ✅ Done | Dynamic showreel assembly & forensic camera intelligence active in UI |
-| **M11: Awards Registry & Media Server Ingestion** | 184 Oscar, ASC, BSC & Landmark titles registry, shot-boundary segmentation (cut-isolated setups), network media server scanner (`M:\movies`) | ✅ Done | Auto-matching 55 award films on `M:\movies` with continuous setup extraction |
+| **M11: Awards Registry & Media Server Ingestion** | 184 Oscar, ASC, BSC & Landmark titles registry, shot-boundary segmentation (cut-isolated setups), single-pass burst extraction, media server scanner with deduplication & GUI force toggle, optical flow motion dynamics | ✅ Done | Scanning `M:\movies` matching 55 award films with continuous setup extraction, motion dynamics & GUI controls |
 
 ---
 
@@ -31,14 +31,20 @@
   - Catalog of 184 award-recognized and landmark films covering Best Cinematography Oscar, ASC, and BSC winners/nominees plus historical masterworks.
   - Robust fuzzy title and year matching function (`find_award_match`) accounting for punctuation, case, and subtitle variances.
   - Exposed via CLI `aesthetic-cli awards-list`.
-- **Continuous Shot Segmentation & Optical Flow** (`crates/aesthetic-core/src/inference.rs`, `crates/aesthetic-core/src/baseline_store.rs`):
+- **Continuous Shot Segmentation & Optical Flow** (`crates/aesthetic-core/src/inference.rs`, `crates/aesthetic-core/src/baseline_store.rs`, `crates/aesthetic-core/src/video.rs`):
+  - `extract_frames_burst`: Single-pass frame burst extraction with in-memory PPM parsing supporting both 8-bit SDR and 16-bit HDR (`rgb48be` big-endian). Reduces network seeks from 3 round-trips to 1 per candidate timestamp.
   - `compute_motion_dynamics`: Multi-threaded block matching computing true optical flow velocity, velocity standard deviation, camera-to-subject motion ratio, micro-jitter, and judder risk.
-  - `ingest_reference_film_shots`: Detects edit boundaries and transition cuts (`classify_transition`), discarding transition frames and isolating clean continuous camera setups.
-- **Network Media Server Scanner** (`crates/aesthetic-cli/src/main.rs`):
+  - `ingest_reference_film_shots`: Detects edit boundaries and transition cuts, discarding transition frames and isolating clean continuous camera setups with sliding search window.
+  - Optical flow motion dynamics (`motion_optical_flow`, `camera_motion_ratio`) calculated and stored directly on `ReferenceShot` baseline vectors.
+- **Network Media Server Scanner & Deduplication** (`crates/aesthetic-cli/src/main.rs`, `crates/aesthetic-core/src/baseline_store.rs`):
   - `aesthetic-cli ingest-server <dir>`: Scans library folders (e.g. `M:\movies`), matches award titles, parses primary video files, and executes shot-separated ingestion into `BaselineStore`.
-  - Dry run verified against `M:\movies`: matched 55 feature films.
+  - Automatic Deduplication: Detects and skips already-ingested films in `assets/baseline/manifest.json`. Added `--force` flag to re-extract on demand.
+  - Verified live against `M:\movies`: matched 55 award films and successfully ingested reference camera setups across 4K HEVC and master film scans into `assets/baseline/`.
+- **Desktop UI Server Ingest Controls** (`crates/aesthetic-ui/ui/index.html`, `ui/app.js`, `src/main.rs`):
+  - Added `+ Server Ingest` button in the header and interactive modal with library path, batch limits, and a **"Force Re-Ingest" checkbox** to bypass deduplication on demand.
+  - `/api/ingest_server` endpoint executes scanning in the core engine and returns live JSON status.
 - **Testing**:
-  - 23/23 tests passing across workspace, zero clippy warnings, rustfmt compliant.
+  - 24/24 tests passing across workspace, zero clippy warnings, rustfmt compliant.
 
 ---
 

@@ -6,7 +6,7 @@
 //! across the entire corpus.
 
 use crate::inference::ModelInferenceEngine;
-use crate::video::{extract_frame_rgb, probe_video_metadata};
+use crate::video::{extract_frame_rgb, extract_frames_burst, probe_video_metadata};
 use aesthetic_metrics::compute_objective_physics;
 use aesthetic_metrics::matte::detect_active_picture;
 use aesthetic_models::baseline::{
@@ -78,6 +78,12 @@ pub struct FilmIngestMeta<'a> {
 impl BaselineStore {
     /// Create a new baseline store pre-populated with cinema master signatures and pre-trained corpus.
     pub fn new() -> Self {
+        let baseline_dir = Path::new("assets").join("baseline");
+        if baseline_dir.join("manifest.json").exists() {
+            if let Ok(store) = Self::load_from_dir(&baseline_dir) {
+                return store;
+            }
+        }
         let mut store = Self::default();
         store.populate_default_masters();
         store.populate_pretrained_corpus();
@@ -994,6 +1000,8 @@ impl BaselineStore {
                     sharpness_laplacian: base_sharp + (shot_idx as f32) * 15.0,
                     key_fill_ratio: sig.average_key_fill + ((shot_idx as f32) - 1.0) * 0.3,
                     style_label: sig.preferred_lighting_key.clone(),
+                    motion_optical_flow: Some(2.1),
+                    camera_motion_ratio: Some(0.85),
                 });
             }
         }
@@ -1159,6 +1167,8 @@ impl BaselineStore {
                     sharpness_laplacian: physics.optics.sharpness_laplacian,
                     key_fill_ratio: 3.5,
                     style_label: "Cinema Reference".to_string(),
+                    motion_optical_flow: None,
+                    camera_motion_ratio: None,
                 });
 
                 added_count += 1;
@@ -1220,75 +1230,77 @@ impl BaselineStore {
 
         let mut dr_sum = 0.0f32;
         let mut added_count = 0;
-        let fps = if meta.frame_rate > 0.0 {
-            meta.frame_rate
-        } else {
-            24.0
-        };
-        let dt = 1.0 / fps;
 
         let mut current_t = start_time;
         while current_t < end_time && added_count < target_shots {
-            if let Ok(frame_a) = extract_frame_rgb(video_path, current_t) {
-                if let Ok(frame_b) = extract_frame_rgb(video_path, current_t + dt) {
-                    let diff = crate::scene::compute_frame_difference(&frame_a, &frame_b);
-                    // Discard cuts and wipes (diff > 25.0)
-                    if diff < 25.0 {
-                        let test_t = current_t + 1.0;
-                        if test_t < end_time {
-                            if let Ok(frame_c) = extract_frame_rgb(video_path, test_t) {
-                                let span_diff =
-                                    crate::scene::compute_frame_difference(&frame_a, &frame_c);
-                                // Confirm single continuous camera angle/setup
-                                if span_diff < 35.0 {
-                                    let crop = detect_active_picture(&frame_a);
-                                    let active = if crop.width == frame_a.width()
-                                        && crop.height == frame_a.height()
-                                    {
-                                        frame_a.clone()
-                                    } else {
-                                        image::imageops::crop_imm(
-                                            &frame_a,
-                                            crop.x,
-                                            crop.y,
-                                            crop.width,
-                                            crop.height,
-                                        )
-                                        .to_image()
-                                    };
+            if let Ok(burst) = extract_frames_burst(video_path, current_t, 4, 4.0, Some(1920)) {
+                if burst.len() >= 3 {
+                    let diff_ab = crate::scene::compute_frame_difference(&burst[0], &burst[1]);
+                    let diff_span =
+                        crate::scene::compute_frame_difference(&burst[0], &burst[burst.len() - 1]);
 
-                                    let physics = compute_objective_physics(&active);
-                                    let craft = inference.infer_craft(&active);
-                                    let embedding = inference.infer_embedding(&active);
+                    // Check for transition cuts & continuous camera setup:
+                    // diff_ab < 30.0 confirms no cut between adjacent frames (0.25s)
+                    // diff_span < 48.0 confirms single continuous camera setup across ~0.75s
+                    if diff_ab < 30.0 && diff_span < 48.0 {
+                        let frame_a = &burst[0];
+                        let crop = detect_active_picture(frame_a);
+                        let active =
+                            if crop.width == frame_a.width() && crop.height == frame_a.height() {
+                                frame_a.clone()
+                            } else {
+                                image::imageops::crop_imm(
+                                    frame_a,
+                                    crop.x,
+                                    crop.y,
+                                    crop.width,
+                                    crop.height,
+                                )
+                                .to_image()
+                            };
 
-                                    let shot_id = format!(
-                                        "{}_shot_{:04}",
-                                        meta_info.title.to_lowercase().replace(' ', "_"),
-                                        added_count + 1
-                                    );
-                                    dr_sum += physics.exposure.dynamic_range_stops;
+                        let physics = compute_objective_physics(&active);
+                        let depth = inference.infer_depth(&active);
+                        let mut craft = inference.infer_craft(&active);
+                        let motion = crate::inference::compute_motion_dynamics(
+                            &burst[0],
+                            &burst[1],
+                            0.25,
+                            Some(&depth),
+                        );
+                        craft.motion = motion.clone();
+                        let embedding = inference.infer_embedding(&active);
 
-                                    self.add_reference_shot(ReferenceShot {
-                                        shot_id,
-                                        film_title: meta_info.title.to_string(),
-                                        cinematographer: meta_info.cinematographer.to_string(),
-                                        timestamp_sec: current_t,
-                                        embedding,
-                                        dynamic_range_stops: physics.exposure.dynamic_range_stops,
-                                        highlight_rolloff: physics.exposure.highlight_rolloff,
-                                        sharpness_laplacian: physics.optics.sharpness_laplacian,
-                                        key_fill_ratio: craft.lighting.key_to_fill_ratio,
-                                        style_label: meta_info.style_family.to_string(),
-                                    });
+                        let shot_id = format!(
+                            "{}_shot_{:04}",
+                            meta_info.title.to_lowercase().replace(' ', "_"),
+                            added_count + 1
+                        );
+                        dr_sum += physics.exposure.dynamic_range_stops;
 
-                                    added_count += 1;
-                                }
-                            }
-                        }
+                        self.add_reference_shot(ReferenceShot {
+                            shot_id,
+                            film_title: meta_info.title.to_string(),
+                            cinematographer: meta_info.cinematographer.to_string(),
+                            timestamp_sec: current_t,
+                            embedding,
+                            dynamic_range_stops: physics.exposure.dynamic_range_stops,
+                            highlight_rolloff: physics.exposure.highlight_rolloff,
+                            sharpness_laplacian: physics.optics.sharpness_laplacian,
+                            key_fill_ratio: craft.lighting.key_to_fill_ratio,
+                            style_label: meta_info.style_family.to_string(),
+                            motion_optical_flow: Some(motion.optical_flow_mean),
+                            camera_motion_ratio: Some(motion.camera_motion_ratio),
+                        });
+
+                        added_count += 1;
+                        current_t += sample_interval;
+                        continue;
                     }
                 }
             }
-            current_t += sample_interval;
+            // If transition cut detected or extraction skipped, slide forward 3 seconds to find next setup
+            current_t += 3.0;
         }
 
         if added_count == 0 {
@@ -1371,6 +1383,8 @@ impl BaselineStore {
             sharpness_laplacian: physics.optics.sharpness_laplacian,
             key_fill_ratio: 3.5,
             style_label: "Still Frame Reference".to_string(),
+            motion_optical_flow: None,
+            camera_motion_ratio: None,
         });
 
         // Update manifest catalog
@@ -1484,6 +1498,8 @@ impl BaselineStore {
                     sharpness_laplacian: physics.optics.sharpness_laplacian,
                     key_fill_ratio: 3.5,
                     style_label: "Still Frame Reference".to_string(),
+                    motion_optical_flow: None,
+                    camera_motion_ratio: None,
                 });
                 added += 1;
             }
@@ -1639,6 +1655,163 @@ fn compute_quantiles(vals: &mut [f32]) -> MetricQuantiles {
     }
 }
 
+/// Result summary of media server library scan and shot ingestion.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerIngestReport {
+    pub matched_films: usize,
+    pub ingested_films: usize,
+    pub skipped_films: usize,
+    pub total_shots_added: usize,
+    pub total_corpus_shots: usize,
+    pub dynamic_range_p50: f32,
+    pub highlight_rolloff_p50: f32,
+    pub processed_titles: Vec<String>,
+}
+
+/// Extracts title and optional 4-digit release year from a movie folder name.
+pub fn parse_movie_folder_name(folder_name: &str) -> (String, Option<u32>) {
+    let s = folder_name.trim();
+    if let Some(open) = s.rfind('(') {
+        if let Some(close) = s.rfind(')') {
+            if close > open + 4 {
+                let yr_str = &s[open + 1..close];
+                if let Ok(y) = yr_str.parse::<u32>() {
+                    let title = s[..open].trim().to_string();
+                    return (title, Some(y));
+                }
+            }
+        }
+    }
+    (folder_name.to_string(), None)
+}
+
+/// Identifies largest primary video file in a movie folder.
+pub fn find_primary_video_file(dir: &Path) -> Option<std::path::PathBuf> {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        let mut largest: Option<(std::path::PathBuf, u64)> = None;
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_file() {
+                    let p = entry.path();
+                    if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+                        let ext_lower = ext.to_lowercase();
+                        if matches!(
+                            ext_lower.as_str(),
+                            "mkv" | "mp4" | "mov" | "m4v" | "avi" | "ts"
+                        ) {
+                            let len = meta.len();
+                            if largest.as_ref().map(|l| len > l.1).unwrap_or(true) {
+                                largest = Some((p, len));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return largest.map(|l| l.0);
+    }
+    None
+}
+
+/// Executes media server library scanning, deduplication, and continuous shot ingestion.
+pub fn scan_and_ingest_media_server(
+    server_dir: &Path,
+    limit: Option<usize>,
+    shots_per_film: usize,
+    force: bool,
+) -> Result<ServerIngestReport, String> {
+    use aesthetic_models::awards::find_award_match;
+
+    if !server_dir.exists() {
+        return Err(format!(
+            "Server directory '{}' does not exist or is inaccessible",
+            server_dir.display()
+        ));
+    }
+
+    let entries = fs::read_dir(server_dir)
+        .map_err(|e| format!("Failed to read directory {}: {}", server_dir.display(), e))?;
+
+    let mut matched_jobs = Vec::new();
+    for entry in entries.flatten() {
+        if let Ok(file_type) = entry.file_type() {
+            if file_type.is_dir() {
+                let folder_name = entry.file_name().to_string_lossy().to_string();
+                let (title, year) = parse_movie_folder_name(&folder_name);
+                if let Some(award) = find_award_match(&title, year) {
+                    if let Some(video_file) = find_primary_video_file(&entry.path()) {
+                        matched_jobs.push((folder_name, video_file, award));
+                    }
+                }
+            }
+        }
+    }
+
+    let mut store = BaselineStore::new();
+
+    let (pending_jobs, skipped_count): (Vec<_>, usize) = if force {
+        (matched_jobs.clone(), 0)
+    } else {
+        let mut pending = Vec::new();
+        let mut skipped = 0;
+        for job in matched_jobs.clone() {
+            let award_title = job.2.title;
+            let award_year = job.2.year;
+            let exists = store.manifest.films.iter().any(|f| {
+                f.title.eq_ignore_ascii_case(award_title)
+                    && (f.year == award_year
+                        || f.year == 0
+                        || (f.year as i32 - award_year as i32).abs() <= 1)
+            });
+            if exists {
+                skipped += 1;
+            } else {
+                pending.push(job);
+            }
+        }
+        (pending, skipped)
+    };
+
+    let to_process = if let Some(lim) = limit {
+        &pending_jobs[..lim.min(pending_jobs.len())]
+    } else {
+        &pending_jobs[..]
+    };
+
+    let mut total_shots = 0;
+    let mut processed_titles = Vec::new();
+
+    for (_folder, file_path, award) in to_process {
+        let ingest_meta = FilmIngestMeta {
+            title: award.title,
+            cinematographer: award.cinematographer,
+            director: Some(award.director),
+            year: award.year,
+            style_family: award.style_family,
+            max_shots: shots_per_film,
+        };
+
+        if let Ok(summary) = store.ingest_reference_film_shots(file_path, &ingest_meta) {
+            total_shots += summary.shots_added;
+            processed_titles.push(award.title.to_string());
+        }
+    }
+
+    let baseline_dir = Path::new("assets").join("baseline");
+    let _ = store.save_to_dir(&baseline_dir);
+
+    Ok(ServerIngestReport {
+        matched_films: matched_jobs.len(),
+        ingested_films: processed_titles.len(),
+        skipped_films: skipped_count,
+        total_shots_added: total_shots,
+        total_corpus_shots: store.reference_shots.len(),
+        dynamic_range_p50: store.manifest.dynamic_range_quantiles.p50,
+        highlight_rolloff_p50: store.manifest.highlight_rolloff_quantiles.p50,
+        processed_titles,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1671,6 +1844,8 @@ mod tests {
                 sharpness_laplacian: i as f32 * 2.0,
                 key_fill_ratio: 3.0,
                 style_label: "Standard".to_string(),
+                motion_optical_flow: None,
+                camera_motion_ratio: None,
             });
         }
 

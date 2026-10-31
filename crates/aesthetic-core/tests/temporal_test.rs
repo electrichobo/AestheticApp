@@ -136,6 +136,8 @@ fn test_baseline_store_search_and_master_match() {
         sharpness_laplacian: 180.0,
         key_fill_ratio: 4.0,
         style_label: "Prestige Naturalism".to_string(),
+        motion_optical_flow: Some(1.8),
+        camera_motion_ratio: Some(0.80),
     });
 
     // Register Roger Deakins signature

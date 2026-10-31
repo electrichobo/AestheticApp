@@ -960,3 +960,77 @@ if (btnWeb) {
 loadSelects();
 fetchFrameData(currentTime);
 console.log('AESTHETIC Stage 1 & Stage 2 Engine Active.');
+
+// ============================================================================
+// Media Server Baseline Ingest Modal & Deduplication Controller
+// ============================================================================
+const btnServerIngest = document.getElementById('btn-server-ingest');
+const ingestModal = document.getElementById('server-ingest-modal');
+const modalClose = document.getElementById('modal-ingest-close');
+const btnIngestCancel = document.getElementById('btn-ingest-cancel');
+const btnIngestStart = document.getElementById('btn-ingest-start');
+const ingestPathInput = document.getElementById('server-ingest-path');
+const ingestLimitInput = document.getElementById('server-ingest-limit');
+const ingestShotsInput = document.getElementById('server-ingest-shots');
+const ingestForceCheck = document.getElementById('server-ingest-force');
+const ingestStatusBox = document.getElementById('server-ingest-status');
+
+if (btnServerIngest && ingestModal) {
+  btnServerIngest.addEventListener('click', () => {
+    ingestModal.style.display = 'flex';
+    if (ingestStatusBox) ingestStatusBox.style.display = 'none';
+  });
+}
+
+function closeIngestModal() {
+  if (ingestModal) ingestModal.style.display = 'none';
+}
+
+if (modalClose) modalClose.addEventListener('click', closeIngestModal);
+if (btnIngestCancel) btnIngestCancel.addEventListener('click', closeIngestModal);
+
+if (btnIngestStart) {
+  btnIngestStart.addEventListener('click', async () => {
+    const path = ingestPathInput ? ingestPathInput.value.trim() : 'M:\\movies';
+    const limit = ingestLimitInput ? parseInt(ingestLimitInput.value, 10) || 5 : 5;
+    const shots = ingestShotsInput ? parseInt(ingestShotsInput.value, 10) || 5 : 5;
+    const force = ingestForceCheck ? ingestForceCheck.checked : false;
+
+    if (ingestStatusBox) {
+      ingestStatusBox.style.display = 'block';
+      ingestStatusBox.innerHTML = `Scanning ${path}...<br>Checking against 184 canonical awards titles...<br>Deduplication: ${force ? 'FORCED (re-extracting)' : 'ENABLED (skipping previous)'}`;
+    }
+
+    btnIngestStart.disabled = true;
+    btnIngestStart.textContent = 'Ingesting...';
+
+    try {
+      const url = `/api/ingest_server?path=${encodeURIComponent(path)}&limit=${limit}&shots=${shots}&force=${force}`;
+      const res = await fetch(url);
+      const data = await res.json();
+
+      if (data.success && data.report) {
+        const r = data.report;
+        ingestStatusBox.innerHTML = `
+          <strong>[✓] Ingestion Complete!</strong><br>
+          • Matched in Library: ${r.matched_films} films<br>
+          • Ingested This Batch: ${r.ingested_films} films (${r.total_shots_added} shots)<br>
+          • Skipped (Already Present): ${r.skipped_films} films<br>
+          • Total Baseline Corpus: ${r.total_corpus_shots} shots<br>
+          • Dynamic Range (p50): ${r.dynamic_range_p50.toFixed(1)} stops<br>
+          • Highlight Roll-Off (p50): ${r.highlight_rolloff_p50.toFixed(1)}%<br>
+          ${r.processed_titles && r.processed_titles.length ? `<small>Ingested: ${r.processed_titles.join(', ')}</small>` : ''}
+        `;
+      } else {
+        ingestStatusBox.innerHTML = `<span style="color: #ff6666;">Error: ${data.error || 'Ingestion failed'}</span>`;
+      }
+    } catch (err) {
+      if (ingestStatusBox) {
+        ingestStatusBox.innerHTML = `<span style="color: #ff6666;">Network/Server error: ${err}</span>`;
+      }
+    } finally {
+      btnIngestStart.disabled = false;
+      btnIngestStart.textContent = 'Start Ingestion';
+    }
+  });
+}

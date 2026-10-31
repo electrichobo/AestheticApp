@@ -4,7 +4,7 @@
 //! Serves broadcast scopes, 4-output evaluations, live frame extraction,
 //! and interactive UI via embedded native WebView (Edge App Mode / Chromium).
 
-use aesthetic_core::baseline_store::BaselineStore;
+use aesthetic_core::baseline_store::{scan_and_ingest_media_server, BaselineStore};
 use aesthetic_core::export::{
     generate_cmx3600_edl, generate_contact_sheet_html, generate_csv_selects, generate_fcpxml,
 };
@@ -530,6 +530,60 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                     "application/json",
                     json.to_string().as_bytes(),
                 );
+            }
+        }
+        "/api/ingest_server" => {
+            let server_path = query_map
+                .get("path")
+                .map(|s| s.as_str())
+                .unwrap_or(r"M:\movies");
+            let limit: Option<usize> = query_map.get("limit").and_then(|l| l.parse().ok());
+            let shots: usize = query_map
+                .get("shots")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(5);
+            let force = query_map
+                .get("force")
+                .map(|f| f == "true" || f == "1")
+                .unwrap_or(false);
+
+            let path = PathBuf::from(server_path);
+            if !path.exists() {
+                let json = serde_json::json!({
+                    "success": false,
+                    "error": format!("Directory '{}' does not exist or is inaccessible", server_path)
+                });
+                send_response(
+                    stream,
+                    "400 Bad Request",
+                    "application/json",
+                    json.to_string().as_bytes(),
+                );
+                return;
+            }
+
+            match scan_and_ingest_media_server(&path, limit, shots, force) {
+                Ok(report) => {
+                    let json = serde_json::json!({
+                        "success": true,
+                        "report": report
+                    });
+                    send_response(
+                        stream,
+                        "200 OK",
+                        "application/json",
+                        json.to_string().as_bytes(),
+                    );
+                }
+                Err(err) => {
+                    let json = serde_json::json!({ "success": false, "error": err });
+                    send_response(
+                        stream,
+                        "500 Internal Server Error",
+                        "application/json",
+                        json.to_string().as_bytes(),
+                    );
+                }
             }
         }
         "/api/analyze" => {
