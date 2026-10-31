@@ -92,6 +92,74 @@ impl DepthMap {
 
         (avg_edge * 120.0).clamp(0.0, 100.0)
     }
+
+    /// Computes depth-conditioned subject sharpness vs background bokeh falloff.
+    /// Returns (subject_sharpness, background_sharpness, bokeh_separation_ratio).
+    pub fn compute_depth_conditioned_focus(&self, img: &RgbImage) -> (f32, f32, f32) {
+        let (img_w, img_h) = img.dimensions();
+        if img_w < 8 || img_h < 8 || self.width < 4 || self.height < 4 {
+            return (0.0, 0.0, 1.0);
+        }
+
+        let dw = self.width;
+        let dh = self.height;
+
+        let mut sub_lap_sum = 0.0f64;
+        let mut sub_lap_sq = 0.0f64;
+        let mut sub_count = 0usize;
+
+        let mut bg_lap_sum = 0.0f64;
+        let mut bg_lap_sq = 0.0f64;
+        let mut bg_count = 0usize;
+
+        for dy in 1..(dh - 1) {
+            let iy = (dy as u32 * img_h / dh as u32).min(img_h - 2);
+            for dx in 1..(dw - 1) {
+                let ix = (dx as u32 * img_w / dw as u32).min(img_w - 2);
+                let z = self.data[dy * dw + dx];
+
+                let get_l = |x: u32, y: u32| {
+                    let p = img.get_pixel(x, y);
+                    0.2126 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.0722 * p[2] as f32
+                };
+
+                let c = get_l(ix, iy);
+                let top = get_l(ix, iy.saturating_sub(1));
+                let bot = get_l(ix, iy + 1);
+                let left = get_l(ix.saturating_sub(1), iy);
+                let right = get_l(ix + 1, iy);
+
+                let lap = (top + bot + left + right - 4.0 * c) as f64;
+
+                if z < 0.45 {
+                    sub_lap_sum += lap;
+                    sub_lap_sq += lap * lap;
+                    sub_count += 1;
+                } else if z > 0.60 {
+                    bg_lap_sum += lap;
+                    bg_lap_sq += lap * lap;
+                    bg_count += 1;
+                }
+            }
+        }
+
+        let sub_variance = if sub_count > 10 {
+            let m = sub_lap_sum / (sub_count as f64);
+            ((sub_lap_sq / (sub_count as f64)) - (m * m)).max(0.0) as f32
+        } else {
+            0.0
+        };
+
+        let bg_variance = if bg_count > 10 {
+            let m = bg_lap_sum / (bg_count as f64);
+            ((bg_lap_sq / (bg_count as f64)) - (m * m)).max(0.0) as f32
+        } else {
+            0.0
+        };
+
+        let ratio = (sub_variance + 1.0) / (bg_variance + 1.0);
+        (sub_variance, bg_variance, ratio)
+    }
 }
 
 /// Vision model inference coordinator.
@@ -215,19 +283,23 @@ impl ModelInferenceEngine {
         let depth_sep = depth.depth_separation_score();
         let plane_count = depth.depth_plane_count();
         let silhouette = depth.silhouette_clarity();
+        let (sub_sharpness, _bg_sharpness, bokeh_ratio) =
+            depth.compute_depth_conditioned_focus(img);
+
+        let (key_azimuth, key_elevation, kf_ratio) = compute_volumetric_lighting(img);
 
         ModelInferredCraft {
             lighting: LightingGeometry {
-                key_to_fill_ratio: 3.5,
-                key_azimuth_deg: Some(42.0),
-                key_elevation_deg: Some(30.0),
+                key_to_fill_ratio: kf_ratio,
+                key_azimuth_deg: Some(key_azimuth),
+                key_elevation_deg: Some(key_elevation),
                 rim_light_separation: depth_sep * 0.85,
                 shadow_softness: 72.0,
             },
             focus: FocusOptics {
-                subject_focus_accuracy: 94.0,
-                eye_sharpness: Some(88.0),
-                focus_hunting_score: 0.0,
+                subject_focus_accuracy: (sub_sharpness.sqrt() * 5.0).clamp(20.0, 100.0),
+                eye_sharpness: Some((sub_sharpness.sqrt() * 6.0).clamp(20.0, 100.0)),
+                focus_hunting_score: (100.0 - bokeh_ratio * 5.0).clamp(0.0, 100.0),
                 focus_breathing_score: 0.0,
                 rack_focus_detected: false,
             },
@@ -250,6 +322,67 @@ impl ModelInferenceEngine {
             },
         }
     }
+}
+
+/// Infers key light azimuth angle, elevation, and key-to-fill ratio from image raster luminance.
+fn compute_volumetric_lighting(img: &RgbImage) -> (f32, f32, f32) {
+    let (w, h) = img.dimensions();
+    if w == 0 || h == 0 {
+        return (45.0, 35.0, 3.0);
+    }
+
+    let mut highlight_x_sum = 0.0f64;
+    let mut highlight_y_sum = 0.0f64;
+    let mut highlight_luma_sum = 0.0f64;
+    let mut highlight_count = 0usize;
+
+    let mut shadow_luma_sum = 0.0f64;
+    let mut shadow_count = 0usize;
+
+    for y in 0..h {
+        for x in 0..w {
+            let p = img.get_pixel(x, y);
+            let luma = (0.2126 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.0722 * p[2] as f32) as f64;
+            if luma > 180.0 {
+                highlight_x_sum += (x as f64) / (w as f64);
+                highlight_y_sum += (y as f64) / (h as f64);
+                highlight_luma_sum += luma;
+                highlight_count += 1;
+            } else if luma < 60.0 {
+                shadow_luma_sum += luma;
+                shadow_count += 1;
+            }
+        }
+    }
+
+    let azimuth = if highlight_count > 0 {
+        let avg_x = (highlight_x_sum / highlight_count as f64) as f32;
+        ((avg_x - 0.5) * 180.0).clamp(-90.0, 90.0)
+    } else {
+        45.0
+    };
+
+    let elevation = if highlight_count > 0 {
+        let avg_y = (highlight_y_sum / highlight_count as f64) as f32;
+        ((1.0 - avg_y) * 60.0 + 15.0).clamp(10.0, 85.0)
+    } else {
+        35.0
+    };
+
+    let avg_hi = if highlight_count > 0 {
+        (highlight_luma_sum / highlight_count as f64) as f32
+    } else {
+        120.0
+    };
+    let avg_sh = if shadow_count > 0 {
+        ((shadow_luma_sum / shadow_count as f64) as f32).max(5.0)
+    } else {
+        30.0
+    };
+
+    let kf_ratio = (avg_hi / avg_sh).clamp(1.0, 16.0);
+
+    (azimuth, elevation, kf_ratio)
 }
 
 #[cfg(test)]
@@ -286,6 +419,57 @@ mod tests {
         assert!(
             (norm - 1.0).abs() < 1e-4,
             "Embedding must be unit normalized"
+        );
+    }
+
+    #[test]
+    fn test_depth_conditioned_focus() {
+        use image::Rgb;
+
+        let mut img = RgbImage::new(40, 40);
+        // Put high contrast sharp edges in left region (foreground)
+        for y in 0..40 {
+            for x in 0..18 {
+                let v = if (x + y) % 2 == 0 { 255 } else { 0 };
+                img.put_pixel(x, y, Rgb([v, v, v]));
+            }
+            // Smooth flat bokeh in right region (background)
+            for x in 18..40 {
+                img.put_pixel(x, y, Rgb([128, 128, 128]));
+            }
+        }
+
+        let mut depth_data = vec![0.5f32; 40 * 40];
+        for y in 0..40 {
+            for x in 0..16 {
+                depth_data[y * 40 + x] = 0.2; // Near / Subject
+            }
+            for x in 24..40 {
+                depth_data[y * 40 + x] = 0.8; // Far / Background (safely away from transition edge)
+            }
+        }
+
+        let depth_map = DepthMap {
+            width: 40,
+            height: 40,
+            data: depth_data,
+        };
+
+        let (sub_sharp, bg_sharp, ratio) = depth_map.compute_depth_conditioned_focus(&img);
+        assert!(
+            sub_sharp > 50.0,
+            "Subject plane should be sharp: {}",
+            sub_sharp
+        );
+        assert!(
+            bg_sharp < 1.0,
+            "Background plane should be smooth bokeh: {}",
+            bg_sharp
+        );
+        assert!(
+            ratio > 50.0,
+            "Bokeh separation ratio should be high: {}",
+            ratio
         );
     }
 }

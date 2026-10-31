@@ -7,20 +7,19 @@
 
 ---
 
-## Current Status: M6 (Editorial Deliverables & Golden Baseline Stills Ingest Complete)
+## Current Status: M7 (Depth-Conditioned Focus & Volumetric Lighting Complete)
 - Protocol initialized: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `START_HERE.md`, `STATUS.md`.
 - Workspace crates complete: `aesthetic-models`, `aesthetic-metrics`, `aesthetic-core`, `aesthetic-cli`, `aesthetic-ui`.
-- Still Image Baseline Ingestion: `ingest_reference_still` and `ingest_reference_directory` for `.png`, `.jpg`, `.tiff`, `.exr`.
-- Editorial Deliverables: JSON shot sidecars (`<dir>/metrics/*.json`), Top-$N$ visual HTML contact sheet, FCPXML and CMX 3600 EDL timeline exports.
-- Native File/Folder Browser: Native OS file/directory dialogs wired into `aesthetic-ui`.
-- 17/17 tests passing, zero clippy warnings, rustfmt compliant.
+- Depth-Conditioned Focus: `compute_depth_conditioned_focus` evaluates subject-plane MTF sharpness vs background bokeh roll-off ratio.
+- Volumetric Lighting: Inferred 3D key light azimuth, elevation angle, and key-to-fill modeling ratio from spatial highlight/shadow distribution.
+- Editorial Deliverables: Top-$N$ visual contact sheets, JSON sidecars, FCPXML, CMX 3600 EDL, still/video baseline ingestion, native OS dialogs.
+- 18/18 tests passing, zero clippy warnings, rustfmt compliant.
 
 ---
 
-## Next Immediate Step (M7 Depth-Conditioned Focus & Style Geodesics)
-1. **Depth-Conditioned Focus**: Sharpness evaluation conditioned on subject depth plane vs background bokeh roll-off.
-2. **Volumetric Lighting**: Key-to-fill modeling ratio and specular catchlight geometry.
-3. **Style-Family Clusters**: Segment baseline into style families for within-genre grading comparison.
+## Next Immediate Step (M7 Style-Family Clusters & ACES Gamut)
+1. **Style-Family Clusters**: Segment 58 master baseline into distinct style families (Noir, Naturalism, Pastel, Technicolor, Vérité).
+2. **ACES / Linear Gamut Volume**: Measure harmonic complementary split-toning in perceptual color space.
 
 ---
 

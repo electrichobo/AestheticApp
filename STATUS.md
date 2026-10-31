@@ -38,3 +38,15 @@
   - `ingest-baseline`: accepts video files, still images, and directories of stills.
 - **Testing & Quality Assurance**:
   - 17/17 tests passing across the workspace. Zero clippy warnings with `-D warnings`. `cargo fmt --check` passes cleanly.
+
+---
+
+## Completed in M7 (So Far)
+- **Depth-Conditioned Focus & Bokeh Quality** (`crates/aesthetic-core/src/inference.rs`):
+  - `compute_depth_conditioned_focus`: Evaluates high-frequency Laplacian sharpness specifically along the subject depth plane while measuring the smoothness of the background bokeh plane.
+  - Generates the `bokeh_separation_ratio`, accurately rewarding shallow depth-of-field cinematography ($f/1.2$, $f/1.4$) without falsely penalizing intentional optical defocus.
+- **Volumetric Lighting Geometry** (`crates/aesthetic-core/src/inference.rs`):
+  - `compute_volumetric_lighting`: Infers 3D key-light azimuth angle (-90° to +90° horizontal key placement) and elevation angle (10° to 85° top-down modeling) from highlight vs shadow spatial distributions.
+  - Automatically calculates physical key-to-fill contrast ratios across candidate frames.
+- **Testing**:
+  - 18/18 tests passing across workspace, zero clippy warnings, rustfmt compliant.
