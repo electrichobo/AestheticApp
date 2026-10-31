@@ -103,6 +103,7 @@ pub fn evaluate_candidate_frame(
         shot_scale: "Medium".to_string(),
         cinematographer_match: None,
         match_confidence: 0.0,
+        style_family: "Prestige Naturalism".to_string(),
     };
 
     // 4. Calculate tangible 0-100 scores using baseline calibration
@@ -205,6 +206,7 @@ pub fn analyze_video_file(
                 take.style.cinematographer_match =
                     Some(format!("{} ({})", dp.dp_name, dp.reference_film));
                 take.style.match_confidence = dp.visual_similarity;
+                take.style.style_family = dp.style_family;
             }
 
             takes.push(take);

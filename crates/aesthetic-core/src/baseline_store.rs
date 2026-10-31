@@ -1003,7 +1003,22 @@ impl BaselineStore {
             reference_film: ref_film,
             visual_similarity: sim,
             craft_explanation: explanation,
+            style_family: sig.style_family().to_string(),
         })
+    }
+
+    /// Classifies candidate shot into its closest stylistic family cluster.
+    pub fn classify_style_family(
+        &self,
+        candidate_embedding: &[f32],
+        candidate_key_fill: f32,
+    ) -> String {
+        if let Some(m) = self.match_master_cinematographer(candidate_embedding, candidate_key_fill)
+        {
+            m.style_family
+        } else {
+            "Prestige Naturalism".to_string()
+        }
     }
 
     /// Ingest a reference cinema film into the Golden Baseline corpus.

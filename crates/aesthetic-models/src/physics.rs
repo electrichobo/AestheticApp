@@ -67,6 +67,10 @@ pub struct ColorPhysics {
     pub gamut_coverage_srgb: f32,
     pub gamut_coverage_p3: f32,
     pub gamut_coverage_rec2020: f32,
+    /// Angular separation between highlight and shadow color vectors (0 - 180 deg). ~180 = complementary split-toning
+    pub split_toning_separation_deg: f32,
+    /// Harmonic color harmony score (0.0 - 100.0) based on complementary color modeling
+    pub harmonic_palette_score: f32,
 }
 
 /// Combined Objective Physics metrics bundle.

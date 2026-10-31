@@ -31,6 +31,15 @@ pub fn analyze_color(img: &RgbImage) -> ColorPhysics {
     let mut p3_inside = 0usize;
     let mut rec2020_inside = 0usize;
 
+    // Split-toning chromatic accumulation (Cb, Cr vectors for highlights vs shadows)
+    let mut hi_cr_sum = 0.0f64;
+    let mut hi_cb_sum = 0.0f64;
+    let mut hi_count = 0usize;
+
+    let mut sh_cr_sum = 0.0f64;
+    let mut sh_cb_sum = 0.0f64;
+    let mut sh_count = 0usize;
+
     for pixel in img.pixels() {
         let r = pixel[0] as f32;
         let g = pixel[1] as f32;
@@ -39,6 +48,20 @@ pub fn analyze_color(img: &RgbImage) -> ColorPhysics {
         sum_r += r as f64;
         sum_g += g as f64;
         sum_b += b as f64;
+
+        let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        let cb = (b - luma) as f64;
+        let cr = (r - luma) as f64;
+
+        if luma > 170.0 {
+            hi_cr_sum += cr;
+            hi_cb_sum += cb;
+            hi_count += 1;
+        } else if luma < 70.0 {
+            sh_cr_sum += cr;
+            sh_cb_sum += cb;
+            sh_count += 1;
+        }
 
         // Saturation in HSV space: (max - min) / max
         let max_c = r.max(g).max(b);
@@ -106,6 +129,30 @@ pub fn analyze_color(img: &RgbImage) -> ColorPhysics {
     let gamut_coverage_p3 = (p3_inside as f32 / total as f32) * 100.0;
     let gamut_coverage_rec2020 = (rec2020_inside as f32 / total as f32) * 100.0;
 
+    // Harmonic Split-Toning Angle
+    let (split_toning_deg, harmonic_score) = if hi_count > 10 && sh_count > 10 {
+        let hi_cr = hi_cr_sum / hi_count as f64;
+        let hi_cb = hi_cb_sum / hi_count as f64;
+        let sh_cr = sh_cr_sum / sh_count as f64;
+        let sh_cb = sh_cb_sum / sh_count as f64;
+
+        let norm_hi = (hi_cr * hi_cr + hi_cb * hi_cb).sqrt();
+        let norm_sh = (sh_cr * sh_cr + sh_cb * sh_cb).sqrt();
+
+        if norm_hi > 1.5 && norm_sh > 1.5 {
+            let dot = (hi_cr * sh_cr + hi_cb * sh_cb) / (norm_hi * norm_sh);
+            let angle = dot.clamp(-1.0, 1.0).acos() * 180.0 / std::f64::consts::PI;
+            // Reward complementary split-toning angles (140 - 180 deg)
+            let harmony =
+                ((angle as f32 / 180.0) * 60.0 + (entropy.min(5.0) * 8.0)).clamp(0.0, 100.0);
+            (angle as f32, harmony)
+        } else {
+            (0.0, (entropy.min(5.0) * 12.0).clamp(0.0, 100.0))
+        }
+    } else {
+        (0.0, 50.0)
+    };
+
     ColorPhysics {
         estimated_kelvin,
         wb_deviation,
@@ -116,6 +163,8 @@ pub fn analyze_color(img: &RgbImage) -> ColorPhysics {
         gamut_coverage_srgb,
         gamut_coverage_p3,
         gamut_coverage_rec2020,
+        split_toning_separation_deg: split_toning_deg,
+        harmonic_palette_score: harmonic_score,
     }
 }
 

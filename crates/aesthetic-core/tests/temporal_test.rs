@@ -164,5 +164,6 @@ fn test_baseline_store_search_and_master_match() {
     let mm = master_match.unwrap();
     assert_eq!(mm.dp_name, "Roger Deakins");
     assert!(mm.visual_similarity > 95.0);
+    assert_eq!(mm.style_family, "Prestige Naturalism");
     assert!(mm.craft_explanation.contains("Roger Deakins"));
 }

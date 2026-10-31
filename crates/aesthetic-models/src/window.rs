@@ -30,6 +30,8 @@ pub struct DiscoveredStyle {
     pub cinematographer_match: Option<String>,
     /// Match confidence (0.0 - 100.0)
     pub match_confidence: f32,
+    /// Style Family Cluster: "Chiaroscuro Noir", "Prestige Naturalism", "Expressive Color", "High-Key Pastel", "Documentary Vérité", "Atmospheric Silver"
+    pub style_family: String,
 }
 
 /// The 4-Output structured evaluation of a candidate shot / take.

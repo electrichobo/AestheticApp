@@ -449,6 +449,11 @@ pub fn generate_contact_sheet_html(
             "          <span class=\"tag\">{}</span>",
             take.style.shot_scale
         );
+        let _ = writeln!(
+            html,
+            "          <span class=\"tag tag-family\">{}</span>",
+            take.style.style_family
+        );
         let _ = writeln!(html, "        </div>");
 
         let _ = writeln!(html, "      </div>");
@@ -545,6 +550,7 @@ mod tests {
                 shot_scale: "Medium Close-Up".to_string(),
                 cinematographer_match: Some("Roger Deakins (Skyfall)".to_string()),
                 match_confidence: 94.2,
+                style_family: "Prestige Naturalism".to_string(),
             },
             measured: Default::default(),
             concerns: vec![],

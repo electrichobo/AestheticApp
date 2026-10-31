@@ -102,3 +102,32 @@ fn test_native_aspect_ratio_no_crop() {
     assert_eq!(bounds.width, 120);
     assert_eq!(bounds.height, 50);
 }
+
+#[test]
+fn test_split_toning_harmony() {
+    let mut img = RgbImage::new(64, 64);
+    // Upper half: warm golden highlights
+    for y in 0..32 {
+        for x in 0..64 {
+            img.put_pixel(x, y, Rgb([240, 200, 110]));
+        }
+    }
+    // Lower half: cool teal/blue shadows
+    for y in 32..64 {
+        for x in 0..64 {
+            img.put_pixel(x, y, Rgb([15, 45, 95]));
+        }
+    }
+
+    let physics = compute_objective_physics(&img);
+    assert!(
+        physics.color.split_toning_separation_deg > 110.0,
+        "Separation angle should reflect complementary split-toning: {}",
+        physics.color.split_toning_separation_deg
+    );
+    assert!(
+        physics.color.harmonic_palette_score > 50.0,
+        "Harmonic palette score should be high: {}",
+        physics.color.harmonic_palette_score
+    );
+}

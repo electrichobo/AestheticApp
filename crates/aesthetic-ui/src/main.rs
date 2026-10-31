@@ -258,6 +258,7 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 shot.style.cinematographer_match =
                     Some(format!("{} ({})", dp.dp_name, dp.reference_film));
                 shot.style.match_confidence = dp.visual_similarity;
+                shot.style.style_family = dp.style_family;
             }
 
             let payload = serde_json::to_string(&shot).unwrap_or_default();
@@ -454,6 +455,7 @@ fn get_demo_takes() -> Vec<ShotTake> {
                 shot_scale: "Medium Close-Up".to_string(),
                 cinematographer_match: Some("Roger Deakins (Skyfall)".to_string()),
                 match_confidence: 94.6,
+                style_family: "Prestige Naturalism".to_string(),
             },
             measured: Default::default(),
             concerns: vec![],
@@ -478,6 +480,7 @@ fn get_demo_takes() -> Vec<ShotTake> {
                 shot_scale: "Extreme Wide".to_string(),
                 cinematographer_match: Some("Greig Fraser (Dune)".to_string()),
                 match_confidence: 91.2,
+                style_family: "Atmospheric Immersion".to_string(),
             },
             measured: Default::default(),
             concerns: vec![],

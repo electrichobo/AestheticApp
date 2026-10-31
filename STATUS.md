@@ -48,5 +48,11 @@
 - **Volumetric Lighting Geometry** (`crates/aesthetic-core/src/inference.rs`):
   - `compute_volumetric_lighting`: Infers 3D key-light azimuth angle (-90° to +90° horizontal key placement) and elevation angle (10° to 85° top-down modeling) from highlight vs shadow spatial distributions.
   - Automatically calculates physical key-to-fill contrast ratios across candidate frames.
+- **Harmonic Complementary Split-Toning** (`crates/aesthetic-metrics/src/color.rs`):
+  - `split_toning_separation_deg`: Chromatic angle between highlight and shadow vectors in $Y C_b C_r$ space. Detects and scores complementary color schemes (e.g. orange/teal separation at 140°–180°).
+  - `harmonic_palette_score`: Composite palette score rewarding harmonic split-toning balance and controlled color entropy.
+- **6 Canonical Style-Family Clusters** (`crates/aesthetic-models/src/baseline.rs`, `crates/aesthetic-core/src/baseline_store.rs`):
+  - Dynamic classification across *Chiaroscuro Noir*, *Prestige Naturalism*, *Expressive Color*, *High-Key Symmetrical*, *Documentary Vérité*, and *Atmospheric Immersion*.
+  - Surface style-family tags in `DiscoveredStyle`, `MasterMatchResult`, HTML contact sheet, and UI.
 - **Testing**:
-  - 18/18 tests passing across workspace, zero clippy warnings, rustfmt compliant.
+  - 19/19 tests passing across workspace, zero clippy warnings, rustfmt compliant.

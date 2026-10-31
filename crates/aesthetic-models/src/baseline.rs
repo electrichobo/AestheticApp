@@ -74,7 +74,7 @@ pub struct ReferenceShot {
 }
 
 /// A cluster representing a master cinematographer's visual signature.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct CinematographerSignature {
     pub dp_name: String,
     pub representative_films: Vec<String>,
@@ -84,13 +84,59 @@ pub struct CinematographerSignature {
     pub preferred_motion_style: String,
 }
 
+impl CinematographerSignature {
+    /// Maps master cinematographer signature to one of the 6 canonical style families.
+    pub fn style_family(&self) -> &'static str {
+        match self.dp_name.as_str() {
+            "Gordon Willis" | "Robert Krasker" | "Gregg Toland" | "Darius Khondji"
+            | "Michael Chapman" | "Lee Garmes" | "Eduard Tisse" | "Conrad Hall"
+            | "Tonino Delli Colli" | "Robert Elswit" | "Rudolph Maté" | "Gunnar Fischer"
+            | "Henri Decaë" | "Asakazu Nakai" => "Chiaroscuro Noir",
+
+            "Roger Deakins"
+            | "Emmanuel Lubezki"
+            | "Sven Nykvist"
+            | "Néstor Almendros"
+            | "Caleb Deschanel"
+            | "Stuart Dryburgh"
+            | "Sayombhu Mukdeeprom"
+            | "Yūharu Atsuta"
+            | "Christian Matras"
+            | "John Alcott"
+            | "Carlo di Palma"
+            | "Mark Lee Ping-Bing" => "Prestige Naturalism",
+
+            "Jack Cardiff" | "Vittorio Storaro" | "Christopher Doyle" | "Robert Burks"
+            | "Luciano Tovoli" | "Russell Metty" | "Rodrigo Prieto" | "Sacha Vierny"
+            | "Winton C. Hoch" | "Robert Richardson" => "Expressive Color",
+
+            "Robert Yeoman" | "Bruno Delbonnel" | "Charles Lang" | "Giuseppe Rotunno"
+            | "Gianni Di Venanzo" | "Otello Martelli" => "High-Key Symmetrical",
+
+            "Raoul Coutard" | "Anthony Dod Mantle" | "Robby Müller" | "Sergey Urusevsky"
+            | "Janusz Kamiński" | "Matthew Libatique" | "Ellen Kuras" => "Documentary Vérité",
+
+            _ => {
+                if self.average_key_fill > 4.5 {
+                    "Chiaroscuro Noir"
+                } else if self.average_key_fill < 2.5 {
+                    "Prestige Naturalism"
+                } else {
+                    "Atmospheric Immersion"
+                }
+            }
+        }
+    }
+}
+
 /// The result of matching a candidate shot against master cinematographer signatures.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MasterMatchResult {
     pub dp_name: String,
     pub reference_film: String,
     pub visual_similarity: f32, // 0.0 - 100.0
     pub craft_explanation: String,
+    pub style_family: String,
 }
 
 /// Overall baseline corpus manifest and distribution state.
