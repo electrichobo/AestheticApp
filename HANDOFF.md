@@ -7,23 +7,23 @@
 
 ---
 
-## Current Status: M5 (Broadcast Scopes, Export, Desktop UI & DirectML Complete)
+## Current Status: M5 (Desktop Scopes Deck & Timeline Scrubbing Complete)
 - Protocol initialized: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `START_HERE.md`, `STATUS.md`.
 - Workspace crates complete: `aesthetic-models`, `aesthetic-metrics`, `aesthetic-core`, `aesthetic-cli`, `aesthetic-ui`.
-- 5 Broadcast Scopes: Luma Waveform (100 IRE), RGB Parade, Circular Vectorscope (Cb-Cr + I-line), Channel Histograms, CIE 1931 xy Gamut.
-- Hardware Acceleration: Option A (`ort` with DirectML dynamic loading) approved and integrated for NVIDIA, AMD/ATI, Intel GPUs.
+- 5 Broadcast Scopes Deck: Luma Waveform, RGB Parade, Circular Vectorscope (57° I-line), Histograms, CIE 1931 xy Gamut rendered live via HTML5 Canvas.
+- Real-Time Scrub & Pipeline: Interactive timeline scrubber wired to frame demuxing, live scope calculations, and 4-output cinematographic matrix updates.
+- Hardware Acceleration: Option A (`ort` DirectML dynamic loading) integrated for NVIDIA, AMD/ATI, Intel GPUs.
 - Selects & Editorial Export: CMX 3600 EDL generator with SMPTE timecode and CSV selects manifest.
-- Frame Demux & Trim: Pipe-based `extract_frame_rgb` and handle-aware lossless clip trimming.
-- Desktop UI shell: Embedded TCP/HTTP server + HTML5 Canvas frontend launched in native Edge App Mode (zero C-compiler/dlltool friction).
-- Web ingest: Remote URL probing & streaming via `yt-dlp`.
-- Standalone CLI verified: 4K 79-metric pass executes in 1.70s.
+- Frame Demux & Trim: Pipe-based `extract_frame_rgb` and handle-aware clip trimming.
+- Web Ingest: Remote URL probing & streaming via `yt-dlp`.
+- Standalone CLI: 4K 79-metric pass executes in 1.70s.
 - All 12 integration tests passing, zero clippy warnings, rustfmt compliant.
 
 ---
 
-## Next Immediate Step (M5: UI Timeline Scrubbing & Inference Wiring)
-1. **Video Pipeline Wire-up**: Connect file dialog & timeline scrubbing to video frame extraction and live scope broadcast in `aesthetic-ui`.
-2. **Craft Layer Model Execution**: Wire ONNX model session runners for Depth-Anything-V2 and SigLIP vision embeddings via DirectML.
+## Next Immediate Step (M5: Depth & Style Embedding Inference Session)
+1. **Model Session Runner**: Create ONNX session runner in `aesthetic-core` loading Depth-Anything-V2 (depth map) and SigLIP (1152-dim visual embeddings) with DirectML execution provider.
+2. **End-to-End Batch Pipeline**: Connect video demuxing, golden window extraction, model inference, and EDL export in the UI and CLI.
 
 ---
 

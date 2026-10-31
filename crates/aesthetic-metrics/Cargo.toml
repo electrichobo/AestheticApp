@@ -7,5 +7,6 @@ license.workspace = true
 
 [dependencies]
 aesthetic-models = { path = "../aesthetic-models" }
+serde = { workspace = true }
 image = { workspace = true }
 rayon = { workspace = true }

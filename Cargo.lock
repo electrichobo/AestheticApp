@@ -41,6 +41,7 @@ dependencies = [
  "aesthetic-models",
  "image",
  "rayon",
+ "serde",
 ]
 
 [[package]]

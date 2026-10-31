@@ -9,9 +9,10 @@
 
 use crate::exposure::rgb_to_luma;
 use image::RgbImage;
+use serde::{Deserialize, Serialize};
 
 /// Luma Waveform density representation (IRE 0 to 100 across frame columns).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LumaWaveform {
     pub columns: usize,
     pub ire_levels: usize, // typically 100 (0 to 100 IRE)
@@ -19,7 +20,7 @@ pub struct LumaWaveform {
 }
 
 /// RGB Parade density representation (Red, Green, Blue columns separated).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RgbParade {
     pub columns: usize,
     pub ire_levels: usize,
@@ -29,7 +30,7 @@ pub struct RgbParade {
 }
 
 /// Circular Vectorscope density representation (Cb horizontal, Cr vertical).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Vectorscope {
     pub resolution: usize, // e.g. 128 or 256
     pub density: Vec<f32>,
@@ -37,16 +38,48 @@ pub struct Vectorscope {
 }
 
 /// 256-bucket Histogram for Luma and individual RGB channels.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelHistogram {
+    #[serde(with = "serde_arrays")]
     pub luma: [u32; 256],
+    #[serde(with = "serde_arrays")]
     pub r: [u32; 256],
+    #[serde(with = "serde_arrays")]
     pub g: [u32; 256],
+    #[serde(with = "serde_arrays")]
     pub b: [u32; 256],
 }
 
+mod serde_arrays {
+    use serde::{Deserializer, Serializer};
+    pub fn serialize<S>(arr: &[u32; 256], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeSeq;
+        let mut seq = serializer.serialize_seq(Some(256))?;
+        for elem in arr {
+            seq.serialize_element(elem)?;
+        }
+        seq.end()
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<[u32; 256], D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::Deserialize;
+        let v = Vec::<u32>::deserialize(deserializer)?;
+        let mut arr = [0u32; 256];
+        if v.len() == 256 {
+            arr.copy_from_slice(&v);
+        }
+        Ok(arr)
+    }
+}
+
 /// CIE 1931 Chromaticity Map density in normalized xy coordinates.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CieChromaticityMap {
     pub grid_size: usize, // e.g. 128x128
     pub density: Vec<f32>,

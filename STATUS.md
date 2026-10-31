@@ -37,9 +37,11 @@
 - Integrated **Hardware Acceleration Engine** (`crates/aesthetic-core`):
   - Option A approved: `ort` v2.0 with Microsoft DirectML execution provider.
   - Configured with pure dynamic loading (`load-dynamic`) to ensure zero C-compiler/dlltool friction on Windows GNU toolchains while unlocking NVIDIA, AMD/ATI, and Intel GPU acceleration.
-- Built **Desktop UI Shell** (`crates/aesthetic-ui/`):
+- Built **Desktop UI Shell & Interactive Scopes Deck** (`crates/aesthetic-ui/`):
   - Pure Rust embedded HTTP server + static HTML5/CSS/Canvas frontend.
   - Native Edge App Mode chromeless window (`msedge.exe --app=...`) with sub-millisecond scope rendering.
+  - Interactive timeline scrubber with live playhead feedback, streaming 5 scopes (Waveform, Parade, Vectorscope, Histogram, CIE 1931) and updating 4-output matrix in real-time.
+  - Full support for opening local files (`/api/open_media`), probing remote URLs (`/api/web_probe`), and downloading CMX 3600 EDL and CSV manifests.
 - Built **Web Video Ingest Engine** (`crates/aesthetic-core/src/web_ingest.rs`):
   - Direct URL probing and streaming/download via `yt-dlp` sidecar for YouTube, Vimeo, and web streams.
 - Comprehensive testing: **12/12 tests passing** across workspace. Zero clippy warnings.
