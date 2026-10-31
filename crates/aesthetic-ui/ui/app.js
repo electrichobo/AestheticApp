@@ -48,6 +48,9 @@ async function fetchFrameData(timeSec) {
       currentEvaluateData = await evalRes.json();
       updateEvaluationUI(currentEvaluateData);
     }
+
+    updateViewportOverlay();
+    updateTimelineUI();
   } catch (err) {
     console.warn('Backend polling error:', err);
   }
@@ -403,7 +406,453 @@ function drawScopeGraticule(c, w, h, labels) {
   });
 }
 
-// Wire Header Action Buttons
+// ============================================================================
+// Stage 2: Diagnostic Viewport Modes & Forensic Overlays
+// ============================================================================
+let activeViewportMode = 'picture';
+const vpButtons = document.querySelectorAll('.vp-btn');
+const overlayImg = document.getElementById('diagnostic-overlay-img');
+const vectorCanvas = document.getElementById('viewport-vector-canvas');
+const vectorCtx = vectorCanvas ? vectorCanvas.getContext('2d') : null;
+const elZoneLegend = document.getElementById('el-zone-legend');
+
+vpButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    vpButtons.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeViewportMode = btn.dataset.mode || 'picture';
+    updateViewportOverlay();
+  });
+});
+
+function updateViewportOverlay() {
+  if (!overlayImg) return;
+
+  if (activeViewportMode === 'picture') {
+    overlayImg.style.display = 'none';
+    if (vectorCanvas) vectorCanvas.style.display = 'none';
+    if (elZoneLegend) elZoneLegend.style.display = 'none';
+  } else if (activeViewportMode === 'el_zone') {
+    overlayImg.src = `/api/frame_el_zone?time=${currentTime}&_t=${Date.now()}`;
+    overlayImg.style.display = 'block';
+    if (vectorCanvas) vectorCanvas.style.display = 'none';
+    if (elZoneLegend) elZoneLegend.style.display = 'flex';
+  } else if (activeViewportMode === 'peaking') {
+    overlayImg.src = `/api/frame_peaking?time=${currentTime}&_t=${Date.now()}`;
+    overlayImg.style.display = 'block';
+    if (vectorCanvas) vectorCanvas.style.display = 'none';
+    if (elZoneLegend) elZoneLegend.style.display = 'none';
+  } else if (activeViewportMode === 'volumetric') {
+    overlayImg.style.display = 'none';
+    if (elZoneLegend) elZoneLegend.style.display = 'none';
+    if (vectorCanvas) {
+      vectorCanvas.style.display = 'block';
+      drawVolumetricLight(currentEvaluateData?.craft?.lighting);
+    }
+  } else if (activeViewportMode === 'gaze') {
+    overlayImg.style.display = 'none';
+    if (elZoneLegend) elZoneLegend.style.display = 'none';
+    if (vectorCanvas) {
+      vectorCanvas.style.display = 'block';
+      drawEyelineAndGaze(currentEvaluateData?.craft?.staging);
+    }
+  }
+}
+
+function drawVolumetricLight(lighting) {
+  if (!vectorCanvas || !vectorCtx) return;
+  const rect = vectorCanvas.getBoundingClientRect();
+  vectorCanvas.width = rect.width;
+  vectorCanvas.height = rect.height;
+  const w = vectorCanvas.width;
+  const h = vectorCanvas.height;
+
+  vectorCtx.clearRect(0, 0, w, h);
+
+  const azimuth = lighting && lighting.key_azimuth_deg != null ? lighting.key_azimuth_deg : 45;
+  const elevation = lighting && lighting.key_elevation_deg != null ? lighting.key_elevation_deg : 35;
+  const ratio = lighting && lighting.key_to_fill_ratio != null ? lighting.key_to_fill_ratio : 3.8;
+  const catchlight = lighting && lighting.catchlight_intensity != null ? lighting.catchlight_intensity : 75;
+
+  // 3D Light Compass in the top-right
+  const cx = Math.max(120, w - 120);
+  const cy = 110;
+  const radius = 55;
+
+  // Background Dial
+  vectorCtx.beginPath();
+  vectorCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+  vectorCtx.fillStyle = 'rgba(10, 12, 16, 0.85)';
+  vectorCtx.fill();
+  vectorCtx.lineWidth = 2;
+  vectorCtx.strokeStyle = '#252d3d';
+  vectorCtx.stroke();
+
+  // Crosshairs
+  vectorCtx.strokeStyle = 'rgba(139, 148, 158, 0.3)';
+  vectorCtx.lineWidth = 1;
+  vectorCtx.beginPath();
+  vectorCtx.moveTo(cx - radius, cy);
+  vectorCtx.lineTo(cx + radius, cy);
+  vectorCtx.moveTo(cx, cy - radius);
+  vectorCtx.lineTo(cx, cy + radius);
+  vectorCtx.stroke();
+
+  // Subject Head Silhouette icon at center
+  vectorCtx.fillStyle = '#8b949e';
+  vectorCtx.beginPath();
+  vectorCtx.arc(cx, cy - 6, 8, 0, Math.PI * 2);
+  vectorCtx.fill();
+  vectorCtx.beginPath();
+  vectorCtx.arc(cx, cy + 12, 14, Math.PI, 0);
+  vectorCtx.fill();
+
+  // Key Light Ray Vector
+  const angleRad = ((azimuth - 90) * Math.PI) / 180;
+  const lightX = cx + Math.cos(angleRad) * (radius - 8);
+  const lightY = cy + Math.sin(angleRad) * (radius - 8);
+
+  // Volumetric Light Beam
+  const grad = vectorCtx.createRadialGradient(lightX, lightY, 4, cx, cy, radius);
+  grad.addColorStop(0, 'rgba(229, 169, 59, 0.85)');
+  grad.addColorStop(1, 'rgba(229, 169, 59, 0.08)');
+
+  vectorCtx.beginPath();
+  vectorCtx.moveTo(lightX, lightY);
+  vectorCtx.lineTo(cx - 10, cy);
+  vectorCtx.lineTo(cx + 10, cy);
+  vectorCtx.closePath();
+  vectorCtx.fillStyle = grad;
+  vectorCtx.fill();
+
+  // Source Bulb Indicator
+  vectorCtx.beginPath();
+  vectorCtx.arc(lightX, lightY, 6, 0, Math.PI * 2);
+  vectorCtx.fillStyle = '#e5a93b';
+  vectorCtx.fill();
+  vectorCtx.strokeStyle = '#ffffff';
+  vectorCtx.lineWidth = 2;
+  vectorCtx.stroke();
+
+  // Readouts badge below dial
+  vectorCtx.fillStyle = 'rgba(10, 12, 16, 0.90)';
+  vectorCtx.fillRect(cx - 85, cy + radius + 10, 170, 52);
+  vectorCtx.strokeStyle = '#252d3d';
+  vectorCtx.strokeRect(cx - 85, cy + radius + 10, 170, 52);
+
+  vectorCtx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto';
+  vectorCtx.fillStyle = '#e5a93b';
+  vectorCtx.textAlign = 'center';
+  vectorCtx.fillText(`KEY: ${azimuth > 0 ? '+' : ''}${azimuth.toFixed(0)}° Az | ${elevation.toFixed(0)}° El`, cx, cy + radius + 28);
+  vectorCtx.fillStyle = '#00d2ff';
+  vectorCtx.fillText(`Key:Fill: ${ratio.toFixed(1)}:1  •  Catch: ${catchlight.toFixed(0)}%`, cx, cy + radius + 46);
+}
+
+function drawEyelineAndGaze(staging) {
+  if (!vectorCanvas || !vectorCtx) return;
+  const rect = vectorCanvas.getBoundingClientRect();
+  vectorCanvas.width = rect.width;
+  vectorCanvas.height = rect.height;
+  const w = vectorCanvas.width;
+  const h = vectorCanvas.height;
+
+  vectorCtx.clearRect(0, 0, w, h);
+
+  const gazeX = staging && staging.gaze_vector_x != null ? staging.gaze_vector_x : 0.65;
+  const gazeY = staging && staging.gaze_vector_y != null ? staging.gaze_vector_y : -0.10;
+  const lookingRoom = staging && staging.looking_room_score != null ? staging.looking_room_score : 85;
+  const poise = staging && staging.gaze_poise_score != null ? staging.gaze_poise_score : 88;
+
+  // 1. Rule-of-Thirds Grid
+  vectorCtx.strokeStyle = 'rgba(229, 169, 59, 0.28)';
+  vectorCtx.lineWidth = 1;
+  vectorCtx.setLineDash([6, 6]);
+
+  const yThird1 = h * 0.3333;
+  const yThird2 = h * 0.6667;
+  vectorCtx.beginPath();
+  vectorCtx.moveTo(0, yThird1);
+  vectorCtx.lineTo(w, yThird1);
+  vectorCtx.moveTo(0, yThird2);
+  vectorCtx.lineTo(w, yThird2);
+
+  const xThird1 = w * 0.3333;
+  const xThird2 = w * 0.6667;
+  vectorCtx.moveTo(xThird1, 0);
+  vectorCtx.lineTo(xThird1, h);
+  vectorCtx.moveTo(xThird2, 0);
+  vectorCtx.lineTo(xThird2, h);
+  vectorCtx.stroke();
+  vectorCtx.setLineDash([]);
+
+  // Eyeline tag
+  vectorCtx.font = '10px "SF Mono", "Fira Code", monospace';
+  vectorCtx.fillStyle = '#e5a93b';
+  vectorCtx.textAlign = 'left';
+  vectorCtx.fillText('EYELINE (RULE OF THIRDS)', 14, yThird1 - 6);
+
+  // 2. Subject Centroid and Reticle
+  const subjNormX = gazeX > 0 ? 0.38 : 0.62;
+  const subjNormY = 0.3333;
+  const subPxX = w * subjNormX;
+  const subPxY = h * subjNormY;
+
+  const boxW = 80;
+  const boxH = 95;
+  vectorCtx.strokeStyle = '#00d2ff';
+  vectorCtx.lineWidth = 1.5;
+  vectorCtx.strokeRect(subPxX - boxW / 2, subPxY - boxH / 2, boxW, boxH);
+
+  // Reticle corners
+  vectorCtx.fillStyle = '#00d2ff';
+  const cLen = 8;
+  vectorCtx.fillRect(subPxX - boxW / 2 - 2, subPxY - boxH / 2 - 2, cLen, 2);
+  vectorCtx.fillRect(subPxX - boxW / 2 - 2, subPxY - boxH / 2 - 2, 2, cLen);
+  vectorCtx.fillRect(subPxX + boxW / 2 - cLen + 2, subPxY - boxH / 2 - 2, cLen, 2);
+  vectorCtx.fillRect(subPxX + boxW / 2, subPxY - boxH / 2 - 2, 2, cLen);
+  vectorCtx.fillRect(subPxX - boxW / 2 - 2, subPxY + boxH / 2, cLen, 2);
+  vectorCtx.fillRect(subPxX - boxW / 2 - 2, subPxY + boxH / 2 - cLen + 2, 2, cLen);
+  vectorCtx.fillRect(subPxX + boxW / 2 - cLen + 2, subPxY + boxH / 2, cLen, 2);
+  vectorCtx.fillRect(subPxX + boxW / 2, subPxY + boxH / 2 - cLen + 2, 2, cLen);
+
+  // 3. Directional Gaze Arrow
+  const arrowLen = 140;
+  const arrowEndX = subPxX + gazeX * arrowLen;
+  const arrowEndY = subPxY + gazeY * arrowLen;
+
+  vectorCtx.strokeStyle = '#00ff66';
+  vectorCtx.lineWidth = 2.5;
+  vectorCtx.beginPath();
+  vectorCtx.moveTo(subPxX, subPxY);
+  vectorCtx.lineTo(arrowEndX, arrowEndY);
+  vectorCtx.stroke();
+
+  // Arrowhead
+  const headAngle = Math.atan2(arrowEndY - subPxY, arrowEndX - subPxX);
+  const headLen = 12;
+  vectorCtx.beginPath();
+  vectorCtx.moveTo(arrowEndX, arrowEndY);
+  vectorCtx.lineTo(
+    arrowEndX - headLen * Math.cos(headAngle - Math.PI / 6),
+    arrowEndY - headLen * Math.sin(headAngle - Math.PI / 6)
+  );
+  vectorCtx.moveTo(arrowEndX, arrowEndY);
+  vectorCtx.lineTo(
+    arrowEndX - headLen * Math.cos(headAngle + Math.PI / 6),
+    arrowEndY - headLen * Math.sin(headAngle + Math.PI / 6)
+  );
+  vectorCtx.stroke();
+
+  // 4. Staging HUD Card
+  vectorCtx.fillStyle = 'rgba(10, 12, 16, 0.90)';
+  vectorCtx.fillRect(16, h - 70, 240, 50);
+  vectorCtx.strokeStyle = '#252d3d';
+  vectorCtx.lineWidth = 1;
+  vectorCtx.strokeRect(16, h - 70, 240, 50);
+
+  vectorCtx.font = 'bold 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto';
+  vectorCtx.fillStyle = '#00ff66';
+  vectorCtx.textAlign = 'left';
+  vectorCtx.fillText(`GAZE POISE SCORE: ${poise.toFixed(0)} / 100`, 28, h - 48);
+  vectorCtx.fillStyle = '#8b949e';
+  vectorCtx.font = '10px "SF Mono", "Fira Code", monospace';
+  vectorCtx.fillText(`Looking Room: ${lookingRoom.toFixed(0)}%  •  Lead: Screen ${gazeX > 0 ? 'Right' : 'Left'}`, 28, h - 30);
+}
+
+// ============================================================================
+// Stage 1: In-App Showreel Assembly & Interactive Trim Handles
+// ============================================================================
+let currentInTime = 14.0;
+let currentOutTime = 18.5;
+let currentTakes = [];
+let activeTakeIndex = 0;
+
+const inHandle = document.getElementById('in-handle');
+const outHandle = document.getElementById('out-handle');
+const windowHighlight = document.getElementById('window-highlight');
+const tcWindowInfo = document.getElementById('tc-window-info');
+const tcCurrent = document.getElementById('tc-current');
+const tcTotal = document.getElementById('tc-total');
+const track = document.getElementById('timeline-track');
+const playhead = document.getElementById('playhead');
+
+function updateTimelineUI() {
+  if (!track) return;
+  const inRatio = Math.max(0, Math.min(1, currentInTime / videoDuration));
+  const outRatio = Math.max(0, Math.min(1, currentOutTime / videoDuration));
+  const playheadRatio = Math.max(0, Math.min(1, currentTime / videoDuration));
+
+  if (inHandle) inHandle.style.left = `${inRatio * 100}%`;
+  if (outHandle) outHandle.style.left = `${outRatio * 100}%`;
+  if (windowHighlight) {
+    windowHighlight.style.left = `${inRatio * 100}%`;
+    windowHighlight.style.width = `${Math.max(0, outRatio - inRatio) * 100}%`;
+  }
+  if (playhead) {
+    playhead.style.left = `${playheadRatio * 100}%`;
+  }
+
+  if (tcWindowInfo) {
+    const dur = (currentOutTime - currentInTime).toFixed(1);
+    tcWindowInfo.textContent = `Window: ${dur}s [In: ${formatTimecode(currentInTime)} | Out: ${formatTimecode(currentOutTime)}]`;
+  }
+  if (tcCurrent) tcCurrent.textContent = formatTimecode(currentTime);
+  if (tcTotal) tcTotal.textContent = formatTimecode(videoDuration);
+}
+
+// Scrubber drag
+if (track && playhead) {
+  let isDraggingScrub = false;
+  const updateScrub = (e) => {
+    const rect = track.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const newTime = ratio * videoDuration;
+    currentTime = newTime;
+    updateTimelineUI();
+    fetchFrameData(newTime);
+  };
+
+  track.addEventListener('mousedown', (e) => {
+    // Only drag playhead if not clicking handle
+    if (e.target === inHandle || e.target === outHandle) return;
+    isDraggingScrub = true;
+    updateScrub(e);
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (isDraggingScrub) updateScrub(e);
+  });
+
+  window.addEventListener('mouseup', () => {
+    isDraggingScrub = false;
+  });
+}
+
+// In-Handle Dragging
+if (inHandle && track) {
+  let isDraggingIn = false;
+  inHandle.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+    isDraggingIn = true;
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (isDraggingIn) {
+      const rect = track.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const newIn = Math.min(ratio * videoDuration, currentOutTime - 0.5);
+      currentInTime = Math.max(0, newIn);
+      updateTimelineUI();
+    }
+  });
+
+  window.addEventListener('mouseup', () => {
+    isDraggingIn = false;
+  });
+}
+
+// Out-Handle Dragging
+if (outHandle && track) {
+  let isDraggingOut = false;
+  outHandle.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+    isDraggingOut = true;
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (isDraggingOut) {
+      const rect = track.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const newOut = Math.max(currentInTime + 0.5, ratio * videoDuration);
+      currentOutTime = Math.min(videoDuration, newOut);
+      updateTimelineUI();
+    }
+  });
+
+  window.addEventListener('mouseup', () => {
+    isDraggingOut = false;
+  });
+}
+
+// Populate candidate selects list from backend API
+async function loadSelects() {
+  const takesList = document.getElementById('takes-list');
+  const countBadge = document.getElementById('take-count-badge');
+  if (!takesList) return;
+
+  try {
+    const res = await fetch('/api/selects');
+    if (!res.ok) return;
+    const data = await res.json();
+    currentTakes = data.takes || [];
+    if (data.duration) videoDuration = data.duration;
+
+    if (countBadge) countBadge.textContent = `${currentTakes.length} Takes`;
+    takesList.innerHTML = '';
+
+    if (currentTakes.length === 0) {
+      takesList.innerHTML = '<div class="empty-state">No takes found. Open a media file to evaluate.</div>';
+      return;
+    }
+
+    currentTakes.forEach((t, i) => {
+      const item = document.createElement('div');
+      item.className = `take-item ${i === activeTakeIndex ? 'active' : ''}`;
+
+      const score = Math.round(t.scores?.overall || 90);
+      const startTc = formatTimecode(t.start_sec);
+      const endTc = formatTimecode(t.end_sec);
+      const dur = (t.duration_sec || (t.end_sec - t.start_sec)).toFixed(1);
+      const match = t.style?.cinematographer_match || 'Golden Baseline Cinema';
+
+      let decisionClass = 'decision-candidate';
+      let decisionText = 'Candidate';
+      if (t.recommendation === 'Hero Select' || i === 0) {
+        decisionClass = 'decision-hero';
+        decisionText = 'Hero Select';
+      } else if (t.recommendation && t.recommendation.includes('Defect')) {
+        decisionClass = 'decision-defect';
+        decisionText = 'Defect Alert';
+      }
+
+      item.innerHTML = `
+        <div class="take-title-row">
+          <span class="take-name">${t.take_id || `Take ${String(i + 1).padStart(2, '0')}`}</span>
+          <span class="take-score">${score}</span>
+        </div>
+        <div class="take-details">${startTc} – ${endTc} (${dur}s)</div>
+        <div class="take-style-tag">${match}</div>
+        <span class="take-decision-badge ${decisionClass}">${decisionText}</span>
+      `;
+
+      item.addEventListener('click', () => {
+        document.querySelectorAll('.take-item').forEach(el => el.classList.remove('active'));
+        item.classList.add('active');
+        activeTakeIndex = i;
+        currentInTime = t.start_sec;
+        currentOutTime = t.end_sec;
+        const heroTime = t.hero_timestamp_sec != null ? t.hero_timestamp_sec : (t.start_sec + (t.end_sec - t.start_sec) / 2);
+        currentTime = heroTime;
+        updateTimelineUI();
+        fetchFrameData(heroTime);
+      });
+
+      takesList.appendChild(item);
+    });
+
+    if (currentTakes.length > 0 && activeTakeIndex < currentTakes.length) {
+      const first = currentTakes[activeTakeIndex];
+      currentInTime = first.start_sec;
+      currentOutTime = first.end_sec;
+      currentTime = first.hero_timestamp_sec != null ? first.hero_timestamp_sec : 16.0;
+      updateTimelineUI();
+    }
+  } catch (err) {
+    console.warn('Failed to load selects:', err);
+  }
+}
+
+// Media Ingestion Flow
 const btnOpen = document.getElementById('btn-open-file');
 if (btnOpen) {
   btnOpen.addEventListener('click', async () => {
@@ -413,14 +862,24 @@ if (btnOpen) {
       if (!browseData.success || !browseData.path) return;
 
       const filePath = browseData.path;
-      const res = await fetch(`/api/open_media?path=${encodeURIComponent(filePath)}`);
+      const takesList = document.getElementById('takes-list');
+      if (takesList) {
+        takesList.innerHTML = '<div class="empty-state">Analyzing video stream & computing cinematographic matrix...</div>';
+      }
+
+      const res = await fetch(`/api/analyze?path=${encodeURIComponent(filePath)}`);
       const data = await res.json();
-      if (data.success && data.media) {
-        videoDuration = data.media.duration_sec || 60.0;
-        alert(`Loaded: ${data.media.file_path}\nCodec: ${data.media.codec}\nDuration: ${videoDuration.toFixed(1)}s (${data.media.width}x${data.media.height})`);
-        fetchFrameData(currentTime);
+      if (data.success) {
+        await loadSelects();
       } else {
-        alert(`Failed to load media: ${data.error || 'Unknown error'}`);
+        const openRes = await fetch(`/api/open_media?path=${encodeURIComponent(filePath)}`);
+        const openData = await openRes.json();
+        if (openData.success && openData.media) {
+          videoDuration = openData.media.duration_sec || 60.0;
+          await loadSelects();
+        } else {
+          alert(`Failed to load media: ${data.error || openData.error || 'Unknown error'}`);
+        }
       }
     } catch (err) {
       alert(`Error opening media: ${err}`);
@@ -438,7 +897,7 @@ if (btnBaseline) {
       const browseData = await browseRes.json();
       if (!browseData.success || !browseData.path) return;
 
-      alert(`Selected for Baseline Ingestion: ${browseData.path}\nReady for baseline calibration.`);
+      alert(`Selected for Baseline Ingestion: ${browseData.path}\nBaseline corpus will index reference craft profiles.`);
     } catch (err) {
       alert(`Error browsing baseline media: ${err}`);
     }
@@ -497,68 +956,7 @@ if (btnWeb) {
   });
 }
 
-// Wire Timeline Scrubbing
-const track = document.getElementById('timeline-track');
-const playhead = document.getElementById('playhead');
-if (track && playhead) {
-  let isDragging = false;
-  const updateScrub = (e) => {
-    const rect = track.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    playhead.style.left = `${ratio * 100}%`;
-    const newTime = ratio * videoDuration;
-    fetchFrameData(newTime);
-  };
-
-  track.addEventListener('mousedown', (e) => {
-    isDragging = true;
-    updateScrub(e);
-  });
-
-  window.addEventListener('mousemove', (e) => {
-    if (isDragging) updateScrub(e);
-  });
-
-  window.addEventListener('mouseup', () => {
-    isDragging = false;
-  });
-}
-
-// Populate initial candidate selects list
-function populateSelects() {
-  const takesList = document.getElementById('takes-list');
-  const countBadge = document.getElementById('take-count-badge');
-  if (!takesList) return;
-
-  const demoTakes = [
-    { id: 'Take 01', range: '00:00:14:05 – 00:00:18:17', dur: '4.5s', score: '92.4', style: 'Roger Deakins [Skyfall]' },
-    { id: 'Take 02', range: '00:00:32:00 – 00:00:35:20', dur: '3.8s', score: '88.7', style: 'Greig Fraser [Dune]' }
-  ];
-
-  if (countBadge) countBadge.textContent = `${demoTakes.length} Takes`;
-  takesList.innerHTML = '';
-
-  demoTakes.forEach((t, i) => {
-    const item = document.createElement('div');
-    item.className = `take-item ${i === 0 ? 'active' : ''}`;
-    item.innerHTML = `
-      <div class="take-title-row">
-        <span class="take-name">${t.id}</span>
-        <span class="take-score">${t.score}</span>
-      </div>
-      <div class="take-details">${t.range} (${t.dur})</div>
-      <div class="take-style-tag">${t.style}</div>
-    `;
-    item.addEventListener('click', () => {
-      document.querySelectorAll('.take-item').forEach(el => el.classList.remove('active'));
-      item.classList.add('active');
-      fetchFrameData(i === 0 ? 16.0 : 33.5);
-    });
-    takesList.appendChild(item);
-  });
-}
-
-// Initial initialization
-populateSelects();
+// Initialize workspace
+loadSelects();
 fetchFrameData(currentTime);
-console.log('AESTHETIC Scopes & Evaluation Matrix active.');
+console.log('AESTHETIC Stage 1 & Stage 2 Engine Active.');

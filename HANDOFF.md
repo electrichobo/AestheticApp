@@ -7,18 +7,18 @@
 
 ---
 
-## Current Status: M9 (EL Zone Exposure & Pretrained Baseline Integration)
+## Current Status: M10 (Stage 1 Showreel Assembly & Stage 2 Forensic Overlays)
 - Ed Lachman, ASC EL Zone System: 10-stop calibrated false color engine (18% Middle Gray Zone V = 0 EV).
 - Pretrained Shipped Baseline: 174 calibrated reference shots across 58 Master Cinematographers active out-of-the-box.
-- Brand Assets & In-App UI: Wide header branding and viewport diagnostic toolbar for forensic overlays.
-- 22/22 tests passing, zero clippy warnings, rustfmt compliant.
+- Stage 1 Showreel Selects Assembly: Dynamic candidates bin, interactive In/Out timeline handle trimming, one-click export (EDL, FCPXML, CSV, contact sheet).
+- Stage 2 Forensic Overlays: Real-time toggling between Picture, EL Zone false color heatmap, Focus Peaking, 3D Volumetric Light compass, and Eyeline & Gaze poise HUD.
+- 22/22 tests passing, zero clippy warnings, verified on local loopback server.
 
 ---
 
-## Next Immediate Step (In-App Showreel Assembly & Forensic Overlays)
-1. **Frontend Interactivity & Styling**: Complete Stage 1 showreel assembly (candidate scrubbing & handle trimming) and Stage 2 forensic overlays (EL Zone, focus peaking, 3D light vector compass, eyeline/gaze grid) in `app.css` & `app.js`.
-2. **End-to-End Verification**: Verify `/api/frame_el_zone`, `/api/frame_peaking`, and `/api/selects` headless UI endpoints.
-3. **Packaging Hold**: Hold release packaging until full functional verification is approved.
+## Next Immediate Step (User Verification & Release Readiness)
+1. **Interactive Review**: Review candidate takes, EL Zone false color heatmaps, and 3D light vector HUD in UI.
+2. **Release Preparation (On User Approval)**: When user is fully satisfied with feature behavior, proceed with standalone distribution packaging.
 
 ---
 

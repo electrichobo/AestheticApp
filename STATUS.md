@@ -1,9 +1,9 @@
 # AESTHETIC — Development Status
 
-## Current Milestone: M9 — EL Zone Exposure System & Pretrained Baseline
+## Current Milestone: M10 — Stage 1 Showreel Assembly & Stage 2 Forensic Overlays
 - **Phase**: Ground-Up Rebuild in Rust
 - **Target**: Windows x64 (primary), Linux, macOS
-- **Active Focus**: Ed Lachman, ASC EL Zone false color system, pretrained 58 Master Cinematographer baseline corpus, Stage 1 Showreel Selects Assembly, Stage 2 Forensic Overlays.
+- **Active Focus**: Ed Lachman, ASC EL Zone system, pretrained 58 Master Cinematographers baseline, interactive candidates bin & timeline handle trimming (Stage 1), real-time forensic overlays (EL Zone, peaking, 3D light vectors, eyeline poise) (Stage 2).
 
 ---
 
@@ -21,6 +21,26 @@
 | **M7: Advanced Cinematographic Intelligence** | Depth-Conditioned Z-Plane Focus (Bokeh MTF), Volumetric Key-Fill & Catchlight Geometry, Split-Toning in ACES/Linear Space, Gaze-Anchored Cinematic Poise, Style-Family Manifold Geodesics | ✅ Done | Subject/bokeh MTF, catchlights, gaze vectors, looking room, ACES split-toning & 6 style clusters |
 | **M8: Scoring Matrix & DP Comparison UI** | Side-by-Side Master DP Diagnostic Table, Empirical Improvement Action Cards, Port Binding Configuration, Craft Benchmark Integration | ✅ Done | Desktop UI diagnostic table, dynamic improvement recommendations & 4K craft benchmarks |
 | **M9: EL Zone & Pretrained Baseline** | Ed Lachman, ASC EL Zone 10-stop calibrated false color, 174 pretrained master shots across 58 films, Stage 1/2 UI groundwork | ✅ Done | Industry standard stop false color and out-of-the-box pre-trained baseline corpus |
+| **M10: Showreel Assembly & Forensic Overlays** | Stage 1 candidate selects bin, interactive In/Out handle trimming, Stage 2 real-time diagnostic viewport modes (EL Zone, Peaking, 3D Light, Eyeline/Gaze) | ✅ Done | Dynamic showreel assembly & forensic camera intelligence active in UI |
+
+---
+
+## Completed in M10
+- **Stage 1: In-App Showreel Assembly** (`crates/aesthetic-ui/ui/app.css`, `ui/app.js`):
+  - Dynamic candidate selects bin populated from `/api/selects` with hero select tags, candidate badges, defect alerts, and matched Master DP style signatures.
+  - Interactive scrubbing: clicking any candidate take immediately scrubs timeline to hero timestamp and snaps In/Out markers to optimal window bounds.
+  - Drag-and-trim In/Out timeline handles (`#in-handle`, `#out-handle`) with real-time SMPTE timecode window readout and duration tracking.
+  - Media ingest flow: file browser triggering background `/api/analyze` video intelligence pass.
+  - One-click export packaging for CMX 3600 EDL, FCPXML, CSV selects, and HTML contact sheets.
+- **Stage 2: Real-Time Forensic Overlays & EL Zone** (`crates/aesthetic-ui/ui/app.css`, `ui/app.js`):
+  - Five-state viewport diagnostic mode selector: `Picture`, `EL Zone`, `Peaking`, `3D Light`, `Eyeline & Gaze`.
+  - Ed Lachman, ASC EL Zone false color heatmap overlaid directly on video player with 11-chip photographic stops legend bar docked at viewport bottom.
+  - Depth-conditioned focus peaking overlay highlighting sharp in-focus planes.
+  - Dynamic 3D Volumetric Light compass: renders key-light azimuth angle ray, elevation arc, key-to-fill ratio badge, and specular catchlight reflection index.
+  - Dynamic Eyeline & Directional Gaze HUD: renders rule-of-thirds golden composition grid, subject eye anchor reticle, directional gaze arrow vector, and looking room poise score.
+- **Verification**:
+  - 22/22 tests passing across workspace, zero clippy warnings, rustfmt compliant.
+  - Verified `/`, `/logo_wide.png`, `/api/selects`, `/api/frame_el_zone`, `/api/frame_peaking`, and `/api/evaluate` endpoints returning 200 OK.
 
 ---
 
