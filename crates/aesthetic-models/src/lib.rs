@@ -20,7 +20,7 @@ pub mod window;
 
 pub use awards::{find_award_match, AwardRecord, CINEMATOGRAPHY_AWARDS_REGISTRY};
 pub use baseline::{
-    BaselineCorpusManifest, CinematographerSignature, IngestedReferenceFilm, MasterMatchResult,
+    BaselineCorpusManifest, BaselineMetricComparison, CinematographerSignature, IngestedReferenceFilm, MasterMatchResult,
     MetricQuantiles, ReferenceShot,
 };
 pub use forensics::{DiagnosticFlag, DiagnosticSeverity, ForensicDiagnostics};

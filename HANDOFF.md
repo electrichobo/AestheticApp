@@ -7,22 +7,22 @@
 
 ---
 
-## Current Status: M11 (Motion Dynamics & Deduplicated Server Ingest)
-- Cinematography Awards Registry: 184 Oscar, ASC, and BSC award-winning & landmark titles (1995–2025+) with fuzzy normalization matcher.
-- Motion Dynamics Recorded: True multi-threaded block matching optical flow (`motion_optical_flow`, `camera_motion_ratio`) stored on all baseline reference setups.
-- Deduplication & Force Controls: Automatic skip of already-ingested films in both CLI (`--force`) and Desktop UI modal (`#server-ingest-force` checkbox).
-- 24/24 tests passing, zero clippy warnings, rustfmt compliant.
+## Current Status: M12 (Desktop UI, High-DPI Scopes & Golden Baseline Overhaul)
+- **Golden Baseline Benchmark Thesis**: Primary evaluation compares candidate shots against the **184 Award-Winning Cinema Golden Baseline** (Oscar, ASC & BSC distribution quantiles, `n=176`). DP match is strictly a secondary ancillary tag.
+- **High-DPI Continuous Phosphor Scopes**: 760x428 broadcast scopes sample active viewport pixels at 1:1 resolution with vertical scanline phosphor trace connection for smooth, non-pixelated waveform, RGB parade, vectorscope, spline histograms, and CIE 1931.
+- **Calibrated Exposure Physics & Credits Filtering**: Scene-referred BT.1886 + EL-Zone dynamic range stops, spatial high-frequency luma/chroma SNR (`compute_spatial_snr`), and automatic `NON_PHOTOGRAPHIC_OR_CREDITS` filtering so black leader/end credits never outrank real cinematography.
+- **Complete 58-Metric Contact Sheet & PNG Sidecars**: Both in-app and exported HTML/JSON sidecars include all 58 metrics across all 5 evaluation layers plus lossless `<take_id>.png` hero stills (`hero_frame_png`) and embedded contact-sheet PNGs.
+- **Quality**: All 25 workspace tests passing, zero clippy warnings (`-D warnings`).
 
 ---
 
-## Next Immediate Step (Corpus Expansion & Full Server Ingestion)
-1. **Full/Batch Ingestion**: Run `aesthetic-cli ingest-server M:\movies --limit 55 --shots 5` (or desired subset) to expand Golden Baseline with all matched films.
-2. **Interactive UI Review**: Launch desktop UI (`aesthetic-ui`) to test live candidate evaluation against the real cinema corpus.
+## Next Immediate Step
+1. **Interactive Verification**: Launch `target\release\aesthetic-ui.exe` to inspect real media evaluation, popouts, and export workflows.
+2. **Commit & Push**: Await user command to commit and push M12 UI deliverables.
 
 ---
 
 ## Safety & Invariants
-- Live production machine: never install software/services/Docker; no system changes.
-- Never add a crate without explicit user approval.
+- Live production machine: zero system alterations; no unapproved crates.
 - Keep `HANDOFF.md` under 50 lines; `AGENTS.md` under 12,000 characters.
-- Commit/push only when requested by the user.
+- Commit/push only when requested by user.

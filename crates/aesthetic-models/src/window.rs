@@ -1,6 +1,8 @@
 //! Window, Take, and 4-Output Shot Analysis Structures
 
+use crate::baseline::BaselineMetricComparison;
 use crate::forensics::DiagnosticFlag;
+use crate::inferred::ModelInferredCraft;
 use crate::physics::ObjectivePhysics;
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +17,10 @@ pub struct PillarScores {
     pub creative: f32,
     /// Sustained temporal stability and window quality (0.0 - 100.0)
     pub temporal: f32,
+    /// True only when `temporal` was actually measured from motion between frames.
+    /// When false, `temporal` is not a measurement and is excluded from `overall`.
+    #[serde(default)]
+    pub temporal_measured: bool,
 }
 
 /// Automatically discovered style and visual classification.
@@ -56,4 +62,12 @@ pub struct ShotTake {
 
     // Output 4: Non-Punitive Technical Concerns / Diagnostic Flags
     pub concerns: Vec<DiagnosticFlag>,
+
+    /// Model-inferred craft layer (lighting geometry, focus, staging, motion) when computed.
+    #[serde(default)]
+    pub craft: Option<ModelInferredCraft>,
+
+    /// Measured metrics placed within the measured award-cinema Golden Baseline distribution.
+    #[serde(default)]
+    pub golden_baseline: Vec<BaselineMetricComparison>,
 }

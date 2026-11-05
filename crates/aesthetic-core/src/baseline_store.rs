@@ -10,9 +10,10 @@ use crate::video::{extract_frame_rgb, extract_frames_burst, probe_video_metadata
 use aesthetic_metrics::compute_objective_physics;
 use aesthetic_metrics::matte::detect_active_picture;
 use aesthetic_models::baseline::{
-    BaselineCorpusManifest, CinematographerSignature, IngestedReferenceFilm, MasterMatchResult,
-    MetricQuantiles, ReferenceShot,
+    BaselineCorpusManifest, BaselineMetricComparison, CinematographerSignature,
+    IngestedReferenceFilm, MasterMatchResult, MetricQuantiles, ReferenceShot,
 };
+use aesthetic_models::physics::ObjectivePhysics;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
@@ -1057,14 +1058,35 @@ impl BaselineStore {
             return None;
         }
 
+        let cand_mean: f32 =
+            candidate_embedding.iter().sum::<f32>() / (candidate_embedding.len() as f32);
+
         let best = self
             .master_signatures
             .iter()
             .map(|sig| {
-                let visual_sim = cosine_similarity(candidate_embedding, &sig.centroid_embedding);
+                let sig_mean: f32 = sig.centroid_embedding.iter().sum::<f32>()
+                    / (sig.centroid_embedding.len().max(1) as f32);
+                let mut dot = 0.0f32;
+                let mut na = 0.0f32;
+                let mut nb = 0.0f32;
+                for (a, b) in candidate_embedding.iter().zip(sig.centroid_embedding.iter()) {
+                    let da = *a - cand_mean;
+                    let db = *b - sig_mean;
+                    dot += da * db;
+                    na += da * da;
+                    nb += db * db;
+                }
+                let centered_sim = if na > 1e-6 && nb > 1e-6 {
+                    (((dot / (na.sqrt() * nb.sqrt())).clamp(-1.0, 1.0) + 1.0) * 50.0)
+                        .clamp(0.0, 100.0)
+                } else {
+                    cosine_similarity(candidate_embedding, &sig.centroid_embedding)
+                };
+
                 let kf_diff = (candidate_key_fill - sig.average_key_fill).abs();
-                let kf_bonus = if kf_diff < 1.0 { 5.0 } else { 0.0 };
-                let combined_sim = (visual_sim + kf_bonus).min(100.0);
+                let kf_score = (1.0 - (kf_diff / 4.0).min(1.0)) * 100.0;
+                let combined_sim = (centered_sim * 0.55 + kf_score * 0.45).clamp(0.0, 100.0);
                 (sig, combined_sim)
             })
             .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))?;
@@ -1628,6 +1650,183 @@ impl BaselineStore {
             reference_shots,
             master_signatures,
         })
+    }
+
+    // ------------------------------------------------------------------
+    // Measured Golden Baseline (award cinema actually decoded & measured)
+    // ------------------------------------------------------------------
+
+    /// Reference shots that were actually decoded and measured from award films
+    /// (excludes hand-authored `REF_` seed priors).
+    pub fn measured_shots(&self) -> Vec<&ReferenceShot> {
+        self.reference_shots
+            .iter()
+            .filter(|s| s.is_measured())
+            .collect()
+    }
+
+    /// Number of distinct award films contributing measured reference shots.
+    pub fn measured_film_count(&self) -> usize {
+        let mut titles: Vec<&str> = self
+            .measured_shots()
+            .iter()
+            .map(|s| s.film_title.as_str())
+            .collect();
+        titles.sort_unstable();
+        titles.dedup();
+        titles.len()
+    }
+
+    /// Scoring quantiles for (dynamic range, highlight roll-off, sharpness).
+    ///
+    /// Uses the measured award-cinema distribution once it holds at least
+    /// [`MIN_MEASURED_SHOTS_FOR_CALIBRATION`] shots; otherwise falls back to the
+    /// manifest's seeded priors. The returned flag is `true` when measured.
+    pub fn scoring_quantiles(&self) -> (MetricQuantiles, MetricQuantiles, MetricQuantiles, bool) {
+        let measured = self.measured_shots();
+        if measured.len() >= MIN_MEASURED_SHOTS_FOR_CALIBRATION {
+            let mut dr: Vec<f32> = measured.iter().map(|s| s.dynamic_range_stops).collect();
+            let mut ro: Vec<f32> = measured.iter().map(|s| s.highlight_rolloff).collect();
+            let mut sh: Vec<f32> = measured.iter().map(|s| s.sharpness_laplacian).collect();
+            (
+                compute_quantiles(&mut dr),
+                compute_quantiles(&mut ro),
+                compute_quantiles(&mut sh),
+                true,
+            )
+        } else {
+            (
+                self.manifest.dynamic_range_quantiles.clone(),
+                self.manifest.highlight_rolloff_quantiles.clone(),
+                self.manifest.sharpness_quantiles.clone(),
+                false,
+            )
+        }
+    }
+
+    /// Places a candidate shot's measured metrics inside the award-cinema
+    /// Golden Baseline distribution. Uses measured shots once at least
+    /// [`MIN_MEASURED_SHOTS_FOR_CALIBRATION`] exist, otherwise the full
+    /// calibrated reference corpus.
+    pub fn compare_to_golden_baseline(
+        &self,
+        physics: &ObjectivePhysics,
+        key_fill_ratio: Option<f32>,
+    ) -> Vec<BaselineMetricComparison> {
+        let measured = self.measured_shots();
+        let corpus: Vec<&ReferenceShot> = if measured.len() >= MIN_MEASURED_SHOTS_FOR_CALIBRATION {
+            measured
+        } else {
+            self.reference_shots.iter().collect()
+        };
+        if corpus.is_empty() {
+            return Vec::new();
+        }
+
+        let mut rows = Vec::new();
+        let mut push = |key: &str, metric: &str, unit: &str, value: f32, refs: Vec<f32>| {
+            if refs.is_empty() || !value.is_finite() {
+                return;
+            }
+            let n = refs.len();
+            let pct = percentile_rank(&refs, value);
+            let mut sorted = refs;
+            let q = compute_quantiles(&mut sorted);
+            rows.push(BaselineMetricComparison {
+                key: key.to_string(),
+                metric: metric.to_string(),
+                unit: unit.to_string(),
+                shot_value: value,
+                corpus_p25: q.p25,
+                corpus_p50: q.p50,
+                corpus_p75: q.p75,
+                shot_percentile: pct,
+                sample_size: n,
+                descriptor: describe_percentile(pct, n),
+            });
+        };
+
+        push(
+            "dynamic_range_stops",
+            "Dynamic Range",
+            "stops",
+            physics.exposure.dynamic_range_stops,
+            corpus.iter().map(|s| s.dynamic_range_stops).collect(),
+        );
+        push(
+            "highlight_rolloff",
+            "Highlight Roll-Off",
+            "%",
+            physics.exposure.highlight_rolloff,
+            corpus.iter().map(|s| s.highlight_rolloff).collect(),
+        );
+        push(
+            "sharpness_laplacian",
+            "Acutance (Laplacian Var.)",
+            "",
+            physics.optics.sharpness_laplacian,
+            corpus.iter().map(|s| s.sharpness_laplacian).collect(),
+        );
+        if let Some(kf) = key_fill_ratio {
+            push(
+                "key_fill_ratio",
+                "Key-to-Fill Ratio",
+                ":1",
+                kf,
+                corpus.iter().map(|s| s.key_fill_ratio).collect(),
+            );
+        }
+        rows
+    }
+
+    /// Nearest measured award reference shot by visual layout embedding.
+    /// Returns the shot and raw cosine similarity (0.0 - 1.0).
+    pub fn nearest_measured_reference(
+        &self,
+        candidate_embedding: &[f32],
+    ) -> Option<(&ReferenceShot, f32)> {
+        self.measured_shots()
+            .into_iter()
+            .map(|s| {
+                // cosine_similarity maps [-1, 1] -> [0, 100]; convert back to raw cosine.
+                let raw = cosine_similarity(candidate_embedding, &s.embedding) / 50.0 - 1.0;
+                (s, raw.clamp(0.0, 1.0))
+            })
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+    }
+}
+
+/// Minimum measured award reference shots before scores are calibrated against
+/// the measured distribution rather than seeded priors.
+pub const MIN_MEASURED_SHOTS_FOR_CALIBRATION: usize = 30;
+
+/// Empirical percentile rank (0 - 100) of `value` within `refs` (mid-rank for ties).
+fn percentile_rank(refs: &[f32], value: f32) -> f32 {
+    if refs.is_empty() {
+        return 0.0;
+    }
+    let below = refs.iter().filter(|&&r| r < value).count() as f32;
+    let equal = refs.iter().filter(|&&r| r == value).count() as f32;
+    ((below + 0.5 * equal) / refs.len() as f32 * 100.0).clamp(0.0, 100.0)
+}
+
+/// Neutral, non-instructive description of a percentile position.
+fn describe_percentile(pct: f32, n: usize) -> String {
+    let band = if pct < 10.0 {
+        "Well below award-cinema range"
+    } else if pct < 25.0 {
+        "Below award-cinema middle range"
+    } else if pct <= 75.0 {
+        "Within award-cinema middle range"
+    } else if pct <= 90.0 {
+        "Above award-cinema middle range"
+    } else {
+        "Well above award-cinema range"
+    };
+    if n < 10 {
+        format!("{} (p{:.0}, provisional n={})", band, pct, n)
+    } else {
+        format!("{} (p{:.0})", band, pct)
     }
 }
 

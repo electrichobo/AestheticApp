@@ -249,17 +249,46 @@ pub fn analyze_exposure(img: &RgbImage) -> ExposurePhysics {
     // If the curve tapers down smoothly with low derivative jump, roll-off is film-like.
     let highlight_rolloff = compute_highlight_rolloff(&hist, highlight_clip_pct);
 
-    // Dynamic range stops (log2 ratio between p98 and p02)
-    let p02_eff = (p02 as f32).max(1.0);
-    let p98_eff = (p98 as f32).max(p02_eff + 1.0);
-    let dynamic_range_stops = (p98_eff / p02_eff).log2();
+    // Scene-referred photographic dynamic range in stops:
+    // Combines BT.1886 linearized tonal span with active Ed Lachman EL-Zone occupancy
+    // while penalizing bimodal black-screen / title-card graphics that lack midtone gradation.
+    let el_pcts = [
+        el_zones.zone_0_black_pct,
+        el_zones.zone_1_purple_pct,
+        el_zones.zone_2_blue_pct,
+        el_zones.zone_3_cyan_pct,
+        el_zones.zone_4_olive_pct,
+        el_zones.zone_5_gray_pct,
+        el_zones.zone_6_khaki_pct,
+        el_zones.zone_7_yellow_pct,
+        el_zones.zone_8_orange_pct,
+        el_zones.zone_9_red_pct,
+        el_zones.zone_10_magenta_pct,
+    ];
+    let active_el_zones = el_pcts.iter().filter(|&&pct| pct >= 0.6).count() as f32;
+    let midtone_body_pct: f32 = el_pcts[1..=8].iter().sum();
 
-    // Signal-to-noise ratio estimate (mean / std dev in dB)
-    let snr_luma = if std_dev > 1e-3 {
-        20.0 * (mean / std_dev).log10() as f32
+    let dynamic_range_stops = if std_dev < 0.5 {
+        0.0
+    } else if el_zones.zone_0_black_pct > 78.0 && midtone_body_pct < 18.0 {
+        // Bimodal black leader or white-on-black text/credits card: low photographic latitude
+        (active_el_zones * 0.65).clamp(0.5, 3.4)
     } else {
-        60.0
+        // Toe-clamped Rec.709 / BT.1886 linear luminance ratio + log shoulder & zone spread
+        let p02_code = (p02 as f32).max(10.0);
+        let p98_code = (p98 as f32).max(p02_code + 2.0);
+        let linear_contrast_stops = 2.4 * (p98_code / p02_code).log2();
+        let zone_latitude_stops = active_el_zones * 1.25;
+        let shoulder_bonus = (highlight_rolloff / 100.0) * 1.4;
+        (linear_contrast_stops * 0.55 + zone_latitude_stops * 0.45 + shoulder_bonus)
+            .clamp(1.0, 16.5)
     };
+
+    // Spatial high-frequency signal-to-noise ratio (dB):
+    // Estimates sensor/compression noise floor from adjacent horizontal pixel pairs
+    // within locally smooth regions (|dLuma| < 12.0), avoiding scene-contrast edge bias.
+    let (snr_luma, snr_chroma) =
+        compute_spatial_snr(raw_pixels, width as usize, height as usize, mean, p98);
 
     ExposurePhysics {
         histogram_mean: mean as f32,
@@ -272,10 +301,81 @@ pub fn analyze_exposure(img: &RgbImage) -> ExposurePhysics {
         highlight_rolloff,
         dynamic_range_stops,
         snr_luma,
-        snr_chroma: snr_luma * 0.9, // baseline proxy until full chroma patch analysis
+        snr_chroma,
         false_color_zones,
         el_zones,
     }
+}
+
+/// Estimates spatial luma and chroma SNR (dB) using horizontal neighbor differences
+/// in locally homogeneous regions so scene contrast is never mistaken for noise.
+fn compute_spatial_snr(
+    raw_pixels: &[u8],
+    width: usize,
+    height: usize,
+    mean_luma: f64,
+    p98_luma: usize,
+) -> (f32, f32) {
+    if mean_luma < 1.0 || width < 2 || height == 0 {
+        return (0.0, 0.0);
+    }
+
+    let step_y = (height / 180).max(1);
+    let step_x = (width / 320).max(1);
+
+    let mut luma_diff_sq_sum = 0.0f64;
+    let mut chroma_diff_sq_sum = 0.0f64;
+    let mut smooth_pairs = 0usize;
+
+    for y in (0..height).step_by(step_y) {
+        let row_offset = y * width * 3;
+        let mut x = 0;
+        while x + 1 < width {
+            let idx_a = row_offset + x * 3;
+            let idx_b = idx_a + 3;
+            if idx_b + 2 < raw_pixels.len() {
+                let ra = raw_pixels[idx_a] as f32;
+                let ga = raw_pixels[idx_a + 1] as f32;
+                let ba = raw_pixels[idx_a + 2] as f32;
+
+                let rb = raw_pixels[idx_b] as f32;
+                let gb = raw_pixels[idx_b + 1] as f32;
+                let bb = raw_pixels[idx_b + 2] as f32;
+
+                let la = rgb_to_luma(raw_pixels[idx_a], raw_pixels[idx_a + 1], raw_pixels[idx_a + 2]);
+                let lb = rgb_to_luma(raw_pixels[idx_b], raw_pixels[idx_b + 1], raw_pixels[idx_b + 2]);
+                let dl = (la - lb).abs();
+
+                // Only sample locally flat/smooth patches (exclude structural edges)
+                if dl < 12.0 {
+                    let l_res = (la - lb) as f64 * std::f64::consts::FRAC_1_SQRT_2;
+                    luma_diff_sq_sum += l_res * l_res;
+
+                    let ca_rg = (ra - ga) - (rb - gb);
+                    let ca_bg = (ba - ga) - (bb - gb);
+                    let c_res = ((ca_rg * ca_rg + ca_bg * ca_bg) as f64 * 0.25).sqrt();
+                    chroma_diff_sq_sum += c_res * c_res;
+
+                    smooth_pairs += 1;
+                }
+            }
+            x += step_x;
+        }
+    }
+
+    if smooth_pairs == 0 {
+        return (36.0, 33.0);
+    }
+
+    // Add a small quantization floor (0.28 code value for 8-bit) so synthetic flat rasters stay bounded
+    let sigma_luma = ((luma_diff_sq_sum / smooth_pairs as f64).sqrt() + 0.28).max(0.28);
+    let sigma_chroma = ((chroma_diff_sq_sum / smooth_pairs as f64).sqrt() + 0.35).max(0.35);
+
+    let signal_ref = (p98_luma as f64).max(mean_luma).max(16.0);
+    let snr_l = (20.0 * (signal_ref / sigma_luma).log10() as f32).clamp(12.0, 58.0);
+    let snr_c = (20.0 * (signal_ref / sigma_chroma).log10() as f32).clamp(10.0, 55.0);
+
+    (snr_l, snr_c)
 }
 
 /// Evaluates highlight roll-off quality (0.0 = hard digital ceiling, 100.0 = smooth Alexa-like shoulder).

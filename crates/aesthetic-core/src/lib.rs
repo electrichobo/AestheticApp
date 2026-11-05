@@ -17,14 +17,15 @@ pub use baseline_store::{
     scan_and_ingest_media_server, BaselineStore, IngestSummary, ServerIngestReport,
 };
 pub use export::{
-    export_shot_sidecars, generate_cmx3600_edl, generate_contact_sheet_html, generate_csv_selects,
+    export_shot_sidecars, export_shot_sidecars_with_frames, generate_cmx3600_edl,
+    generate_contact_sheet_html, generate_contact_sheet_html_with_frames, generate_csv_selects,
     generate_fcpxml, seconds_to_smpte_timecode,
 };
 pub use inference::{DepthMap, ModelInferenceEngine};
 pub use video::{extract_frame_rgb, extract_trimmed_clip, probe_video_metadata};
 
 pub use pipeline::{
-    analyze_video_file, evaluate_candidate_frame, BatchAnalysisResult, BatchOptions,
+    analyze_video_file, enrich_take, evaluate_candidate_frame, BatchAnalysisResult, BatchOptions,
 };
 pub use scene::{
     classify_transition, compute_frame_difference, detect_directional_wipe, TransitionType,

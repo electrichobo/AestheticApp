@@ -79,6 +79,42 @@ pub struct ReferenceShot {
     pub camera_motion_ratio: Option<f32>,
 }
 
+impl ReferenceShot {
+    /// Returns true when this reference shot was produced by actually decoding
+    /// and measuring frames from an award film (server / file / still ingest).
+    ///
+    /// Shots with the `REF_` prefix are hand-authored seed priors shipped with the
+    /// pretrained corpus; they were never measured by this engine and are on a
+    /// different numeric scale, so they must not be used as a measured benchmark.
+    pub fn is_measured(&self) -> bool {
+        !self.shot_id.starts_with("REF_")
+    }
+}
+
+/// Comparison of a single measured metric against the measured Golden Baseline
+/// distribution of award-winning cinema reference shots.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct BaselineMetricComparison {
+    /// Stable machine key (e.g. `dynamic_range_stops`)
+    pub key: String,
+    /// Human-readable metric label
+    pub metric: String,
+    /// Display unit suffix (e.g. "stops", "%", ":1")
+    pub unit: String,
+    /// Value measured on the candidate shot
+    pub shot_value: f32,
+    /// Award-cinema reference distribution (measured shots only)
+    pub corpus_p25: f32,
+    pub corpus_p50: f32,
+    pub corpus_p75: f32,
+    /// Empirical percentile rank of the shot within the award-cinema distribution (0 - 100)
+    pub shot_percentile: f32,
+    /// Number of measured award reference shots behind this distribution
+    pub sample_size: usize,
+    /// Neutral, non-instructive description of where the shot sits in the distribution
+    pub descriptor: String,
+}
+
 /// A cluster representing a master cinematographer's visual signature.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct CinematographerSignature {

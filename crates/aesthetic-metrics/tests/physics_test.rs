@@ -170,3 +170,40 @@ fn test_el_zone_system() {
     assert_eq!(el_map.dimensions(), (10, 10));
     assert_eq!(el_map.get_pixel(5, 5), &Rgb([128, 128, 128]));
 }
+
+#[test]
+fn test_dynamic_range_and_spatial_snr() {
+    // 1. Multi-zone continuous photographic gradient (shadows through highlights)
+    let mut cinema_img = RgbImage::new(128, 64);
+    for y in 0..64 {
+        for x in 0..128 {
+            let v = ((x as f32 / 127.0) * 230.0 + 12.0).round() as u8;
+            cinema_img.put_pixel(x, y, Rgb([v, v.saturating_sub(4), v.saturating_add(4)]));
+        }
+    }
+    let cinema_phys = compute_objective_physics(&cinema_img);
+    assert!(
+        cinema_phys.exposure.dynamic_range_stops > 10.0,
+        "Continuous multi-zone scene should measure >10 stops DR, got {}",
+        cinema_phys.exposure.dynamic_range_stops
+    );
+    assert!(
+        cinema_phys.exposure.snr_luma > 30.0,
+        "Clean continuous gradient should have positive high SNR (>30 dB), got {}",
+        cinema_phys.exposure.snr_luma
+    );
+
+    // 2. End-credits bimodal graphic (96% black floor + 4% white text)
+    let mut credits_img = RgbImage::from_pixel(128, 64, Rgb([0, 0, 0]));
+    for y in 28..32 {
+        for x in 40..88 {
+            credits_img.put_pixel(x, y, Rgb([235, 235, 235]));
+        }
+    }
+    let credits_phys = compute_objective_physics(&credits_img);
+    assert!(
+        credits_phys.exposure.dynamic_range_stops < 4.0,
+        "Bimodal white-on-black credits should not fake high photographic DR, got {}",
+        credits_phys.exposure.dynamic_range_stops
+    );
+}

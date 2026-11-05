@@ -1,9 +1,9 @@
 # AESTHETIC — Development Status
 
-## Current Milestone: M11 — Cinematography Awards Registry & Media Server Ingestion
+## Current Milestone: M12 — Desktop UI, Scopes & Visual Æesthetic Overhaul
 - **Phase**: Ground-Up Rebuild in Rust
 - **Target**: Windows x64 (primary), Linux, macOS
-- **Active Focus**: 184 Oscar, ASC, and BSC award-winning & landmark films (1995–2025+), continuous shot-boundary segmentation (cut-isolated setups), and Unraid network media server scanner (`M:\movies`).
+- **Active Focus**: Zero horizontal scroll UI, real frame & thumbnail decoding, broadcast-grade scopes directly from playhead, unified "Visual Æesthetic" benchmark comparison, pop-out contact sheet with collapsible metrics trees, modernized Import/Export dropdowns.
 
 ---
 
@@ -23,6 +23,40 @@
 | **M9: EL Zone & Pretrained Baseline** | Ed Lachman, ASC EL Zone 10-stop calibrated false color, 174 pretrained master shots across 58 films, Stage 1/2 UI groundwork | ✅ Done | Industry standard stop false color and out-of-the-box pre-trained baseline corpus |
 | **M10: Showreel Assembly & Forensic Overlays** | Stage 1 candidate selects bin, interactive In/Out handle trimming, Stage 2 real-time diagnostic viewport modes (EL Zone, Peaking, 3D Light, Eyeline/Gaze) | ✅ Done | Dynamic showreel assembly & forensic camera intelligence active in UI |
 | **M11: Awards Registry & Media Server Ingestion** | 184 Oscar, ASC, BSC & Landmark titles registry, shot-boundary segmentation (cut-isolated setups), single-pass burst extraction, media server scanner with deduplication & GUI force toggle, optical flow motion dynamics | ✅ Done | Scanning `M:\movies` matching 55 award films with continuous setup extraction, motion dynamics & GUI controls |
+| **M12: Desktop UI, Scopes & Visual Æesthetic Overhaul** | Zero-scroll UI, decoded frame/thumbnail endpoints, broadcast scopes from active playhead, unified "Visual Æesthetic" window, capped 100% similarity, non-judgmental deltas, pop-out contact sheet with collapsible metrics trees & sidecar metadata, resizable floating panels, Import/Export dropdowns | ✅ Done | Polished broadcast-grade desktop shell with real image output and objective benchmarking |
+
+---
+
+## Completed in M12
+- **Zero Horizontal Scrolling & Modernized Layout** (`crates/aesthetic-ui/ui/app.css`, `ui/index.html`):
+  - Enforced strict `overflow-x: hidden !important` on `html`, `body`, `.app-container`, and `.workspace-grid`. Adaptive grid column distribution prevents horizontal overflow across standard desktop resolutions.
+- **True Frame & Thumbnail Decoders** (`crates/aesthetic-ui/src/main.rs`, `ui/app.js`):
+  - `/api/frame?time={t}`: Decodes and serves real JPEG frames at the given timestamp for the main picture viewport.
+  - `/api/thumbnail?time={t}`: Downscales frames to 320x180 JPEG thumbnails for candidate selects cards and contact sheets.
+  - `#viewport-frame-img`: Displays real frame output in the picture viewport; overlays seamlessly with EL Zone and diagnostics.
+  - Candidate selects cards display real thumbnails with rank, score, SMPTE timecodes, duration, and claimed tags.
+- **Broadcast Scopes Overhaul** (`crates/aesthetic-ui/ui/app.js`, `crates/aesthetic-ui/src/main.rs`):
+  - High-DPI (`760x428`) scopes sample pixels directly from the active viewport frame at 1:1 column resolution with vertical scanline phosphor trace connection (emulating DaVinci Resolve / Tektronix OLED/CRT scopes) plus 380-column bilinear backend fallback.
+  - Smooth, non-pixelated rendering: authentic green phosphor waveform with white-hot core bloom, 3-pane RGB parade, high-density vectorscope with 25%/50%/75%/100% saturation rings, 57° skin tone I-line, and Rec.709 target boxes, Gaussian-smoothed quadratic spline histograms, and CIE 1931 chromaticity diagram (Rec.709 & Rec.2020 gamuts).
+- **Golden Baseline Award-Winning Cinema Benchmarking** (`crates/aesthetic-ui/src/main.rs`, `ui/index.html`, `ui/app.js`, `crates/aesthetic-core/src/baseline_store.rs`):
+  - Anchored primary benchmark comparison to the **Award-Winning Cinema Golden Baseline (184 Oscar, ASC & BSC Reference Films)** across Dynamic Range, Highlight Roll-Off, MTF50 Optical Acutance, Key-to-Fill Ratio, Split-Toning Separation, Gaze Poise, and Eye Catchlight Specular.
+  - Relegated individual cinematographer similarity to a strictly secondary ancillary stylistic note (`Ancillary DP Affinity`), keeping the core evaluation focused on empirical award-cinema distributions.
+  - Enforced strict $\le 100\%$ alignment cap and objective, non-judgmental descriptive deltas.
+  - Commented out prescriptive "Cinematographic Improvement Actions" per mandate to quantify, not criticize.
+- **Authentic Still-Image Evaluation & Real Measured Physics** (`crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-core/src/pipeline.rs`):
+  - Direct still-image support (`.png`, `.jpg`, `.tiff`, `.webp`, `.bmp`) in `/api/open_media`, `/api/analyze`, and `get_frame_for_time` via `image::open`.
+  - Replaced synthetic sine-wave fallback and empty `Default::default()` demo structs with 3 photorealistic lit reference setups evaluated end-to-end by `evaluate_candidate_frame` + `enrich_take`.
+- **Modernized Menus & Delivery Formats** (`crates/aesthetic-ui/ui/index.html`, `ui/app.js`, `src/main.rs`):
+  - **Import Dropdown**: Open Media File, Import Web URL, Bulk Import (Media Server Ingest), with descriptive tooltips.
+  - **Export Dropdown**: FCPXML (.xml), CMX 3600 EDL (.edl), CSV Selects (.csv), Contact Sheet (HTML), Contact Sheet (PNG), Hero Shots Only (PNG), with descriptive tooltips.
+  - Added `/api/export_contact_sheet_png` and `/api/export_hero_png` endpoints.
+- **Relocated Pop-Out Contact Sheet & Complete 58-Metric Tree** (`crates/aesthetic-ui/ui/index.html`, `ui/app.css`, `ui/app.js`, `crates/aesthetic-core/src/export.rs`):
+  - Added dedicated Contact Sheet subbar directly below Candidate Selects header with `[⤢ Contact Sheet]` button.
+  - Both the in-app Contact Sheet modal and exported HTML/JSON sidecars render **every single measured metric** (58 metrics across Exposure, False Color IRE Zones, EL Zones 0–X, Optics/MTF, Colorimetry/Gamut, Model-Inferred Craft/Lighting/Focus/Staging, Temporal/Optical Flow Motion Dynamics, Golden Baseline Distribution Percentiles, and Forensic Flags).
+- **Floating Resizable Pop-Out Panels**:
+  - Pop-out buttons `[⤢]` on Viewport, Scopes, and Visual Æesthetic open floating, resizable containers with draggable headers and dock-back controls.
+- **Testing & Toolchain**:
+  - 24/24 workspace tests passing. Zero clippy warnings (`-D warnings`). Release binaries verified.
 
 ---
 

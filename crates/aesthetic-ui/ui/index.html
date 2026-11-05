@@ -15,32 +15,116 @@
         <span class="version-tag">Core Engine v0.1.0 (Rust)</span>
       </div>
       <div class="header-actions">
-        <button class="btn btn-secondary" id="btn-export-sheet" title="Export HTML Contact Sheet">Contact Sheet</button>
-        <button class="btn btn-secondary" id="btn-export-xml" title="Export FCPXML for DaVinci Resolve">FCPXML</button>
-        <button class="btn btn-secondary" id="btn-export-edl" title="Export CMX 3600 EDL">EDL</button>
-        <button class="btn btn-secondary" id="btn-web-url">+ Web URL</button>
-        <button class="btn btn-secondary" id="btn-baseline">+ Baseline Media</button>
-        <button class="btn btn-secondary" id="btn-server-ingest" title="Scan Media Server for Oscar/ASC/BSC Award Films">+ Server Ingest</button>
-        <button class="btn btn-primary" id="btn-open-file">+ Open Media</button>
+        <!-- Import Dropdown -->
+        <div class="dropdown" id="dropdown-import">
+          <button class="btn btn-secondary dropdown-toggle" id="btn-dropdown-import" title="Media ingest options">
+            <span class="btn-icon">📁</span> Import <span class="arrow">&#9662;</span>
+          </button>
+          <div class="dropdown-menu" id="menu-import">
+            <button class="dropdown-item" id="btn-open-file" title="Select local video file (.mov, .mp4, .mkv) or image sequence for instant analysis.">
+              <span class="item-icon">🎬</span>
+              <div class="item-text">
+                <div class="item-title">Open Media File</div>
+                <div class="item-desc">Local video or high-res cinematography stills</div>
+              </div>
+            </button>
+            <button class="dropdown-item" id="btn-web-url" title="Probe remote media link or streaming video feed.">
+              <span class="item-icon">🌐</span>
+              <div class="item-text">
+                <div class="item-title">Import Web URL</div>
+                <div class="item-desc">Probe streaming link or online portfolio reel</div>
+              </div>
+            </button>
+            <button class="dropdown-item" id="btn-server-ingest" title="Scan media library directory (e.g. M:\movies) for Oscar, ASC, and BSC cinematography award winners.">
+              <span class="item-icon">🗄️</span>
+              <div class="item-text">
+                <div class="item-title">Bulk Import (Media Server)</div>
+                <div class="item-desc">Auto-match &amp; burst ingest Golden Baseline awards library</div>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Export Dropdown -->
+        <div class="dropdown" id="dropdown-export">
+          <button class="btn btn-secondary dropdown-toggle" id="btn-dropdown-export" title="NLE timelines and visual delivery formats">
+            <span class="btn-icon">📤</span> Export <span class="arrow">&#9662;</span>
+          </button>
+          <div class="dropdown-menu dropdown-menu-right" id="menu-export">
+            <button class="dropdown-item" id="btn-export-xml" title="Export non-destructive NLE timeline project file with hero markers for DaVinci Resolve / Final Cut.">
+              <span class="item-icon">🎞️</span>
+              <div class="item-text">
+                <div class="item-title">FCPXML (.xml)</div>
+                <div class="item-desc">DaVinci Resolve / Final Cut Pro timeline with hero markers</div>
+              </div>
+            </button>
+            <button class="dropdown-item" id="btn-export-edl" title="Export industry-standard Edit Decision List for Avid, Premiere, and Baselight.">
+              <span class="item-icon">📋</span>
+              <div class="item-text">
+                <div class="item-title">CMX 3600 EDL (.edl)</div>
+                <div class="item-desc">Industry-standard CMX cut list with score comments</div>
+              </div>
+            </button>
+            <button class="dropdown-item" id="btn-export-csv" title="Export tabular spreadsheet with timecodes, pillar scores, and DP matches.">
+              <span class="item-icon">📊</span>
+              <div class="item-text">
+                <div class="item-title">CSV Selects Manifest (.csv)</div>
+                <div class="item-desc">Tabular candidate breakdown with ratings and metrics</div>
+              </div>
+            </button>
+            <div class="dropdown-divider"></div>
+            <button class="dropdown-item" id="btn-export-sheet" title="Generate standalone dark-themed interactive HTML visual contact sheet.">
+              <span class="item-icon">🌐</span>
+              <div class="item-text">
+                <div class="item-title">Contact Sheet (HTML)</div>
+                <div class="item-desc">Interactive browser deck with collapsible physics trees</div>
+              </div>
+            </button>
+            <button class="dropdown-item" id="btn-export-sheet-png" title="Export full high-res visual contact sheet stitched as a single PNG image.">
+              <span class="item-icon">🖼️</span>
+              <div class="item-text">
+                <div class="item-title">Contact Sheet (PNG)</div>
+                <div class="item-desc">Multi-shot visual overview sheet stitched to single PNG</div>
+              </div>
+            </button>
+            <button class="dropdown-item" id="btn-export-hero-png" title="Export top-ranked hero select frame in pristine PNG format.">
+              <span class="item-icon">⭐</span>
+              <div class="item-text">
+                <div class="item-title">Hero Shots Only (PNG)</div>
+                <div class="item-desc">Export pristine high-res hero frame image</div>
+              </div>
+            </button>
+          </div>
+        </div>
       </div>
     </header>
 
     <!-- Main Workspace -->
     <main class="workspace-grid">
       <!-- Left Panel: Selects / Takes Navigator -->
-      <aside class="panel panel-takes">
+      <aside class="panel panel-takes" id="panel-takes">
         <div class="panel-header">
           <h2>Candidate Selects</h2>
-          <span class="badge" id="take-count-badge">0 Takes</span>
+          <div class="panel-header-right">
+            <span class="badge" id="take-count-badge">0 Takes</span>
+            <button class="panel-popout-btn" data-panel="panel-takes" title="Pop out Candidate Selects">&#10530;</button>
+          </div>
+        </div>
+        <!-- Contact Sheet Bar directly under Candidate Selects header -->
+        <div class="contact-sheet-bar">
+          <button class="btn-contact-sheet-bar" id="btn-open-contact-sheet" title="Pop out interactive visual contact sheet gallery">
+            <span class="cs-icon">&#10530;</span> Contact Sheet
+          </button>
+          <span class="cs-bar-label">Visual Gallery &amp; Sidecars</span>
         </div>
         <div class="takes-list" id="takes-list">
-          <!-- Populated dynamically -->
+          <!-- Populated dynamically with thumbnails, scores, and claimed tags -->
           <div class="empty-state">No media loaded. Open a finished film or enter a URL.</div>
         </div>
       </aside>
 
       <!-- Center Panel: Video Viewport & Timeline Scrub -->
-      <section class="panel panel-viewport">
+      <section class="panel panel-viewport" id="panel-viewport">
         <!-- Viewport Diagnostic Controls -->
         <div class="viewport-toolbar">
           <div class="viewport-mode-group">
@@ -50,10 +134,12 @@
             <button class="vp-btn" data-mode="volumetric" title="3D Volumetric Light Vectors">3D Light</button>
             <button class="vp-btn" data-mode="gaze" title="Eyeline & Directional Gaze Grid">Eyeline & Gaze</button>
           </div>
+          <button class="panel-popout-btn" data-panel="panel-viewport" title="Pop out Viewport">&#10530; Pop Out</button>
         </div>
 
         <div class="viewport-canvas-container" id="viewport-container">
-          <video id="video-player" class="video-player" controls preload="metadata"></video>
+          <img id="viewport-frame-img" class="viewport-frame-img" alt="Active Picture Frame">
+          <video id="video-player" class="video-player" controls preload="metadata" style="display: none;"></video>
           <img id="diagnostic-overlay-img" class="viewport-overlay-img" alt="Diagnostic Overlay" style="display: none;">
           <canvas id="viewport-vector-canvas" class="viewport-vector-canvas"></canvas>
           
@@ -89,15 +175,18 @@
         </div>
       </section>
 
-      <!-- Right Panel: The 4-Output Cinematographic Matrix -->
-      <aside class="panel panel-matrix">
+      <!-- Right Panel: The Cinematographic Matrix -->
+      <aside class="panel panel-matrix" id="panel-matrix">
         <div class="panel-header">
           <h2>Evaluation Matrix</h2>
-          <span class="badge badge-accent" id="overall-score-badge">-- / 100</span>
+          <div class="panel-header-right">
+            <span class="badge badge-accent" id="overall-score-badge">-- / 100</span>
+            <button class="panel-popout-btn" data-panel="panel-matrix" title="Pop out Matrix">&#10530;</button>
+          </div>
         </div>
 
         <div class="matrix-content">
-          <!-- 1. Tangible Scores -->
+          <!-- 1. Pillar Scores -->
           <section class="matrix-section">
             <h3 class="section-title">Pillar Scores</h3>
             <div class="score-bars">
@@ -119,23 +208,13 @@
             </div>
           </section>
 
-          <!-- 2. Discovered Style & Master DP Match -->
-          <section class="matrix-section">
-            <h3 class="section-title">Discovered Style & Craft Signature</h3>
-            <div class="style-card" id="style-card">
-              <div class="style-tag" id="lighting-key-tag">Lighting: --</div>
-              <div class="style-tag" id="motion-pacing-tag">Motion: --</div>
-              <div class="master-banner" id="master-banner">
-                <span class="master-icon">★</span>
-                <span class="master-text" id="master-text">Cinematographer match pending analysis...</span>
-              </div>
-            </div>
-          </section>
-
-          <!-- 3. Broadcast Scopes Deck -->
-          <section class="matrix-section">
+          <!-- 2. Broadcast Scopes Deck -->
+          <section class="matrix-section" id="section-scopes">
             <div class="scopes-header">
-              <h3 class="section-title">Broadcast Scopes</h3>
+              <div class="scopes-title-group">
+                <h3 class="section-title">Broadcast Scopes</h3>
+                <button class="panel-popout-btn" data-panel="section-scopes" title="Pop out Scopes">&#10530;</button>
+              </div>
               <div class="scope-tabs">
                 <button class="scope-tab active" data-scope="waveform">Waveform</button>
                 <button class="scope-tab" data-scope="parade">Parade</button>
@@ -145,44 +224,52 @@
               </div>
             </div>
             <div class="scope-display-container">
-              <canvas id="scope-canvas" class="scope-canvas" width="320" height="180"></canvas>
+              <canvas id="scope-canvas" class="scope-canvas" width="760" height="428"></canvas>
             </div>
           </section>
 
-          <!-- 4. Per-Shot Benchmark Matrix (Side-by-Side DP Comparison) -->
-          <section class="matrix-section">
-            <div class="matrix-benchmark-header">
-              <h3 class="section-title">Master DP Benchmark Comparison</h3>
-              <span class="dp-tag-badge" id="benchmark-dp-badge">--</span>
+          <!-- 3. Visual Æesthetic: Golden Baseline Award-Winning Cinema Comparison -->
+          <section class="matrix-section" id="section-visual-aesthetic">
+            <div class="section-header-row">
+              <h3 class="section-title">Visual &AElig;esthetic &mdash; Golden Baseline</h3>
+              <div class="header-right-tools">
+                <span class="dp-tag-badge" id="benchmark-dp-badge">Award Cinema Baseline: Pending...</span>
+                <button class="panel-popout-btn" data-panel="section-visual-aesthetic" title="Pop out Visual Æesthetic">&#10530;</button>
+              </div>
             </div>
+            <div class="style-card" id="style-card">
+              <div class="style-tags-flow" id="style-tags-flow">
+                <div class="style-tag" id="lighting-key-tag">Lighting: --</div>
+                <div class="style-tag" id="motion-pacing-tag">Motion: --</div>
+                <div class="style-tag" id="shot-scale-tag">Scale: --</div>
+              </div>
+              <div class="master-banner" id="master-banner">
+                <span class="master-icon">★</span>
+                <span class="master-text" id="master-text">Calibrated against 184 Oscar, ASC &amp; BSC award-winning films...</span>
+              </div>
+            </div>
+
+            <!-- Golden Baseline Benchmark Comparison Table (Award-Winning Cinema Distribution) -->
             <div class="benchmark-table-container">
               <table class="benchmark-table">
                 <thead>
                   <tr>
                     <th>Metric</th>
                     <th>Shot</th>
-                    <th>Master</th>
-                    <th>Status</th>
+                    <th>Award Baseline</th>
+                    <th>Distribution Delta</th>
                   </tr>
                 </thead>
                 <tbody id="benchmark-table-body">
-                  <!-- Populated dynamically -->
+                  <!-- Populated dynamically with objective descriptive deltas -->
                 </tbody>
               </table>
             </div>
           </section>
 
-          <!-- 5. Forensic Improvement Action Cards -->
+          <!-- 4. Technical Concerns / Forensics -->
           <section class="matrix-section">
-            <h3 class="section-title">Cinematographic Improvement Actions</h3>
-            <div class="action-cards-list" id="action-cards-list">
-              <!-- Populated dynamically -->
-            </div>
-          </section>
-
-          <!-- 6. Technical Concerns / Forensics -->
-          <section class="matrix-section">
-            <h3 class="section-title">Technical Concerns & Advisory Flags</h3>
+            <h3 class="section-title">Technical Concerns &amp; Forensic Flags</h3>
             <div class="concerns-list" id="concerns-list">
               <div class="concern-item clean">No technical defects or clipping concerns detected.</div>
             </div>
@@ -192,46 +279,81 @@
     </main>
   </div>
 
-    <!-- Media Server Ingest Modal -->
-    <div id="server-ingest-modal" class="modal-overlay" style="display: none;">
-      <div class="modal-card">
-        <div class="modal-header">
-          <h3>Golden Baseline Media Server Ingestion</h3>
-          <button class="modal-close" id="modal-ingest-close">&times;</button>
+  <!-- Media Server Ingest Modal -->
+  <div id="server-ingest-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Golden Baseline Media Server Ingestion</h3>
+        <button class="modal-close" id="modal-ingest-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">
+          Scans your library, matches canonical Oscar, ASC, and BSC cinematography award-winning films, and extracts continuous, cut-isolated reference shots into the Golden Baseline.
+        </p>
+        <div class="form-group">
+          <label for="server-ingest-path">Movies Directory:</label>
+          <input type="text" id="server-ingest-path" class="input-text" value="M:\movies" placeholder="e.g. M:\movies">
         </div>
-        <div class="modal-body">
-          <p class="modal-desc">
-            Scans your library, matches canonical Oscar, ASC, and BSC cinematography award-winning films, and extracts continuous, cut-isolated reference shots into the Golden Baseline.
-          </p>
+        <div class="form-row">
           <div class="form-group">
-            <label for="server-ingest-path">Movies Directory:</label>
-            <input type="text" id="server-ingest-path" class="input-text" value="M:\movies" placeholder="e.g. M:\movies">
+            <label for="server-ingest-limit">Batch Limit (Films):</label>
+            <input type="number" id="server-ingest-limit" class="input-number" value="5" min="1" max="100">
           </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label for="server-ingest-limit">Batch Limit (Films):</label>
-              <input type="number" id="server-ingest-limit" class="input-number" value="5" min="1" max="100">
-            </div>
-            <div class="form-group">
-              <label for="server-ingest-shots">Shots Per Film:</label>
-              <input type="number" id="server-ingest-shots" class="input-number" value="5" min="1" max="25">
-            </div>
+          <div class="form-group">
+            <label for="server-ingest-shots">Shots Per Film:</label>
+            <input type="number" id="server-ingest-shots" class="input-number" value="5" min="1" max="25">
           </div>
-          <div class="form-group form-checkbox">
-            <label class="checkbox-label">
-              <input type="checkbox" id="server-ingest-force">
-              <span><strong>Force Re-Ingest</strong> (Skip deduplication & re-extract already ingested films)</span>
-            </label>
-          </div>
-          <div id="server-ingest-status" class="ingest-status-box" style="display: none;"></div>
         </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" id="btn-ingest-cancel">Cancel</button>
-          <button class="btn btn-primary" id="btn-ingest-start">Start Ingestion</button>
+        <div class="form-group form-checkbox">
+          <label class="checkbox-label">
+            <input type="checkbox" id="server-ingest-force">
+            <span><strong>Force Re-Ingest</strong> (Skip deduplication &amp; re-extract already ingested films)</span>
+          </label>
+        </div>
+        <div id="server-ingest-status" class="ingest-status-box" style="display: none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btn-ingest-cancel">Cancel</button>
+        <button class="btn btn-primary" id="btn-ingest-start">Start Ingestion</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pop-Out Contact Sheet Modal -->
+  <div id="contact-sheet-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card modal-contact-sheet">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3>Visual Contact Sheet &amp; Sidecars</h3>
+          <span class="badge badge-accent" id="modal-sheet-count">0 Hero Selects</span>
+        </div>
+        <div class="modal-header-actions">
+          <button class="btn btn-secondary btn-sm" id="btn-modal-export-png" title="Download stitched high-resolution PNG">Export PNG</button>
+          <button class="btn btn-secondary btn-sm" id="btn-modal-export-html" title="Open standalone HTML contact sheet">Export HTML</button>
+          <button class="modal-close" id="modal-contact-sheet-close">&times;</button>
+        </div>
+      </div>
+      <div class="modal-body modal-sheet-body">
+        <div class="sheet-grid" id="modal-sheet-grid">
+          <!-- Populated dynamically with shot thumbnails, scores, collapsible metrics trees and claimed tags -->
         </div>
       </div>
     </div>
+  </div>
 
-    <script type="module" src="app.js"></script>
+  <!-- Floating Resizable Panel Container -->
+  <div id="floating-popout-modal" class="floating-popout" style="display: none;">
+    <div class="floating-header" id="floating-header">
+      <span class="floating-title" id="floating-title">Panel View</span>
+      <div class="floating-tools">
+        <button class="floating-close-btn" id="btn-floating-close" title="Dock back into main window">&times;</button>
+      </div>
+    </div>
+    <div class="floating-content" id="floating-content">
+      <!-- Active popped-out clone / view -->
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
 </body>
 </html>
