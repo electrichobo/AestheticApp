@@ -52,7 +52,7 @@ All weights are configurable in `config.yaml`.
 | Third moment about 18% gray | ✅ | 🟨 | Zone V deviation — available, not yet in pillar score |
 | SNR luma | ✅ | ✅ | Signal-to-noise via local patch variance |
 | SNR chroma | ✅ | ✅ | SNR on Lab a*/b* channels |
-| Temporal exposure consistency | ⏱ | ✅ | Std of histogram mean across shot frames |
+| Temporal exposure consistency | ✅ | ✅ | `exposure_consistency_std` across sequence in `ReelSequenceMetrics` |
 | Exposure intent | ✅ | ✅ | Rule-based: penalises clipping, rewards tonal spread |
 | EL Zone System (EV stops) | ✅ | ✅ | Ed Lachman, ASC 10-stop calibrated false color mapped to 18% gray (EV 0) |
 
@@ -74,8 +74,8 @@ All weights are configurable in `config.yaml`.
 | Shadow noise | ✅ | ✅ | Std of gray values in shadow zone |
 | Light transition hardness | ✅ | ✅ | Gradient magnitude variance — hard vs soft light |
 | Light motivation | ✅ | ✅ | Quadrant luminance variance — directional = motivated |
-| Coverage consistency | ⏱ | ❌ | Cross-shot variance — video only, not yet implemented |
-| Lighting style adherence | 🎯 | 🎯 | Creative pillar delta vs baseline — future |
+| Coverage consistency | ✅ | ✅ | `coverage_consistency_score` in `ReelSequenceMetrics` (cross-shot DR & Key:Fill consistency) |
+| Lighting style adherence | ✅ | ✅ | Within-Style Key:Fill & DR percentiles in `compare_to_golden_baseline_with_style` |
 
 ---
 
@@ -117,7 +117,7 @@ All weights are configurable in `config.yaml`.
 | Motion blur amount | ✅ | ✅ | High-frequency energy ratio — rewards 10–40 range (180° shutter) |
 | Motion blur direction | ✅ | 🟨 | Dominant gradient orientation — available, not yet in pillar score |
 | Movement type | ✅ | ✅ | Priority: metrics-engine result → smoothness/stabilisation → flow consistency ratio |
-| Shot duration | ⏱ | 🟨 | Derived from scene boundaries — field exists |
+| Shot duration | ✅ | ✅ | Consolidated usable window duration (`1.5s–4.0s`) via cut-aware setup deduplication |
 | Focus during movement | ✅ | ✅ | Subject-region sharpness relative to motion magnitude |
 | Trajectory smoothness | ✅ | ✅ | Single-frame: 100; sequence: flow path smoothness |
 
@@ -146,9 +146,9 @@ All weights are configurable in `config.yaml`.
 | Chroma noise | ✅ | ✅ | Mean std of Lab a*/b* channels |
 | Banding detection | ✅ | ✅ | Periodic gradient step proxy |
 | Gamut coverage (sRGB / P3 / Rec.2020) | ✅ | 🟨 | BGR→linear RGB→XYZ D65→xy chromaticity. Point-in-triangle test against gamut primaries. Shown in CIE 1931 diagram — not yet in pillar score |
-| WB cross-scene variance | ⏱ | ❌ | Video only, not yet implemented |
-| Colour temp cross-scene variance | ⏱ | ❌ | Video only, not yet implemented |
-| Grading uniformity | ⏱ | ❌ | Video only, not yet implemented |
+| WB cross-scene variance | ✅ | ✅ | `wb_cross_scene_std` in `ReelSequenceMetrics` |
+| Colour temp cross-scene variance | ✅ | ✅ | `color_temp_cross_scene_std` in `ReelSequenceMetrics` |
+| Grading uniformity | ✅ | ✅ | `grading_uniformity_score` in `ReelSequenceMetrics` |
 
 **Log-encoding detection:** `VideoMeta.is_log_encoded` detects S-Log, C-Log, Log-C, V-Log, Log316, PQ, HLG from ffprobe `color_transfer` metadata. A warning is shown in the UI when log footage is detected — ΔE values are only meaningful on display-referred (graded) footage.
 
@@ -190,7 +190,7 @@ All weights are configurable in `config.yaml`.
 | Hero-frame potency | 🔮 | 🔮 | Probability a human would choose this as representative still |
 | Three-second impact | 🔮 | 🔮 | How strongly a short clip reads in first few seconds |
 | Authorship / distinctiveness | 🔮 | 🔮 | Distinctiveness relative to candidate pool |
-| Reel diversity contribution | 🔮 | 🔮 | How much new value this shot adds to already selected material |
+| Reel diversity contribution | ✅ | ✅ | Maximal Marginal Relevance (`apply_reel_diversity_ranking`) & `reel_diversity_score` |
 
 ---
 

@@ -17,6 +17,7 @@ use aesthetic_metrics::matte::detect_active_picture;
 use aesthetic_models::baseline::MetricQuantiles;
 use aesthetic_models::forensics::DiagnosticFlag;
 use aesthetic_models::manifest::VideoSourceInfo;
+use aesthetic_models::temporal::ReelSequenceMetrics;
 use aesthetic_models::window::{DiscoveredStyle, PillarScores, ShotTake};
 use image::RgbImage;
 use std::path::{Path, PathBuf};
@@ -60,6 +61,7 @@ impl Default for BatchOptions {
 pub struct BatchAnalysisResult {
     pub video_info: VideoSourceInfo,
     pub ranked_takes: Vec<ShotTake>,
+    pub sequence_metrics: ReelSequenceMetrics,
     pub edl_content: String,
     pub csv_content: String,
     pub fcpxml_content: Option<String>,
@@ -280,10 +282,6 @@ pub fn enrich_take(
         raw_overall
     };
 
-    // Golden Baseline: where this shot sits inside award cinema.
-    take.golden_baseline =
-        store.compare_to_golden_baseline(&take.measured, Some(craft.lighting.key_to_fill_ratio));
-
     // Ancillary tag only: nearest measured award reference or closest master DP signature.
     let emb = inference.infer_embedding(frame);
     if store.measured_shots().len() >= crate::baseline_store::MIN_MEASURED_SHOTS_FOR_CALIBRATION {
@@ -306,7 +304,175 @@ pub fn enrich_take(
         take.style.style_family = m.style_family;
     }
 
+    // Golden Baseline (M15): global award-cinema percentiles + within-style-cluster percentiles + motion velocity.
+    let measured_flow = if take.scores.temporal_measured {
+        Some(craft.motion.optical_flow_mean)
+    } else {
+        None
+    };
+    take.golden_baseline = store.compare_to_golden_baseline_with_style(
+        &take.measured,
+        Some(craft.lighting.key_to_fill_ratio),
+        Some(take.style.style_family.as_str()),
+        measured_flow,
+    );
+
+    // Automatic Shot Scale classification from Z-plane focus isolation, depth planes,
+    // specular catchlights, and spatial edge density.
+    if take.style.shot_scale.is_empty() {
+        let focus_acc = craft.focus.subject_focus_accuracy;
+        let depth_sep = craft.staging.depth_separation_score;
+        let catch = craft.lighting.catchlight_intensity;
+        let edge_d = take.measured.optics.edge_density;
+
+        take.style.shot_scale = if (depth_sep >= 52.0 && focus_acc >= 68.0)
+            || (depth_sep >= 38.0 && catch > 65.0)
+        {
+            "Close-Up".to_string()
+        } else if depth_sep >= 34.0
+            || focus_acc >= 64.0
+            || take.measured.optics.vignetting_stops > 0.38
+        {
+            "Medium Close-Up".to_string()
+        } else if edge_d > 0.14 || depth_sep < 22.0 {
+            "Wide".to_string()
+        } else {
+            "Medium".to_string()
+        };
+    }
+
+    // Flat / ungraded log signal check (pixel-level milk-gray floor + compressed midtone std + low saturation)
+    if !is_non_photographic && detect_flat_log_encoding(&take.measured) {
+        let already_flagged = take.concerns.iter().any(|c| c.code == "LOG_ENCODED_SIGNAL");
+        if !already_flagged {
+            take.concerns.push(DiagnosticFlag {
+                code: "LOG_ENCODED_SIGNAL".to_string(),
+                title: "Camera Log / Flat Transfer Profile Suspected".to_string(),
+                description: format!(
+                    "Compressed tonal std ({:.1}) with elevated black floor (Zone 0 {:.1}%) and low saturation ({:.1}) indicates ungraded log footage; ΔE2000 & contrast reflect ungraded plate",
+                    take.measured.exposure.histogram_std,
+                    take.measured.exposure.el_zones.zone_0_black_pct,
+                    take.measured.color.saturation_mean
+                ),
+                severity: aesthetic_models::forensics::DiagnosticSeverity::Info,
+                timestamp_sec: take.hero_timestamp_sec,
+                affected_region: None,
+            });
+        }
+    }
+
+    // M16 Forensic Diagnostics: Subtitle / lower-third burn-in & Rolling-shutter skew risk
+    if !is_non_photographic
+        && detect_subtitle_or_lower_third_burnin(frame)
+        && !take
+            .concerns
+            .iter()
+            .any(|c| c.code == "SUBTITLE_OR_LOWER_THIRD_BURNIN")
+    {
+        take.concerns.push(DiagnosticFlag {
+            code: "SUBTITLE_OR_LOWER_THIRD_BURNIN".to_string(),
+            title: "Subtitle or Lower-Third Graphic Detected".to_string(),
+            description: "High-contrast sharp horizontal glyph edges detected in lower 18% of raster (burned-in captions or broadcast chyron)".to_string(),
+            severity: aesthetic_models::forensics::DiagnosticSeverity::Info,
+            timestamp_sec: take.hero_timestamp_sec,
+            affected_region: None,
+        });
+    }
+
+    if take.scores.temporal_measured
+        && craft.motion.optical_flow_mean > 14.0
+        && craft.motion.micro_jitter_score > 11.0
+        && !take
+            .concerns
+            .iter()
+            .any(|c| c.code == "ROLLING_SHUTTER_SKEW_RISK")
+    {
+        take.concerns.push(DiagnosticFlag {
+            code: "ROLLING_SHUTTER_SKEW_RISK".to_string(),
+            title: "Rolling Shutter Skew / Whip-Pan Wobble Risk".to_string(),
+            description: format!(
+                "High optical flow velocity ({:.1} px/f) combined with elevated spatial micro-jitter ({:.1}) indicates CMOS rolling-shutter skew risk",
+                craft.motion.optical_flow_mean,
+                craft.motion.micro_jitter_score
+            ),
+            severity: aesthetic_models::forensics::DiagnosticSeverity::Warning,
+            timestamp_sec: take.hero_timestamp_sec,
+            affected_region: None,
+        });
+    }
+
     take.craft = Some(craft);
+}
+
+/// Heuristic detector for ungraded camera log plates when container transfer tags are stripped.
+pub fn detect_flat_log_encoding(physics: &aesthetic_models::physics::ObjectivePhysics) -> bool {
+    let exp = &physics.exposure;
+    let col = &physics.color;
+    exp.shadow_clip_pct < 0.05
+        && exp.highlight_clip_pct < 0.05
+        && exp.el_zones.zone_0_black_pct < 0.25
+        && exp.el_zones.zone_1_purple_pct < 1.5
+        && exp.histogram_mean >= 75.0
+        && exp.histogram_mean <= 162.0
+        && exp.histogram_std < 25.0
+        && col.saturation_mean < 12.5
+}
+
+/// Detects burned-in subtitles or broadcast lower-third graphics in the bottom 18% of the frame.
+pub fn detect_subtitle_or_lower_third_burnin(img: &RgbImage) -> bool {
+    let (w, h) = img.dimensions();
+    if w < 160 || h < 90 {
+        return false;
+    }
+    let x_start = w / 5;
+    let x_end = (w * 4) / 5;
+    let y_mid_start = h / 4;
+    let y_mid_end = (h * 3) / 4;
+    let y_low_start = (h * 82) / 100;
+    let y_low_end = (h * 96) / 100;
+
+    let mut mid_edges = 0usize;
+    let mut mid_samples = 0usize;
+    for y in (y_mid_start..y_mid_end).step_by(3) {
+        for x in (x_start..x_end.saturating_sub(2)).step_by(3) {
+            let p0 = img.get_pixel(x, y);
+            let p1 = img.get_pixel(x + 2, y);
+            let l0 = 0.2126 * p0[0] as f32 + 0.7152 * p0[1] as f32 + 0.0722 * p0[2] as f32;
+            let l1 = 0.2126 * p1[0] as f32 + 0.7152 * p1[1] as f32 + 0.0722 * p1[2] as f32;
+            if (l0 - l1).abs() > 75.0 {
+                mid_edges += 1;
+            }
+            mid_samples += 1;
+        }
+    }
+
+    let mut low_edges = 0usize;
+    let mut bright_glyphs = 0usize;
+    let mut low_samples = 0usize;
+    for y in (y_low_start..y_low_end).step_by(2) {
+        for x in (x_start..x_end.saturating_sub(2)).step_by(2) {
+            let p0 = img.get_pixel(x, y);
+            let p1 = img.get_pixel(x + 2, y);
+            let l0 = 0.2126 * p0[0] as f32 + 0.7152 * p0[1] as f32 + 0.0722 * p0[2] as f32;
+            let l1 = 0.2126 * p1[0] as f32 + 0.7152 * p1[1] as f32 + 0.0722 * p1[2] as f32;
+            if (l0 - l1).abs() > 85.0 && (l0 > 225.0 || l1 > 225.0) {
+                low_edges += 1;
+            }
+            if l0 > 235.0 {
+                bright_glyphs += 1;
+            }
+            low_samples += 1;
+        }
+    }
+
+    if low_samples == 0 || mid_samples == 0 {
+        return false;
+    }
+    let mid_density = mid_edges as f32 / mid_samples as f32;
+    let low_density = low_edges as f32 / low_samples as f32;
+    let glyph_pct = bright_glyphs as f32 / low_samples as f32;
+
+    low_density > 0.045 && low_density > (mid_density * 3.2).max(0.04) && glyph_pct > 0.015 && glyph_pct < 0.28
 }
 
 /// Executes full end-to-end batch analysis on a video file.
@@ -408,14 +574,22 @@ pub fn analyze_video_file(
             );
             enrich_take(&mut candidate, frame, next_ref, &store, &inference);
 
-            if candidate.style.shot_scale.is_empty() {
-                candidate.style.shot_scale = if candidate.measured.optics.edge_density > 0.14 {
-                    "Wide".to_string()
-                } else if candidate.measured.optics.vignetting_stops > 0.35 {
-                    "Medium Close-Up".to_string()
-                } else {
-                    "Medium".to_string()
-                };
+            // M16 Forensic Diagnostic: Practical light flicker across 3-frame burst within same setup
+            if frames.len() >= 3
+                && detect_burst_light_flicker(&frames[0], &frames[1], &frames[2])
+                && !candidate
+                    .concerns
+                    .iter()
+                    .any(|c| c.code == "PRACTICAL_LIGHT_FLICKER")
+            {
+                candidate.concerns.push(DiagnosticFlag {
+                    code: "PRACTICAL_LIGHT_FLICKER".to_string(),
+                    title: "Practical Light / Mains Flicker Detected".to_string(),
+                    description: "Alternating mean luminance oscillation across consecutive burst frames indicates PWM or mains practical light flicker".to_string(),
+                    severity: aesthetic_models::forensics::DiagnosticSeverity::Warning,
+                    timestamp_sec: eff_ts,
+                    affected_region: None,
+                });
             }
 
             if same_setup && !takes.is_empty() {
@@ -468,18 +642,37 @@ pub fn analyze_video_file(
         }
     }
 
-    takes.sort_by(|a, b| {
-        b.scores
-            .overall
-            .partial_cmp(&a.scores.overall)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    // Propagate container-level Log/HDR transfer characteristic flag if present
+    let (meta_is_log, ref meta_curve_label) = video_info.classify_transfer_curve();
+    if meta_is_log {
+        for take in &mut takes {
+            if !take.concerns.iter().any(|c| c.code == "LOG_ENCODED_SIGNAL") {
+                take.concerns.push(DiagnosticFlag {
+                    code: "LOG_ENCODED_SIGNAL".to_string(),
+                    title: format!("Container Transfer: {}", meta_curve_label),
+                    description: format!(
+                        "Stream metadata specifies '{}' transfer characteristic; ΔE2000 & Rec.709 contrast assume display-referred transform",
+                        meta_curve_label
+                    ),
+                    severity: aesthetic_models::forensics::DiagnosticSeverity::Info,
+                    timestamp_sec: take.hero_timestamp_sec,
+                    affected_region: None,
+                });
+            }
+        }
+    }
+
+    // Apply Maximal Marginal Relevance (MMR) reel diversity ranking so recurring setups
+    // do not crowd out distinct camera angles and shot scales in the Top-N selects.
+    apply_reel_diversity_ranking(&mut takes);
 
     if let Some(n) = options.top_n {
         if n > 0 && n < takes.len() {
             takes.truncate(n);
         }
     }
+
+    let sequence_metrics = compute_reel_sequence_metrics(&takes, &video_info);
 
     let title = video_path
         .file_stem()
@@ -565,6 +758,7 @@ pub fn analyze_video_file(
     Ok(BatchAnalysisResult {
         video_info,
         ranked_takes: takes,
+        sequence_metrics,
         edl_content,
         csv_content,
         fcpxml_content,
@@ -572,4 +766,298 @@ pub fn analyze_video_file(
         sidecars_count,
         extracted_clips_count,
     })
+}
+
+/// Greedily orders photographic candidate takes by Maximal Marginal Relevance (MMR),
+/// gently penalizing near-duplicate recurring camera setups so the Top-N hero selects
+/// represent a diverse spread of shot scales, lighting keys, and visual compositions.
+pub fn apply_reel_diversity_ranking(takes: &mut Vec<ShotTake>) {
+    if takes.len() <= 2 {
+        takes.sort_by(|a, b| {
+            b.scores
+                .overall
+                .partial_cmp(&a.scores.overall)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        return;
+    }
+
+    // Separate photographic takes from black/credits leaders
+    let mut photo_pool: Vec<ShotTake> = Vec::new();
+    let mut leader_pool: Vec<ShotTake> = Vec::new();
+    for t in takes.drain(..) {
+        if t.concerns
+            .iter()
+            .any(|c| c.code == "NON_PHOTOGRAPHIC_OR_CREDITS")
+        {
+            leader_pool.push(t);
+        } else {
+            photo_pool.push(t);
+        }
+    }
+
+    photo_pool.sort_by(|a, b| {
+        b.scores
+            .overall
+            .partial_cmp(&a.scores.overall)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    leader_pool.sort_by(|a, b| {
+        b.scores
+            .overall
+            .partial_cmp(&a.scores.overall)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut selected: Vec<ShotTake> = Vec::with_capacity(photo_pool.len());
+    if !photo_pool.is_empty() {
+        selected.push(photo_pool.remove(0));
+    }
+
+    while !photo_pool.is_empty() {
+        let mut best_idx = 0usize;
+        let mut best_mmr = f32::NEG_INFINITY;
+
+        for (idx, cand) in photo_pool.iter().enumerate() {
+            let mut max_redundancy = 0.0f32;
+            for sel in &selected {
+                let dr_diff = (cand.measured.exposure.dynamic_range_stops
+                    - sel.measured.exposure.dynamic_range_stops)
+                    .abs();
+                let luma_diff =
+                    (cand.measured.exposure.histogram_mean - sel.measured.exposure.histogram_mean)
+                        .abs();
+                let cct_diff = (cand.measured.color.estimated_kelvin
+                    - sel.measured.color.estimated_kelvin)
+                    .abs();
+                let same_key = cand.style.lighting_key == sel.style.lighting_key;
+                let same_scale = cand.style.shot_scale == sel.style.shot_scale;
+                let same_ref = cand.style.cinematographer_match == sel.style.cinematographer_match;
+
+                // Measure setup similarity (0.0 = completely distinct, 1.0 = near-identical setup)
+                let mut sim = (-0.35 * dr_diff - 0.04 * luma_diff - 0.001 * cct_diff).exp();
+                if same_key {
+                    sim += 0.12;
+                }
+                if same_scale {
+                    sim += 0.12;
+                }
+                if same_ref {
+                    sim += 0.15;
+                }
+                max_redundancy = max_redundancy.max(sim.clamp(0.0, 1.0));
+            }
+
+            // Up to 7.5-point MMR penalty for redundant recurring setups
+            let mmr_score = cand.scores.overall - 7.5 * max_redundancy;
+            if mmr_score > best_mmr {
+                best_mmr = mmr_score;
+                best_idx = idx;
+            }
+        }
+
+        selected.push(photo_pool.remove(best_idx));
+    }
+
+    selected.extend(leader_pool);
+    *takes = selected;
+}
+
+/// Computes cross-shot sequence continuity, grading uniformity, visual fatigue across cuts,
+/// and reel diversity across the selected photographic takes (M14).
+pub fn compute_reel_sequence_metrics(
+    takes: &[ShotTake],
+    video_info: &VideoSourceInfo,
+) -> ReelSequenceMetrics {
+    let (meta_log, curve_label) = video_info.classify_transfer_curve();
+    let photo_takes: Vec<&ShotTake> = takes
+        .iter()
+        .filter(|t| {
+            !t.concerns
+                .iter()
+                .any(|c| c.code == "NON_PHOTOGRAPHIC_OR_CREDITS")
+        })
+        .collect();
+
+    let any_pixel_log = photo_takes
+        .iter()
+        .any(|t| t.concerns.iter().any(|c| c.code == "LOG_ENCODED_SIGNAL"));
+    let is_log_or_hdr = meta_log || any_pixel_log;
+    let transfer_curve_label = if !meta_log && any_pixel_log {
+        "Camera Log / Flat Transfer (Pixel-Inferred)".to_string()
+    } else {
+        curve_label
+    };
+
+    if photo_takes.is_empty() {
+        return ReelSequenceMetrics {
+            is_log_or_hdr,
+            transfer_curve_label,
+            ..Default::default()
+        };
+    }
+
+    let n = photo_takes.len() as f32;
+    let std_dev = |vals: &[f32]| -> f32 {
+        if vals.len() <= 1 {
+            return 0.0;
+        }
+        let mean = vals.iter().sum::<f32>() / (vals.len() as f32);
+        let var = vals.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / (vals.len() as f32);
+        var.sqrt()
+    };
+
+    let wb_vals: Vec<f32> = photo_takes
+        .iter()
+        .map(|t| t.measured.color.wb_deviation)
+        .collect();
+    let cct_vals: Vec<f32> = photo_takes
+        .iter()
+        .map(|t| t.measured.color.estimated_kelvin)
+        .collect();
+    let luma_vals: Vec<f32> = photo_takes
+        .iter()
+        .map(|t| t.measured.exposure.histogram_mean)
+        .collect();
+    let dr_vals: Vec<f32> = photo_takes
+        .iter()
+        .map(|t| t.measured.exposure.dynamic_range_stops)
+        .collect();
+    let kf_vals: Vec<f32> = photo_takes
+        .iter()
+        .map(|t| {
+            t.craft
+                .as_ref()
+                .map(|c| c.lighting.key_to_fill_ratio)
+                .unwrap_or(2.5)
+        })
+        .collect();
+
+    let wb_cross_scene_std = std_dev(&wb_vals);
+    let color_temp_cross_scene_std = std_dev(&cct_vals);
+    let exposure_consistency_std = std_dev(&luma_vals);
+    let dr_std = std_dev(&dr_vals);
+    let kf_std = std_dev(&kf_vals);
+
+    let coverage_consistency_score =
+        (100.0 - dr_std * 11.0 - kf_std * 6.5 - exposure_consistency_std * 0.45).clamp(0.0, 100.0);
+    let grading_uniformity_score = (100.0
+        - wb_cross_scene_std * 3.2
+        - (color_temp_cross_scene_std / 35.0)
+        - exposure_consistency_std * 0.55)
+        .clamp(0.0, 100.0);
+
+    // Visual Fatigue Index across consecutive timeline cuts (ordered chronologically)
+    let mut chrono = photo_takes.clone();
+    chrono.sort_by(|a, b| {
+        a.start_sec
+            .partial_cmp(&b.start_sec)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mut cut_jump_sum = 0.0f32;
+    if chrono.len() > 1 {
+        for pair in chrono.windows(2) {
+            let a = pair[0];
+            let b = pair[1];
+            let luma_jump =
+                (a.measured.exposure.histogram_mean - b.measured.exposure.histogram_mean).abs()
+                    / 255.0;
+            let com_jump = match (&a.craft, &b.craft) {
+                (Some(ca), Some(cb)) => {
+                    let dx = (ca.staging.gaze_vector_x.unwrap_or(0.0)
+                        - cb.staging.gaze_vector_x.unwrap_or(0.0))
+                        * 0.5;
+                    let dy = (ca.staging.gaze_vector_y.unwrap_or(0.0)
+                        - cb.staging.gaze_vector_y.unwrap_or(0.0))
+                        * 0.5;
+                    (dx * dx + dy * dy).sqrt()
+                }
+                _ => 0.15,
+            };
+            cut_jump_sum += (luma_jump * 55.0 + com_jump * 45.0).clamp(0.0, 100.0);
+        }
+    }
+    let visual_fatigue_index = if chrono.len() > 1 {
+        (cut_jump_sum / ((chrono.len() - 1) as f32)).clamp(0.0, 100.0)
+    } else {
+        12.0
+    };
+
+    // Reel Diversity Score: rewards variety of shot scales, lighting keys, and reference matches
+    let mut unique_scales: Vec<&str> = photo_takes
+        .iter()
+        .map(|t| t.style.shot_scale.as_str())
+        .collect();
+    unique_scales.sort_unstable();
+    unique_scales.dedup();
+
+    let mut unique_keys: Vec<&str> = photo_takes
+        .iter()
+        .map(|t| t.style.lighting_key.as_str())
+        .collect();
+    unique_keys.sort_unstable();
+    unique_keys.dedup();
+
+    let mut unique_refs: Vec<&str> = photo_takes
+        .iter()
+        .filter_map(|t| t.style.cinematographer_match.as_deref())
+        .collect();
+    unique_refs.sort_unstable();
+    unique_refs.dedup();
+
+    let scale_factor = (unique_scales.len() as f32 / 3.0).min(1.0) * 35.0;
+    let key_factor = (unique_keys.len() as f32 / 2.0).min(1.0) * 25.0;
+    let ref_factor = (unique_refs.len() as f32 / n.max(1.0)).min(1.0) * 40.0;
+    let reel_diversity_score = (scale_factor + key_factor + ref_factor).clamp(0.0, 100.0);
+
+    ReelSequenceMetrics {
+        wb_cross_scene_std,
+        color_temp_cross_scene_std,
+        exposure_consistency_std,
+        coverage_consistency_score,
+        grading_uniformity_score,
+        visual_fatigue_index,
+        reel_diversity_score,
+        is_log_or_hdr,
+        transfer_curve_label,
+    }
+}
+
+/// Detects alternating luminance oscillation across a 3-frame burst within the same camera setup.
+pub fn detect_burst_light_flicker(f0: &RgbImage, f1: &RgbImage, f2: &RgbImage) -> bool {
+    let d01 = crate::scene::compute_frame_difference(f0, f1);
+    let d12 = crate::scene::compute_frame_difference(f1, f2);
+    if d01 > 18.0 || d12 > 18.0 {
+        return false; // Cut or heavy camera move
+    }
+
+    let mean_luma = |img: &RgbImage| -> f32 {
+        let (w, h) = img.dimensions();
+        if w == 0 || h == 0 {
+            return 0.0;
+        }
+        let mut sum = 0.0f64;
+        let mut count = 0usize;
+        for y in (0..h).step_by(8) {
+            for x in (0..w).step_by(8) {
+                let p = img.get_pixel(x, y);
+                sum += (0.2126 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.0722 * p[2] as f32) as f64;
+                count += 1;
+            }
+        }
+        if count > 0 {
+            (sum / count as f64) as f32
+        } else {
+            0.0
+        }
+    };
+
+    let m0 = mean_luma(f0);
+    let m1 = mean_luma(f1);
+    let m2 = mean_luma(f2);
+    let delta01 = m1 - m0;
+    let delta12 = m2 - m1;
+
+    // Opposite-sign luminance swing of > 3.5 luma units in both steps
+    delta01.abs() > 3.5 && delta12.abs() > 3.5 && (delta01 * delta12) < -12.0
 }

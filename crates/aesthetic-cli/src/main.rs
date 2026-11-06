@@ -57,6 +57,15 @@ fn main() {
             let server_dir = PathBuf::from(&args[2]);
             run_server_ingest(&server_dir, &args[3..]);
         }
+        "rescore" => {
+            if args.len() < 3 {
+                println!("Error: Missing sidecars directory.");
+                println!("Usage: aesthetic-cli rescore <sidecars_dir> [--contact-sheet <file.html>]");
+                return;
+            }
+            let sidecars_dir = PathBuf::from(&args[2]);
+            run_sidecars_rescore(&sidecars_dir, &args[3..]);
+        }
         _ => {
             println!("Unknown command: {}", args[1]);
             print_usage();
@@ -86,10 +95,71 @@ fn print_usage() {
     );
     println!("      --force                Re-ingest films even if already present in baseline");
     println!("      --dry-run              Catalog matched award titles without extracting shots");
+    println!("  rescore <sidecars_dir> Instantaneously re-score cached JSON+PNG sidecars against current baseline");
     println!("  awards-list            Display all 80+ Oscar, ASC, and BSC titles in the registry");
     println!("  baseline-info          Display current Golden Baseline statistics and films");
     println!("  benchmark              Run multi-threaded SIMD physics & vector search benchmarks");
     println!("  demo                   Run synthetic benchmark on high-resolution frame raster");
+}
+
+fn run_sidecars_rescore(sidecars_dir: &Path, flags: &[String]) {
+    let mut contact_sheet_path: Option<PathBuf> = None;
+    let mut i = 0;
+    while i < flags.len() {
+        if (flags[i] == "--contact-sheet" || flags[i] == "--html") && i + 1 < flags.len() {
+            contact_sheet_path = Some(PathBuf::from(&flags[i + 1]));
+            i += 1;
+        }
+        i += 1;
+    }
+
+    let t0 = Instant::now();
+    match aesthetic_core::export::rescore_from_sidecars(sidecars_dir) {
+        Ok((takes, hero_frames)) => {
+            let elapsed = t0.elapsed().as_secs_f64() * 1000.0;
+            println!(
+                "\nRe-scored {} cached takes in {:.1}ms against Golden Baseline",
+                takes.len(),
+                elapsed
+            );
+            println!(
+                "{:<6} {:<12} {:<12} {:<8} {:<18} {:<15} {:<24}",
+                "Rank", "Take ID", "Start(s)", "Score", "Lighting Key", "Scale", "Nearest Award Ref"
+            );
+            println!("{}", "-".repeat(98));
+            for (idx, t) in takes.iter().enumerate() {
+                println!(
+                    "#{:<5} {:<12} {:<12.2} {:<8.1} {:<18} {:<15} {:<24}",
+                    idx + 1,
+                    t.take_id,
+                    t.start_sec,
+                    t.scores.overall,
+                    t.style.lighting_key,
+                    t.style.shot_scale,
+                    t.style
+                        .cinematographer_match
+                        .as_deref()
+                        .unwrap_or("Baseline Cinema")
+                );
+            }
+            if let Some(ref cs_path) = contact_sheet_path {
+                let html = aesthetic_core::export::generate_contact_sheet_html_with_frames(
+                    "RESCORED_SELECTS",
+                    &sidecars_dir.to_string_lossy(),
+                    &takes,
+                    0,
+                    &hero_frames,
+                );
+                if let Some(parent) = cs_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if std::fs::write(cs_path, html).is_ok() {
+                    println!("\n[✓] Updated Contact Sheet exported to: {}", cs_path.display());
+                }
+            }
+        }
+        Err(e) => eprintln!("Rescore failed: {}", e),
+    }
 }
 
 fn run_video_analysis(video_path: &Path, flags: &[String]) {
@@ -166,10 +236,10 @@ fn run_video_analysis(video_path: &Path, flags: &[String]) {
             println!("------------------------------------------------------------");
 
             println!(
-                "{:<6} {:<12} {:<12} {:<6} {:<8} {:<16} {:<24}",
-                "Rank", "In TC", "Out TC", "Dur(s)", "Score", "Lighting Key", "Master DP Match"
+                "{:<6} {:<12} {:<12} {:<6} {:<8} {:<16} {:<15} {:<24}",
+                "Rank", "In TC", "Out TC", "Dur(s)", "Score", "Lighting Key", "Scale", "Nearest Award Ref"
             );
-            println!("{}", "-".repeat(84));
+            println!("{}", "-".repeat(100));
 
             for (idx, take) in result.ranked_takes.iter().enumerate() {
                 let in_tc = seconds_to_smpte_timecode(take.start_sec, result.video_info.frame_rate);
@@ -179,18 +249,44 @@ fn run_video_analysis(video_path: &Path, flags: &[String]) {
                     .cinematographer_match
                     .as_deref()
                     .unwrap_or("Baseline Cinema");
+                let scale = if take.style.shot_scale.is_empty() {
+                    "Medium"
+                } else {
+                    take.style.shot_scale.as_str()
+                };
 
                 println!(
-                    "#{:<5} {:<12} {:<12} {:<6.1} {:<8.1} {:<16} {:<24}",
+                    "#{:<5} {:<12} {:<12} {:<6.1} {:<8.1} {:<16} {:<15} {:<24}",
                     idx + 1,
                     in_tc,
                     out_tc,
                     take.duration_sec,
                     take.scores.overall,
                     take.style.lighting_key,
+                    scale,
                     dp_match
                 );
             }
+
+            let seq = &result.sequence_metrics;
+            println!("------------------------------------------------------------");
+            println!(
+                "Sequence & Reel Continuity (Transfer: {}):",
+                seq.transfer_curve_label
+            );
+            println!(
+                "  * Grading Uniformity:    {:.1}/100  (WB Std: {:.2}, CCT Std: {:.0}K, Luma Std: {:.1})",
+                seq.grading_uniformity_score,
+                seq.wb_cross_scene_std,
+                seq.color_temp_cross_scene_std,
+                seq.exposure_consistency_std
+            );
+            println!(
+                "  * Coverage Consistency:  {:.1}/100  | Reel Diversity: {:.1}/100  | Visual Fatigue Index: {:.1}/100",
+                seq.coverage_consistency_score,
+                seq.reel_diversity_score,
+                seq.visual_fatigue_index
+            );
 
             if let Some(ref p) = options.export_edl_path {
                 println!("\n[✓] CMX 3600 EDL exported to: {}", p.display());

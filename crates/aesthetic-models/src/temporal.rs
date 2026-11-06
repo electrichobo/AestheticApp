@@ -42,3 +42,26 @@ pub struct TakeEditorial {
     /// Identified usable windows within the take
     pub usable_windows: Vec<UsableWindow>,
 }
+
+/// Cross-shot sequence continuity, grading uniformity, and reel diversity metrics (M14).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ReelSequenceMetrics {
+    /// Standard deviation of white-balance deviation across photographic takes
+    pub wb_cross_scene_std: f32,
+    /// Standard deviation of correlated color temperature (Kelvin) across takes
+    pub color_temp_cross_scene_std: f32,
+    /// Standard deviation of mean luminance (0-255) across takes
+    pub exposure_consistency_std: f32,
+    /// Cross-shot lighting & dynamic range coverage consistency (0.0 - 100.0)
+    pub coverage_consistency_score: f32,
+    /// Composite cross-scene color & tonal grading uniformity (0.0 - 100.0)
+    pub grading_uniformity_score: f32,
+    /// Viewer luminance & center-of-mass jump fatigue across consecutive cuts (0.0 - 100.0, lower = smoother)
+    pub visual_fatigue_index: f32,
+    /// Shot-scale, lighting-key, and framing diversity across the selected reel (0.0 - 100.0)
+    pub reel_diversity_score: f32,
+    /// True if log-encoded or HDR transfer curve was detected in stream metadata or pixel distribution
+    pub is_log_or_hdr: bool,
+    /// Detected transfer curve description (e.g. "Rec.709 Display-Referred", "S-Log3 / Camera Log", "PQ (SMPTE ST.2084)")
+    pub transfer_curve_label: String,
+}

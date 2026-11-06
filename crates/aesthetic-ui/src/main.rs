@@ -779,9 +779,11 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                             .file_name()
                             .and_then(|s| s.to_str())
                             .unwrap_or("STILL.PNG");
+                        let seq_metrics = aesthetic_core::compute_reel_sequence_metrics(&takes, &info);
                         let res = BatchAnalysisResult {
                             video_info: info.clone(),
                             ranked_takes: takes.clone(),
+                            sequence_metrics: seq_metrics,
                             edl_content: generate_cmx3600_edl(
                                 "AESTHETIC_STILL",
                                 clip_name,

@@ -786,6 +786,176 @@ pub fn export_shot_sidecars_with_frames(
     Ok(written)
 }
 
+/// Re-scores and re-ranks cached JSON+PNG shot sidecars in `<sidecars_dir>/metrics`
+/// against the current Golden Baseline corpus without re-decoding video (M17).
+pub fn rescore_from_sidecars(
+    sidecars_dir: &std::path::Path,
+) -> Result<(Vec<ShotTake>, std::collections::HashMap<String, image::RgbImage>), String> {
+    let metrics_dir = if sidecars_dir.join("metrics").is_dir() {
+        sidecars_dir.join("metrics")
+    } else {
+        sidecars_dir.to_path_buf()
+    };
+
+    let entries = std::fs::read_dir(&metrics_dir).map_err(|e| {
+        format!(
+            "Failed to read sidecars directory {}: {}",
+            metrics_dir.display(),
+            e
+        )
+    })?;
+
+    let store = crate::baseline_store::BaselineStore::new();
+    let inference = crate::inference::ModelInferenceEngine::new();
+    let (dr_q, rolloff_q, sharp_q, _) = store.scoring_quantiles();
+
+    let mut takes: Vec<ShotTake> = Vec::new();
+    let mut hero_frames: std::collections::HashMap<String, image::RgbImage> =
+        std::collections::HashMap::new();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let raw = std::fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+        let val: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|e| format!("Invalid JSON in {}: {}", path.display(), e))?;
+
+        let take_id = val["take_id"]
+            .as_str()
+            .unwrap_or("take_000")
+            .to_string();
+        let scene_index = val["scene_index"].as_u64().unwrap_or(1) as usize;
+        let start_sec = val["start_sec"].as_f64().unwrap_or(0.0);
+        let end_sec = val["end_sec"].as_f64().unwrap_or(start_sec + 2.5);
+        let duration_sec = val["duration_sec"].as_f64().unwrap_or(end_sec - start_sec);
+
+        let measured: aesthetic_models::physics::ObjectivePhysics =
+            serde_json::from_value(val["measured_physics"].clone()).unwrap_or_default();
+        let craft: Option<aesthetic_models::inferred::ModelInferredCraft> =
+            serde_json::from_value(val["inferred_craft"].clone()).ok();
+        let concerns: Vec<aesthetic_models::forensics::DiagnosticFlag> =
+            serde_json::from_value(val["concerns"].clone()).unwrap_or_default();
+
+        let mut style = aesthetic_models::window::DiscoveredStyle {
+            lighting_key: val["style"]["lighting_key"]
+                .as_str()
+                .unwrap_or("Mid-Key Naturalistic")
+                .to_string(),
+            motion_type: val["style"]["motion_type"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+            shot_scale: val["style"]["shot_scale"]
+                .as_str()
+                .unwrap_or("Medium")
+                .to_string(),
+            cinematographer_match: val["style"]["cinematographer_match"]
+                .as_str()
+                .map(|s| s.to_string()),
+            match_confidence: val["style"]["match_confidence"].as_f64().unwrap_or(0.0) as f32,
+            style_family: val["style"]["style_family"]
+                .as_str()
+                .unwrap_or("Prestige Naturalism")
+                .to_string(),
+        };
+
+        // Load companion PNG still if present
+        let png_path = metrics_dir.join(format!("{}.png", take_id));
+        if png_path.exists() {
+            if let Ok(dyn_img) = image::open(&png_path) {
+                let rgb = dyn_img.to_rgb8();
+                let emb = inference.infer_embedding(&rgb);
+                let kf = craft
+                    .as_ref()
+                    .map(|c| c.lighting.key_to_fill_ratio)
+                    .unwrap_or(2.5);
+                if let Some((shot, sim)) = store.nearest_measured_reference_with_craft(
+                    &emb,
+                    measured.exposure.dynamic_range_stops,
+                    measured.optics.sharpness_laplacian,
+                    kf,
+                ) {
+                    style.cinematographer_match =
+                        Some(format!("{} ({})", shot.cinematographer, shot.film_title));
+                    style.match_confidence = (sim * 100.0).clamp(0.0, 100.0);
+                    style.style_family = shot.style_label.clone();
+                }
+                hero_frames.insert(take_id.clone(), rgb);
+            }
+        }
+
+        let is_non_photographic = concerns
+            .iter()
+            .any(|c| c.code == "NON_PHOTOGRAPHIC_OR_CREDITS");
+
+        let dr_score = dr_q.compute_percentile_score(measured.exposure.dynamic_range_stops);
+        let rolloff_score = rolloff_q.compute_percentile_score(measured.exposure.highlight_rolloff);
+        let sharp_score = sharp_q.compute_percentile_score(measured.optics.sharpness_laplacian);
+        let mut technical =
+            (dr_score * 0.35 + rolloff_score * 0.35 + sharp_score * 0.30).clamp(0.0, 100.0);
+        if is_non_photographic {
+            technical = (technical * 0.20).min(18.0);
+        }
+
+        let creative = val["scores"]["creative"].as_f64().unwrap_or(50.0) as f32;
+        let temporal = val["scores"]["temporal"].as_f64().unwrap_or(0.0) as f32;
+        let temporal_measured = temporal > 0.0;
+
+        let raw_overall = if temporal_measured {
+            technical * 0.45 + creative * 0.35 + temporal * 0.20
+        } else {
+            (technical * 0.45 + creative * 0.35) / 0.80
+        }
+        .clamp(0.0, 100.0);
+        let overall = if is_non_photographic {
+            (raw_overall * 0.25).min(18.0)
+        } else {
+            raw_overall
+        };
+
+        let kf_opt = craft.as_ref().map(|c| c.lighting.key_to_fill_ratio);
+        let flow_opt = if temporal_measured {
+            craft.as_ref().map(|c| c.motion.optical_flow_mean)
+        } else {
+            None
+        };
+        let golden_baseline = store.compare_to_golden_baseline_with_style(
+            &measured,
+            kf_opt,
+            Some(style.style_family.as_str()),
+            flow_opt,
+        );
+
+        takes.push(ShotTake {
+            take_id,
+            scene_index,
+            start_sec,
+            end_sec,
+            duration_sec,
+            hero_frame_index: Some(0),
+            hero_timestamp_sec: start_sec,
+            scores: aesthetic_models::window::PillarScores {
+                overall,
+                technical,
+                creative,
+                temporal,
+                temporal_measured,
+            },
+            style,
+            measured,
+            concerns,
+            craft,
+            golden_baseline,
+        });
+    }
+
+    crate::pipeline::apply_reel_diversity_ranking(&mut takes);
+    Ok((takes, hero_frames))
+}
+
 /// Encodes an `RgbImage` (optionally downscaled to `max_width`) into a `data:image/png;base64,...` URI.
 fn encode_rgb_png_data_uri(img: &image::RgbImage, max_width: u32) -> Option<String> {
     use image::ImageEncoder;

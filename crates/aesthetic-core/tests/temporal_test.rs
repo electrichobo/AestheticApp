@@ -169,3 +169,69 @@ fn test_baseline_store_search_and_master_match() {
     assert_eq!(mm.style_family, "Prestige Naturalism");
     assert!(mm.craft_explanation.contains("Roger Deakins"));
 }
+
+#[test]
+fn test_reel_continuity_and_sidecar_rescore() {
+    use aesthetic_core::{
+        compute_reel_sequence_metrics, detect_burst_light_flicker, enrich_take,
+        export_shot_sidecars_with_frames, rescore_from_sidecars, BaselineStore,
+        ModelInferenceEngine,
+    };
+    use aesthetic_models::manifest::VideoSourceInfo;
+
+    let store = BaselineStore::new();
+    let inference = ModelInferenceEngine::new();
+    let (dr_q, rolloff_q, sharp_q, _) = store.scoring_quantiles();
+
+    let mut img_a = RgbImage::new(160, 90);
+    for (x, y, p) in img_a.enumerate_pixels_mut() {
+        let r = ((x * 255) / 160).min(255) as u8;
+        let g = ((y * 200) / 90).min(255) as u8;
+        *p = Rgb([r, g, 90]);
+    }
+    let mut take_a = evaluate_candidate_frame(&img_a, "take_001", 1, 2.0, &dr_q, &rolloff_q, &sharp_q);
+    enrich_take(&mut take_a, &img_a, None, &store, &inference);
+    assert!(!take_a.style.shot_scale.is_empty());
+    assert!(take_a.golden_baseline.len() >= 4);
+
+    let video_info = VideoSourceInfo {
+        file_path: "test.mov".to_string(),
+        duration_sec: 30.0,
+        frame_rate: 24.0,
+        width: 1920,
+        height: 1080,
+        codec: "h264".to_string(),
+        color_primaries: Some("bt709".to_string()),
+        transfer_characteristic: Some("arib-std-b67".to_string()),
+    };
+    let seq = compute_reel_sequence_metrics(std::slice::from_ref(&take_a), &video_info);
+    assert!(seq.is_log_or_hdr);
+    assert!(seq.transfer_curve_label.contains("HLG"));
+    assert!(seq.grading_uniformity_score >= 0.0 && seq.grading_uniformity_score <= 100.0);
+
+    // Flicker detector test on oscillating burst
+    let f0 = RgbImage::from_pixel(64, 64, Rgb([100, 100, 100]));
+    let f1 = RgbImage::from_pixel(64, 64, Rgb([112, 112, 112]));
+    let f2 = RgbImage::from_pixel(64, 64, Rgb([99, 99, 99]));
+    assert!(detect_burst_light_flicker(&f0, &f1, &f2));
+
+    // Sidecar export & cached rescore round-trip
+    let tmp_dir = std::env::temp_dir().join("aesthetic_rescore_test");
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    let mut frames = std::collections::HashMap::new();
+    frames.insert("take_001".to_string(), img_a);
+    let count = export_shot_sidecars_with_frames(
+        &tmp_dir,
+        "test.mov",
+        std::slice::from_ref(&take_a),
+        &frames,
+    )
+    .unwrap();
+    assert_eq!(count, 1);
+
+    let (rescored, loaded_frames) = rescore_from_sidecars(&tmp_dir).unwrap();
+    assert_eq!(rescored.len(), 1);
+    assert!(loaded_frames.contains_key("take_001"));
+    assert!(rescored[0].scores.overall > 0.0);
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}

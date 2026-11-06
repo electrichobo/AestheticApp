@@ -7,23 +7,23 @@
 
 ---
 
-## Current Status: M13 (760-Shot Measured Golden Baseline & Cut-Aware Shot Segmentation)
+## Current Status: M14–M17 (Sequence Continuity, Style-Cluster Quantiles, Forensics & Cached Rescore)
 - **100% Real Measured Golden Baseline (`n=760` across 135 Award-Winning Films)**:
-  - Ingested all **55 matched award-winning feature films** on `M:\movies` (285 continuous video setups) plus **92 multi-shot high-resolution still collections** (475 uncompressed frames from `film-grab.com`, `shot.cafe`, and `frameset.app`) into `assets/baseline/`.
-  - Purged all legacy synthetic `REF_` seed entries so `assets/baseline/` is **100% real pixel-measured cinema** (`Dynamic Range p10 = 7.33 / p50 = 9.73 / p90 = 11.65 stops`, `Highlight Roll-Off p10 = 97.15% / p50 = 100.0%`, `Laplacian Acutance p50 = 40.43`).
-- **Cut-Aware 3-Frame Burst & Same-Setup Consolidation**:
-  - `analyze_video_file` extracts 3-frame bursts (`0.25s` interval) at each candidate sample to step past hard cuts (`MAD > 26.0`) and consolidates adjacent samples from the same camera setup (`MAD < 10.5`) into a single optimal `1.5s–4.0s` hero window.
-- **Mean-Centered Spatial + Craft Reference Matching**:
-  - Upgraded `infer_embedding` to an aspect-ratio-invariant `32x36` spatial-chromatic grid and added `nearest_measured_reference_with_craft` (combining mean-centered Pearson spatial correlation with dynamic range, log-acutance, and key-to-fill craft proximity), eliminating positive-orthant hubness.
-- **Lossless PNG Sidecars & Embedded Contact Sheets**:
-  - Sidecars save `<take_id>.png` (`hero_frame_png`) alongside `<take_id>.json`; HTML contact sheets embed lossless PNG stills directly (`data:image/png;base64,...`).
-- **Quality**: All 25 workspace tests passing, zero clippy warnings (`-D warnings`).
+  - `assets/baseline/` (`version = "2.0.0-measured"`) holds 285 decoded continuous video setups from 55 award films on `M:\movies` + 475 multi-shot high-res stills across 92 collections from `film-grab.com`, `shot.cafe`, and `frameset.app`.
+- **M14: Cross-Shot Sequence Continuity, Log-Encoding Detection & MMR Reel Diversity**:
+  - Added `ReelSequenceMetrics` (`wb_cross_scene_std`, `color_temp_cross_scene_std`, `exposure_consistency_std`, `coverage_consistency_score`, `grading_uniformity_score`, `visual_fatigue_index`, `reel_diversity_score`, `transfer_curve_label`).
+  - Added container + pixel-level camera log/HDR detection (`LOG_ENCODED_SIGNAL`) and Maximal Marginal Relevance (`apply_reel_diversity_ranking`) to prevent recurring setups from crowding Top-$N$ selects.
+- **M15: Within-Style-Cluster & Motion Velocity Baseline Quantiles**:
+  - `compare_to_golden_baseline_with_style` evaluates global award-cinema percentiles plus within-style-cluster percentiles (`Within-Style DR`, `Within-Style Key:Fill`) and measured optical flow velocity percentiles.
+- **M16 & M17: Non-Punitive Forensics & Instant Cached Sidecar Re-Scoring**:
+  - Added `SUBTITLE_OR_LOWER_THIRD_BURNIN`, `PRACTICAL_LIGHT_FLICKER`, and `ROLLING_SHUTTER_SKEW_RISK` detectors plus `rescore_from_sidecars` (`aesthetic-cli rescore <dir>`, ~240ms for 12 takes).
+- **Quality**: All 26 workspace tests passing, zero clippy warnings (`-D warnings`).
 
 ---
 
 ## Next Immediate Step
-1. **Interactive Desktop UI Verification**: Launch `target\release\aesthetic-ui.exe` to inspect the 760-shot Golden Baseline in the desktop UI.
-2. **Commit & Push**: Await user command to commit and push M13 deliverables.
+1. **Commit & Push**: Await user command to commit and push M14–M17 deliverables.
+2. **Interactive UI & DaVinci Resolve Bridge**: Inspect sequence continuity in `aesthetic-ui` or push selects to DaVinci Resolve.
 
 ---
 

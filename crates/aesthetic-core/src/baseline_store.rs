@@ -1845,6 +1845,94 @@ impl BaselineStore {
         rows
     }
 
+    /// Expanded Golden Baseline comparison (M15) that includes global corpus percentiles,
+    /// within-style-cluster percentiles (e.g. against only Chiaroscuro Noir or Prestige Naturalism
+    /// reference shots), and measured camera/subject optical flow velocity percentiles.
+    pub fn compare_to_golden_baseline_with_style(
+        &self,
+        physics: &ObjectivePhysics,
+        key_fill_ratio: Option<f32>,
+        style_family: Option<&str>,
+        optical_flow_mean: Option<f32>,
+    ) -> Vec<BaselineMetricComparison> {
+        let mut rows = self.compare_to_golden_baseline(physics, key_fill_ratio);
+        let measured = self.measured_shots();
+        let corpus: Vec<&ReferenceShot> = if measured.len() >= MIN_MEASURED_SHOTS_FOR_CALIBRATION {
+            measured
+        } else {
+            self.reference_shots.iter().collect()
+        };
+
+        let mut push_extra = |key: &str, metric: &str, unit: &str, value: f32, refs: Vec<f32>| {
+            if refs.len() < 3 || !value.is_finite() {
+                return;
+            }
+            let n = refs.len();
+            let pct = percentile_rank(&refs, value);
+            let mut sorted = refs;
+            let q = compute_quantiles(&mut sorted);
+            rows.push(BaselineMetricComparison {
+                key: key.to_string(),
+                metric: metric.to_string(),
+                unit: unit.to_string(),
+                shot_value: value,
+                corpus_p25: q.p25,
+                corpus_p50: q.p50,
+                corpus_p75: q.p75,
+                shot_percentile: pct,
+                sample_size: n,
+                descriptor: describe_percentile(pct, n),
+            });
+        };
+
+        if let Some(style) = style_family {
+            let trimmed = style.trim();
+            if !trimmed.is_empty() {
+                let cluster: Vec<&ReferenceShot> = corpus
+                    .iter()
+                    .copied()
+                    .filter(|s| s.style_label.eq_ignore_ascii_case(trimmed))
+                    .collect();
+                if cluster.len() >= 5 {
+                    push_extra(
+                        "style_cluster_dr",
+                        &format!("Within-Style DR ({})", trimmed),
+                        "stops",
+                        physics.exposure.dynamic_range_stops,
+                        cluster.iter().map(|s| s.dynamic_range_stops).collect(),
+                    );
+                    if let Some(kf) = key_fill_ratio {
+                        push_extra(
+                            "style_cluster_kf",
+                            &format!("Within-Style Key:Fill ({})", trimmed),
+                            ":1",
+                            kf,
+                            cluster.iter().map(|s| s.key_fill_ratio).collect(),
+                        );
+                    }
+                }
+            }
+        }
+
+        if let Some(flow) = optical_flow_mean {
+            let flow_refs: Vec<f32> = corpus
+                .iter()
+                .filter_map(|s| s.motion_optical_flow)
+                .collect();
+            if flow_refs.len() >= 10 {
+                push_extra(
+                    "motion_optical_flow",
+                    "Motion Velocity (vs Award Cinema)",
+                    "px/f",
+                    flow,
+                    flow_refs,
+                );
+            }
+        }
+
+        rows
+    }
+
     /// Nearest measured award reference shot by mean-centered spatial embedding.
     /// Returns the shot and normalized similarity (0.0 - 1.0).
     pub fn nearest_measured_reference(
