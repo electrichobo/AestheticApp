@@ -180,6 +180,9 @@ pub fn evaluate_candidate_frame(
             creative: creative_score,
             temporal: temporal_score,
             temporal_measured: false,
+            hero_potency_score: technical_score,
+            three_second_impact_score: technical_score,
+            authorship_distinctiveness_score: 50.0,
         },
         style: discovered_style,
         measured: physics,
@@ -249,7 +252,20 @@ pub fn enrich_take(
     let depth_quality = (craft.staging.depth_separation_score * 0.5
         + craft.staging.silhouette_clarity * 0.5)
         .clamp(0.0, 100.0);
-    let color_harmony = take.measured.color.harmonic_palette_score;
+
+    // Log-aware CIE 1931 gamut coverage integration into color harmony score
+    let is_flat_log = detect_flat_log_encoding(&take.measured);
+    let gamut_score = if is_flat_log {
+        // On ungraded log plates, do not penalize compressed Rec.709 gamut volume before LUT transform
+        72.0
+    } else {
+        (take.measured.color.gamut_coverage_srgb * 1.4
+            + take.measured.color.gamut_coverage_p3 * 0.6)
+            .clamp(35.0, 100.0)
+    };
+    let color_harmony =
+        (take.measured.color.harmonic_palette_score * 0.80 + gamut_score * 0.20).clamp(0.0, 100.0);
+
     let staging_poise = craft.staging.gaze_poise_score;
     let lighting_quality = ((craft.lighting.catchlight_intensity * 0.20)
         + (craft.lighting.key_to_fill_ratio.min(8.0) / 8.0) * 80.0)
@@ -281,6 +297,52 @@ pub fn enrich_take(
     } else {
         raw_overall
     };
+
+    // Narrative & Aesthetic Reranker Heads (M18):
+    // 1. Hero-Frame Potency: suitability as a representative showreel still/thumbnail
+    let clip_penalty =
+        (take.measured.exposure.highlight_clip_pct + take.measured.exposure.shadow_clip_pct * 0.5)
+            .min(30.0);
+    let hero_potency = (craft.focus.subject_focus_accuracy * 0.30
+        + staging_poise * 0.25
+        + craft.staging.silhouette_clarity * 0.20
+        + craft.lighting.catchlight_intensity * 0.15
+        + take.scores.technical * 0.20
+        - clip_penalty)
+        .clamp(0.0, 100.0);
+
+    // 2. Three-Second Impact: immediate visual authority in the opening 3 seconds
+    let dr_norm = ((take.measured.exposure.dynamic_range_stops / 11.5) * 100.0).clamp(0.0, 100.0);
+    let split_norm =
+        ((take.measured.color.split_toning_separation_deg / 150.0) * 100.0).clamp(0.0, 100.0);
+    let motion_settle = if take.scores.temporal_measured {
+        take.scores.temporal
+    } else {
+        80.0
+    };
+    let three_sec_impact = (dr_norm * 0.30
+        + lighting_quality * 0.25
+        + split_norm * 0.20
+        + motion_settle * 0.25)
+        .clamp(0.0, 100.0);
+
+    // 3. Authorship & Distinctiveness: intentional visual signature strength
+    let entropy_norm = ((take.measured.color.palette_entropy / 4.2) * 100.0).clamp(0.0, 100.0);
+    let authorship = (depth_quality * 0.35
+        + lighting_quality * 0.35
+        + entropy_norm * 0.15
+        + split_norm * 0.15)
+        .clamp(0.0, 100.0);
+
+    if is_non_photographic {
+        take.scores.hero_potency_score = (hero_potency * 0.20).min(15.0);
+        take.scores.three_second_impact_score = (three_sec_impact * 0.20).min(15.0);
+        take.scores.authorship_distinctiveness_score = (authorship * 0.20).min(15.0);
+    } else {
+        take.scores.hero_potency_score = hero_potency;
+        take.scores.three_second_impact_score = three_sec_impact;
+        take.scores.authorship_distinctiveness_score = authorship;
+    }
 
     // Ancillary tag only: nearest measured award reference or closest master DP signature.
     let emb = inference.infer_embedding(frame);

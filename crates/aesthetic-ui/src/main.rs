@@ -806,6 +806,7 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                             sidecars_count: 1,
                             extracted_clips_count: 0,
                         };
+                        let seq_json = res.sequence_metrics.clone();
                         {
                             let mut loaded = state.loaded_media.write().unwrap();
                             *loaded = Some(info);
@@ -815,7 +816,8 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                         let json = serde_json::json!({
                             "success": true,
                             "takes_count": takes.len(),
-                            "takes": takes
+                            "takes": takes,
+                            "sequence_metrics": seq_json
                         });
                         send_response(
                             stream,
@@ -840,6 +842,7 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                             *loaded = Some(info);
                         }
                         let takes = res.ranked_takes.clone();
+                        let seq_json = res.sequence_metrics.clone();
                         {
                             let mut ca = state.current_analysis.write().unwrap();
                             *ca = Some(res);
@@ -847,7 +850,8 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                         let json = serde_json::json!({
                             "success": true,
                             "takes_count": takes.len(),
-                            "takes": takes
+                            "takes": takes,
+                            "sequence_metrics": seq_json
                         });
                         send_response(
                             stream,
@@ -884,7 +888,8 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                     "source": res.video_info.file_path,
                     "duration": res.video_info.duration_sec,
                     "fps": res.video_info.frame_rate,
-                    "takes": res.ranked_takes
+                    "takes": res.ranked_takes,
+                    "sequence_metrics": res.sequence_metrics
                 });
                 send_response(
                     stream,
@@ -894,11 +899,23 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 );
             } else {
                 let takes = get_demo_takes();
+                let demo_info = VideoSourceInfo {
+                    file_path: "DEMO_PORTFOLIO_REEL.MOV".to_string(),
+                    duration_sec: 60.0,
+                    frame_rate: 24.0,
+                    width: 1920,
+                    height: 1080,
+                    codec: "prores".to_string(),
+                    color_primaries: Some("bt709".to_string()),
+                    transfer_characteristic: Some("bt709".to_string()),
+                };
+                let seq = aesthetic_core::compute_reel_sequence_metrics(&takes, &demo_info);
                 let json = serde_json::json!({
                     "source": "DEMO_PORTFOLIO_REEL.MOV",
                     "duration": 60.0,
                     "fps": 24.0,
-                    "takes": takes
+                    "takes": takes,
+                    "sequence_metrics": seq
                 });
                 send_response(
                     stream,

@@ -21,6 +21,15 @@ pub struct PillarScores {
     /// When false, `temporal` is not a measurement and is excluded from `overall`.
     #[serde(default)]
     pub temporal_measured: bool,
+    /// Hero-frame potency (0.0 - 100.0): suitability as a representative showreel thumbnail/still.
+    #[serde(default)]
+    pub hero_potency_score: f32,
+    /// Three-second impact (0.0 - 100.0): immediate visual authority in the opening 3 seconds.
+    #[serde(default)]
+    pub three_second_impact_score: f32,
+    /// Authorship & distinctiveness (0.0 - 100.0): intentional visual signature strength.
+    #[serde(default)]
+    pub authorship_distinctiveness_score: f32,
 }
 
 /// Automatically discovered style and visual classification.

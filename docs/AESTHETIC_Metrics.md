@@ -145,7 +145,7 @@ All weights are configurable in `config.yaml`.
 | Skin tone ΔE2000 | ✅ | ✅ | When YOLO detects a person: samples Lab values from upper 25% of bounding box (head region), finds closest Macbeth-derived reference (fair → deep), computes ΔE2000. Reports cross-shoot WB inconsistency |
 | Chroma noise | ✅ | ✅ | Mean std of Lab a*/b* channels |
 | Banding detection | ✅ | ✅ | Periodic gradient step proxy |
-| Gamut coverage (sRGB / P3 / Rec.2020) | ✅ | 🟨 | BGR→linear RGB→XYZ D65→xy chromaticity. Point-in-triangle test against gamut primaries. Shown in CIE 1931 diagram — not yet in pillar score |
+| Gamut coverage (sRGB / P3 / Rec.2020) | ✅ | ✅ | BGR→linear RGB→XYZ D65→xy chromaticity. Point-in-triangle test against gamut primaries. Log-aware integration into `color_harmony` & CIE 1931 diagram |
 | WB cross-scene variance | ✅ | ✅ | `wb_cross_scene_std` in `ReelSequenceMetrics` |
 | Colour temp cross-scene variance | ✅ | ✅ | `color_temp_cross_scene_std` in `ReelSequenceMetrics` |
 | Grading uniformity | ✅ | ✅ | `grading_uniformity_score` in `ReelSequenceMetrics` |
@@ -187,9 +187,9 @@ All weights are configurable in `config.yaml`.
 | Visual storytelling effectiveness | 🔮 | 🔮 | Needs learned classifier — field defined in model |
 | Cinematic technique quality | 🔮 | 🔮 | Needs learned classifier — field defined in model |
 | Memorability | 🔮 | 🔮 | CLIP + aesthetic regressor — field defined in model |
-| Hero-frame potency | 🔮 | 🔮 | Probability a human would choose this as representative still |
-| Three-second impact | 🔮 | 🔮 | How strongly a short clip reads in first few seconds |
-| Authorship / distinctiveness | 🔮 | 🔮 | Distinctiveness relative to candidate pool |
+| Hero-frame potency | ✅ | ✅ | `hero_potency_score` combining subject focus accuracy, catchlight, gaze poise, DR & highlight roll-off |
+| Three-second impact | ✅ | ✅ | `three_second_impact_score` combining depth separation, harmonic palette, Chiaroscuro contrast & settle stability |
+| Authorship / distinctiveness | ✅ | ✅ | `authorship_distinctiveness_score` combining style-cluster alignment, palette entropy, split-toning & volumetric haze |
 | Reel diversity contribution | ✅ | ✅ | Maximal Marginal Relevance (`apply_reel_diversity_ranking`) & `reel_diversity_score` |
 
 ---
@@ -304,16 +304,10 @@ Sidecars are cached. Re-scoring with a new baseline version reuses them — infe
 
 ---
 
-## What is still missing and why
+## Recently Completed & Remaining Optional Modules
 
-**Video-only metrics** — `coverage_consistency`, `wb_cross_scene_variance`, `color_temp_cross_scene_variance`, `grading_uniformity`, `shot_duration_sec` all require multiple frames in temporal context. These fields exist in the model and will be populated as reference films are ingested.
-
-**VMAF** — requires a reference video for comparison. Optional QC pack, disabled by default.
-
-**Learned Subjective heads** — hero-frame potency, memorability, three-second impact, authorship/distinctiveness all require training data. The feedback event logger (Phase 1 of the roadmap) will begin accumulating this data from user selects.
-
-**Transition classifier** — a lightweight learned refinement for the existing cut detector (hard cut / dissolve / fade / false positive). Training dataset compilation is in progress.
-
-**Style-family Creative scoring** — the corpus currently compares against a single global baseline. Style-family clustering (prestige naturalism, gritty handheld, documentary vérité, etc.) will enable within-style Creative scores as an additional signal alongside global baseline similarity.
-
-**Gamut coverage in pillar score** — the CIE 1931 gamut computation and coverage percentages are computed and displayed in the Matrix tab but not yet included in the colour category score. Will be added once the display-referred vs log-encoded distinction is handled more robustly.
+- **Video Sequence & Continuity Metrics (`✅ M14`)** — `coverage_consistency_score`, `wb_cross_scene_std`, `color_temp_cross_scene_std`, `grading_uniformity_score`, `visual_fatigue_index`, and `reel_diversity_score` are now computed in `ReelSequenceMetrics` (`crates/aesthetic-core/src/pipeline.rs`) and rendered in the HTML Contact Sheet Sequence Continuity banner and JSON API.
+- **Within-Style-Cluster Baseline Quantiles (`✅ M15`)** — `compare_to_golden_baseline_with_style` (`crates/aesthetic-core/src/baseline_store.rs`) computes within-style-cluster Dynamic Range and Key:Fill percentiles alongside global corpus percentiles across all 760 measured reference shots.
+- **Narrative & Aesthetic Reranker Heads (`✅ M18`)** — `hero_potency_score`, `three_second_impact_score`, and `authorship_distinctiveness_score` are computed for every take (`PillarScores`) and exported in JSON sidecars and HTML contact sheets.
+- **Log-Aware Gamut Coverage in Pillar Score (`✅ M18`)** — CIE 1931 `gamut_coverage_srgb` and `gamut_coverage_p3` are integrated into `color_harmony` with automatic log-plate awareness (`detect_flat_log_encoding`) so ungraded log plates are never penalized before LUT transformation.
+- **VMAF / Reference QC Pack (`🟨 Optional`)** — requires a reference video for full-reference comparison; optional QC pack, disabled by default.

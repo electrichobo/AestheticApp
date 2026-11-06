@@ -465,6 +465,38 @@ pub fn generate_contact_sheet_html_with_frames(
         limit
     );
     let _ = writeln!(html, "  </header>");
+
+    let dummy_info = aesthetic_models::manifest::VideoSourceInfo {
+        file_path: media_file.to_string(),
+        duration_sec: 0.0,
+        frame_rate: 24.0,
+        width: 1920,
+        height: 1080,
+        codec: "unknown".to_string(),
+        color_primaries: None,
+        transfer_characteristic: None,
+    };
+    let seq = crate::pipeline::compute_reel_sequence_metrics(selects, &dummy_info);
+    let _ = writeln!(
+        html,
+        r#"  <section style="max-width:1400px;margin:0 auto 24px auto;background:#14161a;border:1px solid #282c35;border-radius:10px;padding:14px 20px;display:flex;flex-wrap:wrap;gap:22px;align-items:center;justify-content:space-between;font-size:13px;">
+    <div><span style="color:#8a919e;text-transform:uppercase;font-size:11px;font-weight:700;letter-spacing:0.6px;">Sequence &amp; Reel Continuity</span><div style="color:#fff;font-weight:600;margin-top:2px;">{}</div></div>
+    <div><span style="color:#8a919e;font-size:11px;">Grading Uniformity</span><div style="color:#4ade80;font-weight:700;font-family:monospace;">{:.1} / 100</div></div>
+    <div><span style="color:#8a919e;font-size:11px;">Coverage Consistency</span><div style="color:#38bdf8;font-weight:700;font-family:monospace;">{:.1} / 100</div></div>
+    <div><span style="color:#8a919e;font-size:11px;">Reel Diversity</span><div style="color:#e5a93c;font-weight:700;font-family:monospace;">{:.1} / 100</div></div>
+    <div><span style="color:#8a919e;font-size:11px;">Visual Fatigue Index</span><div style="color:#e8eaed;font-weight:700;font-family:monospace;">{:.1} / 100</div></div>
+    <div><span style="color:#8a919e;font-size:11px;">Cross-Scene Spread</span><div style="color:#8a919e;font-family:monospace;font-size:12px;">WB &sigma;={:.2} | CCT &sigma;={:.0}K | Luma &sigma;={:.1}</div></div>
+  </section>"#,
+        seq.transfer_curve_label,
+        seq.grading_uniformity_score,
+        seq.coverage_consistency_score,
+        seq.reel_diversity_score,
+        seq.visual_fatigue_index,
+        seq.wb_cross_scene_std,
+        seq.color_temp_cross_scene_std,
+        seq.exposure_consistency_std
+    );
+
     let _ = writeln!(html, "  <main class=\"grid\">");
 
     for (idx, take) in selects.iter().enumerate() {
@@ -663,7 +695,15 @@ pub fn generate_contact_sheet_html_with_frames(
         }
         let _ = writeln!(html, "            </div>");
 
-        // 6. Golden Baseline Comparison
+        // 6. Narrative & Aesthetic Reranker Heads (M18)
+        let _ = writeln!(html, "            <div class=\"metric-branch\">");
+        let _ = writeln!(html, "              <span class=\"branch-title\">Narrative &amp; Aesthetic Reranker Heads</span>");
+        let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Hero-Frame Potency (Thumbnail Suitability)</span><span>{:.1} / 100</span></div>", take.scores.hero_potency_score);
+        let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Three-Second Impact (Opening Authority)</span><span>{:.1} / 100</span></div>", take.scores.three_second_impact_score);
+        let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Authorship &amp; Distinctiveness</span><span>{:.1} / 100</span></div>", take.scores.authorship_distinctiveness_score);
+        let _ = writeln!(html, "            </div>");
+
+        // 7. Golden Baseline Comparison
         if !take.golden_baseline.is_empty() {
             let _ = writeln!(html, "            <div class=\"metric-branch\">");
             let _ = writeln!(html, "              <span class=\"branch-title\">Golden Baseline Comparison (Award-Winning Cinema Distribution)</span>");
@@ -677,7 +717,7 @@ pub fn generate_contact_sheet_html_with_frames(
             let _ = writeln!(html, "            </div>");
         }
 
-        // 6. Forensic Technical Diagnostics
+        // 8. Forensic Technical Diagnostics
         let _ = writeln!(html, "            <div class=\"metric-branch\">");
         let _ = writeln!(html, "              <span class=\"branch-title\">Forensics: Non-Punitive Advisory Flags</span>");
         if take.concerns.is_empty() {
@@ -741,7 +781,7 @@ pub fn export_shot_sidecars_with_frames(
         }
 
         let sidecar = serde_json::json!({
-            "metrics_version": "1.0",
+            "metrics_version": "1.1",
             "source_file": media_file,
             "take_id": take.take_id,
             "hero_frame_png": png_filename,
@@ -754,6 +794,9 @@ pub fn export_shot_sidecars_with_frames(
                 "technical": take.scores.technical,
                 "creative": take.scores.creative,
                 "temporal": take.scores.temporal,
+                "hero_potency_score": take.scores.hero_potency_score,
+                "three_second_impact_score": take.scores.three_second_impact_score,
+                "authorship_distinctiveness_score": take.scores.authorship_distinctiveness_score,
             },
             "style": {
                 "lighting_key": take.style.lighting_key,
@@ -929,6 +972,19 @@ pub fn rescore_from_sidecars(
             flow_opt,
         );
 
+        let hero_potency_score = val["scores"]["hero_potency_score"]
+            .as_f64()
+            .map(|v| v as f32)
+            .unwrap_or(overall);
+        let three_second_impact_score = val["scores"]["three_second_impact_score"]
+            .as_f64()
+            .map(|v| v as f32)
+            .unwrap_or(creative);
+        let authorship_distinctiveness_score = val["scores"]["authorship_distinctiveness_score"]
+            .as_f64()
+            .map(|v| v as f32)
+            .unwrap_or(style.match_confidence);
+
         takes.push(ShotTake {
             take_id,
             scene_index,
@@ -943,6 +999,9 @@ pub fn rescore_from_sidecars(
                 creative,
                 temporal,
                 temporal_measured,
+                hero_potency_score,
+                three_second_impact_score,
+                authorship_distinctiveness_score,
             },
             style,
             measured,
@@ -1036,6 +1095,7 @@ mod tests {
                 creative: 88.0,
                 temporal: 93.0,
                 temporal_measured: true,
+                ..Default::default()
             },
             style: DiscoveredStyle {
                 lighting_key: "Low-Key".to_string(),
