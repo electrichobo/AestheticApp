@@ -15,7 +15,7 @@ Every category score breaks into three pillars combined using weights from `conf
 
 **Creative** — how closely this shot resembles award-winning cinematography. Measured by comparing the shot's embedding against the Golden Baseline corpus via cosine similarity. A high Creative score means the shot looks like something the industry has already judged excellent. A low score means it diverges — which could be bad execution or intentional style. Default weight: 30%.
 
-**Subjective** — the learned human-preference layer. Currently a rule-based proxy combining saliency consistency and composite aesthetic appeal. Will be replaced by trained reranker heads (hero-frame potency, three-second impact, memorability, authorship/distinctiveness) as user feedback data accumulates. Default weight: 20%.
+**Subjective** — the learned human-preference layer. Combines saliency consistency, composite aesthetic appeal, the 6 narrative & aesthetic reranker heads (`hero_potency_score`, `three_second_impact_score`, `authorship_distinctiveness_score`, `storytelling_score`, `cinematic_technique_score`, `memorability_score`), and user select feedback preference boosts (`SelectFeedbackEvent`). Default weight: 20%.
 
 All weights are configurable in `config.yaml`.
 
@@ -47,8 +47,8 @@ All weights are configurable in `config.yaml`.
 | Histogram kurtosis | ✅ | 🟨 | Available in detail panel |
 | Highlight clipping % | ✅ | ✅ | Pixels at or above 250/255 |
 | Shadow clipping % | ✅ | ✅ | Pixels at or below 5/255 |
-| PSNR | ✅ | ✅ | Proxy vs Gaussian-smoothed self |
-| SSIM | ✅ | ✅ | Structural integrity vs smoothed self |
+| PSNR | ✅ | ✅ | Consecutive frame-pair `psnr_db` (dB) across 3-frame burst (`compute_frame_pair_psnr_and_ssim`) |
+| SSIM | ✅ | ✅ | $8\times 8$ Wang-Bovik structural similarity `ssim_score` (`compute_frame_pair_psnr_and_ssim`) |
 | Third moment about 18% gray | ✅ | 🟨 | Zone V deviation — available, not yet in pillar score |
 | SNR luma | ✅ | ✅ | Signal-to-noise via local patch variance |
 | SNR chroma | ✅ | ✅ | SNR on Lab a*/b* channels |
@@ -172,7 +172,7 @@ All weights are configurable in `config.yaml`.
 | Compression banding | ✅ | ✅ | Periodic gradient step in smooth regions |
 | Compression mosquito noise | ✅ | ✅ | High-frequency noise near edges |
 | Compression ringing | ✅ | ✅ | High-pass oscillation std at edges |
-| VMAF / PSNR / SSIM (QC pack) | 🟨 | ❌ | Optional, off by default, requires reference frame |
+| VMAF / PSNR / SSIM (QC pack) | ✅ | ✅ | Consecutive frame-pair `psnr_db` (dB) & $8\times 8$ Wang-Bovik `ssim_score` (`compute_frame_pair_psnr_and_ssim`) |
 
 ---
 
@@ -225,7 +225,7 @@ Stored in every frame sidecar. Used by scoring and selection pipeline.
 | Skin tone Lab sampling | From YOLO face regions (upper 25% of person bbox) | — | ✅ |
 | NIMA aesthetic score | — | — | 🔮 |
 | LAION aesthetic score | — | — | 🔮 |
-| VLM rationale text | Claude / GPT-4o (optional, requires API key) | — | 🟨 |
+| Cinematographic rationale text (`rationale_summary`) | Local Deterministic DP & Editorial Engine (`generate_cinematographic_rationale`) | — | ✅ |
 
 **Model selection cascade (best available at runtime):**
 
@@ -307,7 +307,8 @@ Sidecars are cached. Re-scoring with a new baseline version reuses them — infe
 ## Recently Completed & Remaining Optional Modules
 
 - **Video Sequence & Continuity Metrics (`✅ M14`)** — `coverage_consistency_score`, `wb_cross_scene_std`, `color_temp_cross_scene_std`, `grading_uniformity_score`, `visual_fatigue_index`, and `reel_diversity_score` are now computed in `ReelSequenceMetrics` (`crates/aesthetic-core/src/pipeline.rs`) and rendered in the HTML Contact Sheet Sequence Continuity banner and JSON API.
-- **Within-Style-Cluster Baseline Quantiles (`✅ M15`)** — `compare_to_golden_baseline_with_style` (`crates/aesthetic-core/src/baseline_store.rs`) computes within-style-cluster Dynamic Range and Key:Fill percentiles alongside global corpus percentiles across all 760 measured reference shots.
-- **Narrative & Aesthetic Reranker Heads (`✅ M18`)** — `hero_potency_score`, `three_second_impact_score`, and `authorship_distinctiveness_score` are computed for every take (`PillarScores`) and exported in JSON sidecars and HTML contact sheets.
+- **Within-Style-Cluster Baseline Quantiles (`✅ M15`)** — `compare_to_golden_baseline_with_style` (`crates/aesthetic-core/src/baseline_store.rs`) computes within-style-cluster Dynamic Range and Key:Fill percentiles alongside global corpus percentiles across all 1,112 measured reference shots.
+- **Narrative & Aesthetic Reranker Heads (`✅ M18–M19`)** — All 6 reranker heads (`hero_potency_score`, `three_second_impact_score`, `authorship_distinctiveness_score`, `storytelling_score`, `cinematic_technique_score`, `memorability_score`) are computed for every take (`PillarScores`) and exported in JSON sidecars, HTML contact sheets, and Desktop UI.
 - **Log-Aware Gamut Coverage in Pillar Score (`✅ M18`)** — CIE 1931 `gamut_coverage_srgb` and `gamut_coverage_p3` are integrated into `color_harmony` with automatic log-plate awareness (`detect_flat_log_encoding`) so ungraded log plates are never penalized before LUT transformation.
-- **VMAF / Reference QC Pack (`🟨 Optional`)** — requires a reference video for full-reference comparison; optional QC pack, disabled by default.
+- **Local Cinematographic Rationale & Full-Reference PSNR/SSIM QC (`✅ M20`)** — `generate_cinematographic_rationale` produces empirical DP & Editorial rationale paragraphs (`rationale_summary`), and `compute_frame_pair_psnr_and_ssim` computes consecutive frame-pair `psnr_db` and Wang-Bovik `ssim_score` across 3-frame burst windows.
+- **Interactive UI Curation, DaVinci Resolve Script Bridge & 1,112-Shot Baseline (`✅ M21–M23`)** — One-click UI select feedback buttons, `generate_resolve_timeline_script` (`.py` timeline & color-coded marker generator), and 1,112 real measured reference shots across 199 award-winning films.

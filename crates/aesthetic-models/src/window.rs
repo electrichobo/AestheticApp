@@ -112,4 +112,8 @@ pub struct ShotTake {
     /// Measured metrics placed within the measured award-cinema Golden Baseline distribution.
     #[serde(default)]
     pub golden_baseline: Vec<BaselineMetricComparison>,
+
+    /// Concise, deterministic natural-language DP & Editorial rationale explaining the shot's ranking (M20).
+    #[serde(default)]
+    pub rationale_summary: String,
 }

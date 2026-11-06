@@ -9,7 +9,10 @@ pub mod matte;
 pub mod optics;
 pub mod scopes;
 
-pub use exposure::{compute_el_zone_map, el_zone_color_for_stops, luma_to_el_zone_stops};
+pub use exposure::{
+    compute_el_zone_map, compute_frame_pair_psnr_and_ssim, el_zone_color_for_stops,
+    luma_to_el_zone_stops,
+};
 pub use matte::{detect_active_picture, ActiveCropBounds};
 pub use scopes::{
     compute_cie_chromaticity_map, compute_histograms, compute_parade, compute_vectorscope,

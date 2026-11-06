@@ -156,10 +156,15 @@ fn run_feedback_log(take_id: &str, action: &str, flags: &[String]) {
 
 fn run_sidecars_rescore(sidecars_dir: &Path, flags: &[String]) {
     let mut contact_sheet_path: Option<PathBuf> = None;
+    let mut resolve_script_path: Option<PathBuf> = None;
     let mut i = 0;
     while i < flags.len() {
         if (flags[i] == "--contact-sheet" || flags[i] == "--html") && i + 1 < flags.len() {
             contact_sheet_path = Some(PathBuf::from(&flags[i + 1]));
+            i += 1;
+        } else if (flags[i] == "--resolve" || flags[i] == "--resolve-script") && i + 1 < flags.len()
+        {
+            resolve_script_path = Some(PathBuf::from(&flags[i + 1]));
             i += 1;
         }
         i += 1;
@@ -207,6 +212,23 @@ fn run_sidecars_rescore(sidecars_dir: &Path, flags: &[String]) {
                 }
                 if std::fs::write(cs_path, html).is_ok() {
                     println!("\n[✓] Updated Contact Sheet exported to: {}", cs_path.display());
+                }
+            }
+            if let Some(ref py_path) = resolve_script_path {
+                let py = aesthetic_core::export::generate_resolve_timeline_script(
+                    "AESTHETIC_RESCORED",
+                    &sidecars_dir.to_string_lossy(),
+                    &takes,
+                    24.0,
+                );
+                if let Some(parent) = py_path.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if std::fs::write(py_path, py).is_ok() {
+                    println!(
+                        "[✓] DaVinci Resolve script exported to: {}",
+                        py_path.display()
+                    );
                 }
             }
         }

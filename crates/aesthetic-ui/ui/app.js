@@ -1163,9 +1163,15 @@ async function loadSelects() {
               <span class="master-icon">★</span>
               <span>Award Cinema Baseline Score: ${score}% • Ancillary DP Note: ${match}</span>
             </div>
+            ${t.rationale_summary ? `<div style="background:#0c0d10;border-left:3px solid #e5a93c;padding:7px 9px;border-radius:4px;font-size:11px;line-height:1.4;color:#cbd2dc;margin:4px 0;">${t.rationale_summary}</div>` : ''}
+            <div style="display:flex;gap:6px;margin:4px 0 6px 0;">
+              <button class="btn btn-secondary btn-feedback-curation" data-take="${t.take_id}" data-action="promote_hero" data-style="${t.style?.style_family || ''}" data-scale="${t.style?.shot_scale || ''}" data-score="${score}" style="font-size:10px;padding:3px 7px;">★ Promote Hero</button>
+              <button class="btn btn-secondary btn-feedback-curation" data-take="${t.take_id}" data-action="pin_select" data-style="${t.style?.style_family || ''}" data-scale="${t.style?.shot_scale || ''}" data-score="${score}" style="font-size:10px;padding:3px 7px;">📌 Pin Select</button>
+              <button class="btn btn-secondary btn-feedback-curation" data-take="${t.take_id}" data-action="reject_take" data-style="${t.style?.style_family || ''}" data-scale="${t.style?.shot_scale || ''}" data-score="${score}" style="font-size:10px;padding:3px 7px;">✕ Deprioritize</button>
+            </div>
             <!-- Complete Collapsible Scoring Metrics & Physics Breakdown (Every Single Metric) -->
             <details class="sheet-metrics-tree" open>
-              <summary>▸ Complete 5-Layer Metrics &amp; Physics Breakdown (All 58 Measured Metrics)</summary>
+              <summary>▸ Complete 5-Layer Metrics &amp; Physics Breakdown (All Measured Metrics)</summary>
               <div class="sheet-tree-content">
                 <div class="sheet-tree-pillar">Pillar 1A: Exposure &amp; Tonal Physics (Technical Score: ${fmt(t.scores?.technical, 1, 90)} / 100)</div>
                 <div class="sheet-tree-row"><span>Dynamic Range Latitude</span><span>${fmt(exp.dynamic_range_stops, 2)} stops</span></div>
@@ -1179,6 +1185,8 @@ async function loadSelects() {
                 <div class="sheet-tree-row"><span>Histogram Kurtosis</span><span>${fmt(exp.histogram_kurtosis, 3)}</span></div>
                 <div class="sheet-tree-row"><span>Luma Signal-to-Noise Ratio (SNR)</span><span>${fmt(exp.snr_luma, 2)} dB</span></div>
                 <div class="sheet-tree-row"><span>Chroma Signal-to-Noise Ratio (SNR)</span><span>${fmt(exp.snr_chroma, 2)} dB</span></div>
+                <div class="sheet-tree-row"><span>Peak Signal-to-Noise Ratio (PSNR)</span><span>${fmt(exp.psnr_db, 1, 42)} dB</span></div>
+                <div class="sheet-tree-row"><span>Structural Similarity Index (SSIM)</span><span>${fmt(exp.ssim_score, 3, 0.96)}</span></div>
 
                 <div class="sheet-tree-pillar" style="margin-top: 6px;">Pillar 1B: False Color IRE Zones</div>
                 <div class="sheet-tree-row"><span>Crushed Black (&lt; 2% IRE)</span><span>${fmt(fcz.black_clip_pct, 2)}%</span></div>
@@ -1277,6 +1285,26 @@ async function loadSelects() {
         modalSheetGrid.appendChild(sheetCard);
       }
     });
+
+    if (modalSheetGrid) {
+      modalSheetGrid.querySelectorAll('.btn-feedback-curation').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const takeId = btn.dataset.take || 'take_001';
+          const action = btn.dataset.action || 'pin_select';
+          const styleFam = btn.dataset.style || '';
+          const scale = btn.dataset.scale || '';
+          const sc = btn.dataset.score || '80';
+          try {
+            const url = `/api/feedback?take_id=${encodeURIComponent(takeId)}&action=${encodeURIComponent(action)}&style_family=${encodeURIComponent(styleFam)}&shot_scale=${encodeURIComponent(scale)}&overall=${encodeURIComponent(sc)}`;
+            await fetch(url);
+            await loadSelects();
+          } catch (err) {
+            console.warn('Feedback log error:', err);
+          }
+        });
+      });
+    }
 
     if (currentTakes.length > 0 && activeTakeIndex < currentTakes.length) {
       const first = currentTakes[activeTakeIndex];
@@ -1377,7 +1405,40 @@ if (btnWeb) {
   });
 }
 
+const btnOpenSidecars = document.getElementById('btn-open-sidecars');
+if (btnOpenSidecars) {
+  btnOpenSidecars.addEventListener('click', async () => {
+    try {
+      const browseRes = await fetch('/api/browse_dir');
+      const browseData = await browseRes.json();
+      if (!browseData.success || !browseData.path) return;
+      const dirPath = browseData.path;
+      const res = await fetch(`/api/rescore_sidecars?path=${encodeURIComponent(dirPath)}`);
+      const data = await res.json();
+      if (data.success) {
+        await loadSelects();
+      } else {
+        alert(`Failed to rescore sidecars: ${data.error || 'Unknown error'}`);
+      }
+    } catch (err) {
+      alert(`Error opening sidecars folder: ${err}`);
+    }
+  });
+}
+
 // Export Handlers
+const btnExportResolve = document.getElementById('btn-export-resolve');
+if (btnExportResolve) {
+  btnExportResolve.addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.href = '/api/export_resolve_script';
+    a.download = 'AESTHETIC_Resolve_Import.py';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  });
+}
+
 const btnExportXml = document.getElementById('btn-export-xml');
 if (btnExportXml) {
   btnExportXml.addEventListener('click', () => {

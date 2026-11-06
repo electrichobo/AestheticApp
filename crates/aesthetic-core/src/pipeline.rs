@@ -195,6 +195,7 @@ pub fn evaluate_candidate_frame(
         concerns,
         craft: None,
         golden_baseline: Vec::new(),
+        rationale_summary: String::new(),
     }
 }
 
@@ -228,6 +229,9 @@ pub fn enrich_take(
         };
         let a = proxy(frame);
         let b = proxy(next);
+        let (psnr_db, ssim_score) = aesthetic_metrics::compute_frame_pair_psnr_and_ssim(&a, &b);
+        take.measured.exposure.psnr_db = psnr_db;
+        take.measured.exposure.ssim_score = ssim_score;
         let depth = inference.infer_depth(&a);
         craft.motion = crate::inference::compute_motion_dynamics(
             &a,
@@ -567,6 +571,89 @@ pub fn enrich_take(
     }
 
     take.craft = Some(craft);
+    take.rationale_summary = generate_cinematographic_rationale(take);
+}
+
+/// Generates a deterministic, data-backed DP & Editorial rationale paragraph explaining why
+/// the candidate take was ranked where it is relative to the Award-Winning Cinema Golden Baseline (M20).
+pub fn generate_cinematographic_rationale(take: &ShotTake) -> String {
+    if take
+        .concerns
+        .iter()
+        .any(|c| c.code == "NON_PHOTOGRAPHIC_OR_CREDITS")
+    {
+        return format!(
+            "Non-photographic black leader or title/credits card ({:.1}% Zone 0 black floor, entropy {:.2} bits); automatically deprioritized from hero cinematography selects.",
+            take.measured.exposure.el_zones.zone_0_black_pct,
+            take.measured.color.palette_entropy
+        );
+    }
+
+    let scale = if take.style.shot_scale.is_empty() {
+        "Medium"
+    } else {
+        take.style.shot_scale.as_str()
+    };
+    let intent = if take.style.shot_intent.is_empty() {
+        "Narrative Setup"
+    } else {
+        take.style.shot_intent.as_str()
+    };
+    let scene_env = if take.style.scene_type.is_empty() {
+        "Controlled Lighting"
+    } else {
+        take.style.scene_type.as_str()
+    };
+    let motion_label = if take.style.motion_type.is_empty() {
+        "Static"
+    } else {
+        take.style.motion_type.as_str()
+    };
+
+    let dr = take.measured.exposure.dynamic_range_stops;
+    let rolloff = take.measured.exposure.highlight_rolloff;
+    let cct = take.measured.color.estimated_kelvin;
+    let palette = if take.style.palette_family.is_empty() {
+        "Natural Daylight"
+    } else {
+        take.style.palette_family.as_str()
+    };
+
+    let (kf, poise, depth_planes, focus_acc) = if let Some(ref c) = take.craft {
+        (
+            c.lighting.key_to_fill_ratio,
+            c.staging.gaze_poise_score,
+            c.staging.depth_plane_count,
+            c.focus.subject_focus_accuracy,
+        )
+    } else {
+        (2.5, 75.0, 2, 75.0)
+    };
+
+    let ref_note = take
+        .style
+        .cinematographer_match
+        .as_deref()
+        .unwrap_or("Award-Winning Cinema Baseline");
+
+    format!(
+        "{} ({}, {:.1}s {}) exhibiting {:.1} stops dynamic range ({:.0}% highlight roll-off) and {:.1}:1 {} lighting contrast. Chromatic profile anchored in {} ({:.0}K) with {}-plane Z-depth separation (focus isolation {:.0}/100, eyeline poise {:.0}/100). Nearest measured reference affinity: {} [{}].",
+        scale,
+        intent,
+        take.duration_sec.max(1.5),
+        motion_label,
+        dr,
+        rolloff,
+        kf,
+        take.style.lighting_key,
+        palette,
+        cct,
+        depth_planes.max(1),
+        focus_acc,
+        poise,
+        ref_note,
+        scene_env
+    )
 }
 
 /// Heuristic detector for ungraded camera log plates when container transfer tags are stripped.

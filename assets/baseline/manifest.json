@@ -1,7 +1,7 @@
 {
   "version": "2.0.0-measured",
-  "total_films": 135,
-  "total_reference_shots": 760,
+  "total_films": 199,
+  "total_reference_shots": 1112,
   "films": [
     {
       "title": "2001: A Space Odyssey",
@@ -1217,21 +1217,597 @@
       "aspect_ratio": "2.39:1",
       "shot_count": 5,
       "average_dynamic_range": 9.69629
+    },
+    {
+      "title": "Nosferatu",
+      "cinematographer": "Jarin Blaschke",
+      "director": null,
+      "year": 2024,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.65724
+    },
+    {
+      "title": "El Conde",
+      "cinematographer": "Edward Lachman",
+      "director": null,
+      "year": 2023,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.25253
+    },
+    {
+      "title": "The Zone of Interest",
+      "cinematographer": "Łukasz Żal",
+      "director": null,
+      "year": 2023,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.20121
+    },
+    {
+      "title": "All Quiet on the Western Front",
+      "cinematographer": "James Friend",
+      "director": null,
+      "year": 2022,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 10.12462
+    },
+    {
+      "title": "Empire of Light",
+      "cinematographer": "Roger Deakins",
+      "director": null,
+      "year": 2022,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.33659
+    },
+    {
+      "title": "Bardo",
+      "cinematographer": "Darius Khondji",
+      "director": null,
+      "year": 2022,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 9.114
+    },
+    {
+      "title": "Nightmare Alley",
+      "cinematographer": "Dan Laustsen",
+      "director": null,
+      "year": 2021,
+      "aspect_ratio": "Varied",
+      "shot_count": 4,
+      "average_dynamic_range": 10.49674
+    },
+    {
+      "title": "Nomadland",
+      "cinematographer": "Joshua James Richards",
+      "director": null,
+      "year": 2020,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 8.515
+    },
+    {
+      "title": "News of the World",
+      "cinematographer": "Dariusz Wolski",
+      "director": null,
+      "year": 2020,
+      "aspect_ratio": "Varied",
+      "shot_count": 4,
+      "average_dynamic_range": 9.81578
+    },
+    {
+      "title": "The Irishman",
+      "cinematographer": "Rodrigo Prieto",
+      "director": null,
+      "year": 2019,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 10.77231
+    },
+    {
+      "title": "Joker",
+      "cinematographer": "Lawrence Sher",
+      "director": null,
+      "year": 2019,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.11075
+    },
+    {
+      "title": "A Star Is Born",
+      "cinematographer": "Matthew Libatique",
+      "director": null,
+      "year": 2018,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 10.96213
+    },
+    {
+      "title": "Never Look Away",
+      "cinematographer": "Caleb Deschanel",
+      "director": null,
+      "year": 2018,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.72659
+    },
+    {
+      "title": "The Shape of Water",
+      "cinematographer": "Dan Laustsen",
+      "director": null,
+      "year": 2017,
+      "aspect_ratio": "Varied",
+      "shot_count": 4,
+      "average_dynamic_range": 10.44053
+    },
+    {
+      "title": "Darkest Hour",
+      "cinematographer": "Bruno Delbonnel",
+      "director": null,
+      "year": 2017,
+      "aspect_ratio": "Varied",
+      "shot_count": 4,
+      "average_dynamic_range": 10.43412
+    },
+    {
+      "title": "Mudbound",
+      "cinematographer": "Rachel Morrison",
+      "director": null,
+      "year": 2017,
+      "aspect_ratio": "Varied",
+      "shot_count": 4,
+      "average_dynamic_range": 10.51944
+    },
+    {
+      "title": "Arrival",
+      "cinematographer": "Bradford Young",
+      "director": null,
+      "year": 2016,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 9.59097
+    },
+    {
+      "title": "The Hateful Eight",
+      "cinematographer": "Robert Richardson",
+      "director": null,
+      "year": 2015,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 8.57742
+    },
+    {
+      "title": "Mr. Turner",
+      "cinematographer": "Dick Pope",
+      "director": null,
+      "year": 2014,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.2794
+    },
+    {
+      "title": "Unbroken",
+      "cinematographer": "Roger Deakins",
+      "director": null,
+      "year": 2014,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 9.02266
+    },
+    {
+      "title": "Nebraska",
+      "cinematographer": "Phedon Papamichael",
+      "director": null,
+      "year": 2013,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.96653
+    },
+    {
+      "title": "Anna Karenina",
+      "cinematographer": "Seamus McGarvey",
+      "director": null,
+      "year": 2012,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.66026
+    },
+    {
+      "title": "Django Unchained",
+      "cinematographer": "Robert Richardson",
+      "director": null,
+      "year": 2012,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.26437
+    },
+    {
+      "title": "Lincoln",
+      "cinematographer": "Janusz Kamiński",
+      "director": null,
+      "year": 2012,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.08131
+    },
+    {
+      "title": "The Artist",
+      "cinematographer": "Guillaume Schiffman",
+      "director": null,
+      "year": 2011,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.04151
+    },
+    {
+      "title": "The Girl with the Dragon Tattoo",
+      "cinematographer": "Jeff Cronenweth",
+      "director": null,
+      "year": 2011,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 9.61699
+    },
+    {
+      "title": "War Horse",
+      "cinematographer": "Janusz Kamiński",
+      "director": null,
+      "year": 2011,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.11931
+    },
+    {
+      "title": "The King's Speech",
+      "cinematographer": "Danny Cohen",
+      "director": null,
+      "year": 2010,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.44175
+    },
+    {
+      "title": "True Grit",
+      "cinematographer": "Roger Deakins",
+      "director": null,
+      "year": 2010,
+      "aspect_ratio": "Varied",
+      "shot_count": 3,
+      "average_dynamic_range": 11.79752
+    },
+    {
+      "title": "The White Ribbon",
+      "cinematographer": "Christian Berger",
+      "director": null,
+      "year": 2009,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 11.36386
+    },
+    {
+      "title": "The Curious Case of Benjamin Button",
+      "cinematographer": "Claudio Miranda",
+      "director": null,
+      "year": 2008,
+      "aspect_ratio": "Varied",
+      "shot_count": 4,
+      "average_dynamic_range": 10.08652
+    },
+    {
+      "title": "The Reader",
+      "cinematographer": "Roger Deakins",
+      "director": null,
+      "year": 2008,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 11.84657
+    },
+    {
+      "title": "Revolutionary Road",
+      "cinematographer": "Roger Deakins",
+      "director": null,
+      "year": 2008,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 9.55125
+    },
+    {
+      "title": "Atonement",
+      "cinematographer": "Seamus McGarvey",
+      "director": null,
+      "year": 2007,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 10.66779
+    },
+    {
+      "title": "The Diving Bell and the Butterfly",
+      "cinematographer": "Janusz Kamiński",
+      "director": null,
+      "year": 2007,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 9.96825
+    },
+    {
+      "title": "The Illusionist",
+      "cinematographer": "Dick Pope",
+      "director": null,
+      "year": 2006,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.73718
+    },
+    {
+      "title": "The Black Dahlia",
+      "cinematographer": "Vilmos Zsigmond",
+      "director": null,
+      "year": 2006,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.68052
+    },
+    {
+      "title": "The New World",
+      "cinematographer": "Emmanuel Lubezki",
+      "director": null,
+      "year": 2005,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 11.44491
+    },
+    {
+      "title": "A Very Long Engagement",
+      "cinematographer": "Bruno Delbonnel",
+      "director": null,
+      "year": 2004,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.01159
+    },
+    {
+      "title": "House of Flying Daggers",
+      "cinematographer": "Zhao Xiaoding",
+      "director": null,
+      "year": 2004,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.50251
+    },
+    {
+      "title": "The Passion of the Christ",
+      "cinematographer": "Caleb Deschanel",
+      "director": null,
+      "year": 2004,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.77389
+    },
+    {
+      "title": "The Phantom of the Opera",
+      "cinematographer": "John Mathieson",
+      "director": null,
+      "year": 2004,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.99697
+    },
+    {
+      "title": "Seabiscuit",
+      "cinematographer": "John Schwartzman",
+      "director": null,
+      "year": 2003,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.00797
+    },
+    {
+      "title": "Cold Mountain",
+      "cinematographer": "John Seale",
+      "director": null,
+      "year": 2003,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 8.98127
+    },
+    {
+      "title": "Girl with a Pearl Earring",
+      "cinematographer": "Eduardo Serra",
+      "director": null,
+      "year": 2003,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.94547
+    },
+    {
+      "title": "City of God",
+      "cinematographer": "César Charlone",
+      "director": null,
+      "year": 2003,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 10.99506
+    },
+    {
+      "title": "Chicago",
+      "cinematographer": "Dion Beebe",
+      "director": null,
+      "year": 2002,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.16357
+    },
+    {
+      "title": "Gangs of New York",
+      "cinematographer": "Michael Ballhaus",
+      "director": null,
+      "year": 2002,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.81428
+    },
+    {
+      "title": "The Pianist",
+      "cinematographer": "Paweł Edelman",
+      "director": null,
+      "year": 2002,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.57586
+    },
+    {
+      "title": "Moulin Rouge!",
+      "cinematographer": "Donald McAlpine",
+      "director": null,
+      "year": 2001,
+      "aspect_ratio": "Varied",
+      "shot_count": 4,
+      "average_dynamic_range": 10.58435
+    },
+    {
+      "title": "American Beauty",
+      "cinematographer": "Conrad L. Hall",
+      "director": null,
+      "year": 1999,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 9.70099
+    },
+    {
+      "title": "The Insider",
+      "cinematographer": "Dante Spinotti",
+      "director": null,
+      "year": 1999,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.22664
+    },
+    {
+      "title": "Snow Falling on Cedars",
+      "cinematographer": "Robert Richardson",
+      "director": null,
+      "year": 1999,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.59867
+    },
+    {
+      "title": "The Thin Red Line",
+      "cinematographer": "John Toll",
+      "director": null,
+      "year": 1998,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.50774
+    },
+    {
+      "title": "Elizabeth",
+      "cinematographer": "Remi Adefarasin",
+      "director": null,
+      "year": 1998,
+      "aspect_ratio": "Varied",
+      "shot_count": 4,
+      "average_dynamic_range": 10.31024
+    },
+    {
+      "title": "Amistad",
+      "cinematographer": "Janusz Kamiński",
+      "director": null,
+      "year": 1997,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.80372
+    },
+    {
+      "title": "Kundun",
+      "cinematographer": "Roger Deakins",
+      "director": null,
+      "year": 1997,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 8.843
+    },
+    {
+      "title": "L.A. Confidential",
+      "cinematographer": "Dante Spinotti",
+      "director": null,
+      "year": 1997,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.51827
+    },
+    {
+      "title": "Michael Collins",
+      "cinematographer": "Chris Menges",
+      "director": null,
+      "year": 1996,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 7.46518
+    },
+    {
+      "title": "Batman Forever",
+      "cinematographer": "Stephen Goldblatt",
+      "director": null,
+      "year": 1995,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 7.42015
+    },
+    {
+      "title": "Shanghai Triad",
+      "cinematographer": "Lü Yue",
+      "director": null,
+      "year": 1995,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 7.91914
+    },
+    {
+      "title": "The Night of the Hunter",
+      "cinematographer": "Stanley Cortez",
+      "director": null,
+      "year": 1955,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.3216
+    },
+    {
+      "title": "Raging Bull",
+      "cinematographer": "Michael Chapman",
+      "director": null,
+      "year": 1980,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 11.42814
+    },
+    {
+      "title": "Fanny and Alexander",
+      "cinematographer": "Sven Nykvist",
+      "director": null,
+      "year": 1982,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.09877
     }
   ],
   "dynamic_range_quantiles": {
     "min": 1.95,
-    "p10": 7.32831,
-    "p25": 8.62184,
-    "p50": 9.73145,
-    "p75": 10.85235,
-    "p90": 11.65197,
-    "max": 11.99438
+    "p10": 7.44737,
+    "p25": 8.92647,
+    "p50": 9.98307,
+    "p75": 11.02671,
+    "p90": 11.68877,
+    "max": 11.99673
   },
   "highlight_rolloff_quantiles": {
     "min": 0.0,
-    "p10": 97.15256,
-    "p25": 99.99302,
+    "p10": 95.3636,
+    "p25": 99.96831,
     "p50": 100.0,
     "p75": 100.0,
     "p90": 100.0,
@@ -1239,12 +1815,12 @@
   },
   "sharpness_quantiles": {
     "min": 1.4457,
-    "p10": 10.57755,
-    "p25": 18.83556,
-    "p50": 40.42753,
-    "p75": 96.90262,
-    "p90": 198.46956,
-    "max": 1492.4647
+    "p10": 11.38173,
+    "p25": 21.57154,
+    "p50": 48.38585,
+    "p75": 111.7654,
+    "p90": 247.67787,
+    "max": 3061.9548
   },
   "mtf_quantiles": {
     "min": 0.0,

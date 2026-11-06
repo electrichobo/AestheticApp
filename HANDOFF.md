@@ -7,23 +7,22 @@
 
 ---
 
-## Current Status: M14–M19 (Complete Metric Taxonomy, Reranker Heads & Feedback Learning)
-- **100% Real Measured Golden Baseline (`n=760` across 135 Award-Winning Films)**:
-  - `assets/baseline/` (`version = "2.0.0-measured"`) holds 285 decoded continuous video setups from 55 award films on `M:\movies` + 475 multi-shot high-res stills across 92 collections from `film-grab.com`, `shot.cafe`, and `frameset.app`.
-- **M14–M17: Sequence Continuity, Style Quantiles, Forensics & Instant Cached Rescore**:
-  - Added `ReelSequenceMetrics` (`wb_cross_scene_std`, `color_temp_cross_scene_std`, `exposure_consistency_std`, `coverage_consistency_score`, `grading_uniformity_score`, `visual_fatigue_index`, `reel_diversity_score`, `transfer_curve_label`).
-  - Added container + pixel-level camera log/HDR detection (`LOG_ENCODED_SIGNAL`) and Maximal Marginal Relevance (`apply_reel_diversity_ranking`).
-  - Added `compare_to_golden_baseline_with_style` (within-style-cluster DR & Key:Fill percentiles + motion velocity), non-punitive forensics (`SUBTITLE_OR_LOWER_THIRD_BURNIN`, `PRACTICAL_LIGHT_FLICKER`, `ROLLING_SHUTTER_SKEW_RISK`), and `rescore_from_sidecars` (`aesthetic-cli rescore <dir>`, ~240ms).
-- **M18 & M19: Full 6-Head Narrative Rerankers, Motion Coherence, Palette Family & Feedback Learning**:
-  - Added all 6 narrative reranker heads (`hero_potency_score`, `three_second_impact_score`, `authorship_distinctiveness_score`, `storytelling_score`, `cinematic_technique_score`, `memorability_score`) to `PillarScores`.
-  - Integrated log-aware CIE 1931 gamut coverage (`gamut_coverage_srgb`/`p3`), `palette_family`, `scene_type`, `shot_intent`, and `motion_coherence_score` (`motion_blur_angle_deg`) into pillar scoring and Desktop UI / HTML contact sheets.
-  - Added `SelectFeedbackEvent` preference logger (`log_select_feedback_event`, `compute_feedback_preference_boost`, `/api/feedback`, `aesthetic-cli feedback`).
-- **Quality**: All workspace tests passing, zero clippy warnings (`-D warnings`).
+## Current Status: M20–M23 Complete & Self-Audited (`1,112` Measured Shots / `199` Films)
+- **100% Real Measured Golden Baseline (`n=1,112` across `199` Award-Winning Films)**:
+  - `assets/baseline/` (`version = "2.0.0-measured"`) holds 285 decoded continuous video setups from 55 award films on `M:\movies` + 827 multi-shot high-res stills across 159 collections from `film-grab.com`, `shot.cafe`, and `frameset.app` (`DR p50 = 9.98 stops`, `Roll-Off p50 = 100.0%`, `Laplacian p50 = 48.39`).
+- **M14–M19: Sequence Continuity, Style Quantiles, Forensics, Cached Rescore & 6 Reranker Heads**:
+  - `ReelSequenceMetrics` (cross-scene WB/Kelvin/Luma continuity, visual fatigue, MMR reel diversity, Log/HDR transfer detection).
+  - Within-style-cluster DR & Key:Fill percentiles + motion velocity quantiles (`compare_to_golden_baseline_with_style`), non-punitive forensics (`SUBTITLE_OR_LOWER_THIRD_BURNIN`, `PRACTICAL_LIGHT_FLICKER`, `ROLLING_SHUTTER_SKEW_RISK`), and instant cached sidecar re-scoring (`rescore_from_sidecars`).
+  - All 6 Narrative & Aesthetic reranker heads (`hero_potency_score`, `three_second_impact_score`, `authorship_distinctiveness_score`, `storytelling_score`, `cinematic_technique_score`, `memorability_score`) + `SelectFeedbackEvent` preference learning.
+- **M20–M23: DP Rationale Engine, PSNR/SSIM QC Pack, UI Curation Controls & DaVinci Resolve Bridge**:
+  - Added deterministic DP/Editorial `rationale_summary` and full-reference `psnr_db` / `ssim_score` (`compute_frame_pair_psnr_and_ssim`).
+  - Added one-click UI curation buttons (`Promote Hero`, `Pin Select`, `Deprioritize`), instant Cached Sidecars folder loader (`/api/rescore_sidecars`), and DaVinci Resolve Python timeline/marker script bridge (`generate_resolve_timeline_script`, `/api/export_resolve_script`, `--resolve`).
+- **Quality**: All 26 workspace tests passing, zero clippy warnings (`-D warnings`).
 
 ---
 
 ## Next Immediate Step
-1. **Interactive Desktop UI & DaVinci Resolve Bridge**: Inspect sequence continuity, 6 narrative reranker heads, and select feedback learning in `aesthetic-ui` or push selects to DaVinci Resolve.
+1. **Production Operation**: Launch `aesthetic-ui` or `aesthetic-cli` on new productions or import generated `.py` / `.fcpxml` timelines directly into DaVinci Resolve.
 
 ---
 

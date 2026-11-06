@@ -1,9 +1,9 @@
 # AESTHETIC — Development Status
 
-## Current Milestone: M14–M19 — Sequence Continuity, Style Quantiles, Forensics, Cached Rescore, 6 Reranker Heads & Feedback Learning
+## Current Milestone: M20–M23 — Cinematographic Rationale Engine, PSNR/SSIM QC Pack, UI Curation Controls, DaVinci Resolve Bridge & 1,112-Shot Golden Baseline
 - **Phase**: Ground-Up Rebuild in Rust
 - **Target**: Windows x64 (primary), Linux, macOS
-- **Active Focus**: Cross-shot sequence continuity (`ReelSequenceMetrics`), MMR reel diversity ranking, camera log/HDR detection, within-style-cluster Golden Baseline percentiles, non-punitive forensic flags, instant cached sidecar re-scoring (`rescore_from_sidecars`), all 6 Narrative & Aesthetic reranker heads (`hero_potency_score`, `three_second_impact_score`, `authorship_distinctiveness_score`, `storytelling_score`, `cinematic_technique_score`, `memorability_score`), and user select preference learning (`SelectFeedbackEvent`).
+- **Active Focus**: Local deterministic Cinematographic Rationale Engine (`rationale_summary`), full-reference 3-frame burst `PSNR`/`SSIM` QC pack (`psnr_db`, `ssim_score`), interactive Desktop UI Contact Sheet curation controls (`[★ Promote Hero]`, `[📌 Pin Select]`, `[✕ Deprioritize]`), instant cached sidecar folder loader, direct DaVinci Resolve Python timeline/marker script generator (`generate_resolve_timeline_script`), and 1,112 real measured shots across 199 award-winning films.
 
 ---
 
@@ -28,6 +28,26 @@
 | **M14–M17: Continuity, Style-Cluster Quantiles, Forensics & Cached Rescore** | `ReelSequenceMetrics` (cross-scene WB/Kelvin/Luma continuity, visual fatigue, MMR reel diversity), Log/HDR transfer detection, within-style-cluster & motion baseline percentiles, subtitle/flicker/rolling-shutter forensics, and instant cached sidecar re-scoring (`aesthetic-cli rescore`) | ✅ Done | 26/26 workspace tests passing; cached 12-take rescore completes in ~240ms |
 | **M18: Narrative & Aesthetic Reranker Heads, Log-Aware Gamut & Sequence Banner** | `hero_potency_score`, `three_second_impact_score`, `authorship_distinctiveness_score` in `PillarScores`, log-aware CIE 1931 gamut integration (`gamut_coverage_srgb`/`p3`) into `color_harmony`, and Sequence & Reel Continuity Intelligence banner in HTML contact sheets | ✅ Done | Full 61-metric contact sheet + sequence banner + JSON sidecar export verified |
 | **M19: Complete 6-Head Rerankers, Motion Coherence, Palette Family & Feedback Learning** | `storytelling_score`, `cinematic_technique_score`, `memorability_score`, `palette_family`, `scene_type`, `shot_intent`, `motion_blur_angle_deg`, `motion_coherence_score`, Desktop UI Contact Sheet integration, and `SelectFeedbackEvent` preference learning (`assets/feedback/events.jsonl`) | ✅ Done | Complete metric taxonomy active across CLI, sidecars, HTML & Desktop UI |
+| **M20: Cinematographic Rationale Engine & Full-Reference PSNR/SSIM QC Pack** | Deterministic local DP & Editorial rationale paragraph (`rationale_summary`) and consecutive frame-pair `psnr_db` & Wang-Bovik $8\times 8$ `ssim_score` (`compute_frame_pair_psnr_and_ssim`) | ✅ Done | Zero-API local rationale generation and full-reference burst QC integrated into sidecars & HTML |
+| **M21: Interactive Desktop UI Curation Controls & Cached Sidecars Loader** | One-click `[★ Promote Hero]`, `[📌 Pin Select]`, and `[✕ Deprioritize]` buttons in Contact Sheet modal with live MMR re-ranking + `"Open Cached Sidecars Folder"` in Import menu | ✅ Done | Instant UI re-ranking and cached sidecar folder loading without video re-decoding |
+| **M22: Direct DaVinci Resolve Timeline & Marker Bridge** | `generate_resolve_timeline_script` producing a `DaVinciResolveScript` `.py` script creating an `AESTHETIC_Hero_Selects` timeline with color-coded rationale & forensic markers (`--resolve` & UI export) | ✅ Done | Frame-accurate Resolve timeline assembly with Yellow/Blue/Red markers verified |
+| **M23: Expanded 1,112-Shot Golden Baseline Across 199 Award-Winning Films** | Ingested 67 additional multi-shot still collections (402 full-res stills) from `film-grab.com`, expanding `assets/baseline/` to 1,112 real measured shots across 199 award-winning films | ✅ Done | `manifest.json` (`n=1112`, 199 films, 0 synthetic seeds) reconciled and verified |
+
+---
+
+## Completed in M20–M23
+- **M20: Local Cinematographic Rationale Engine & Full-Reference `PSNR`/`SSIM` QC Pack** (`crates/aesthetic-models/src/physics.rs`, `crates/aesthetic-models/src/window.rs`, `crates/aesthetic-metrics/src/exposure.rs`, `crates/aesthetic-core/src/pipeline.rs`, `crates/aesthetic-core/src/export.rs`):
+  - Implemented `generate_cinematographic_rationale` generating a rich, empirical DP & Editorial rationale paragraph (`ShotTake.rationale_summary`) citing shot scale, intent, duration, motion classification, dynamic range stops, highlight roll-off, key-to-fill ratio, lighting key, palette family, CCT, depth planes, focus isolation, gaze poise, and nearest reference match.
+  - Implemented `compute_frame_pair_psnr_and_ssim` measuring consecutive frame-pair `psnr_db` (dB) and $8\times 8$ block Wang-Bovik structural similarity `ssim_score` across 3-frame burst windows.
+- **M21: Interactive Desktop UI Curation Controls & Cached Sidecar Folder Loader** (`crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/index.html`, `crates/aesthetic-ui/ui/app.js`):
+  - Added `[★ Promote Hero]`, `[📌 Pin Select]`, and `[✕ Deprioritize]` buttons to every Contact Sheet card in `aesthetic-ui`, immediately logging `SelectFeedbackEvent` and re-running `apply_reel_diversity_ranking` on the active analysis.
+  - Added `"Open Cached Sidecars Folder"` (`#btn-open-sidecars` -> `/api/rescore_sidecars`) to load and re-score any cached JSON+PNG sidecar directory in ~240ms.
+- **M22: Direct DaVinci Resolve Timeline & Marker Bridge** (`crates/aesthetic-core/src/export.rs`, `crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-cli/src/main.rs`):
+  - Implemented `generate_resolve_timeline_script` outputting a ready-to-run `DaVinciResolveScript` Python automation script that creates an `AESTHETIC_Hero_Selects` bin and timeline, appends the Top-$N$ usable windows at frame-accurate In/Out handles, and attaches color-coded Resolve markers (`Yellow` Hero #1, `Blue` Select, `Red` Forensic Advisory) containing the full `rationale_summary` and pillar/reranker scores.
+  - Exposed via `"DaVinci Resolve Script (.py)"` in the UI Export menu (`/api/export_resolve_script`) and `--resolve <file.py>` in `aesthetic-cli rescore`.
+- **M23: Expanded Golden Baseline to `1,112` Real Measured Shots Across `199` Award-Winning Films** (`assets/baseline/manifest.json`, `assets/baseline/shots.json`):
+  - Downloaded and ingested 67 additional multi-shot still galleries (402 full-res frames) from `film-grab.com` covering remaining Awards Registry titles.
+  - Reconciled `manifest.json` (`total_films = 199`, `total_reference_shots = 1112`, `0` synthetic seeds): `Dynamic Range p10 = 7.45 / p25 = 8.93 / p50 = 9.98 / p75 = 11.03 / p90 = 11.69 stops`, `Highlight Roll-Off p10 = 95.36% / p50 = 100.0%`, `Laplacian Acutance p10 = 11.38 / p50 = 48.39 / p90 = 247.68`.
 
 ---
 

@@ -965,6 +965,112 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 xml.as_bytes(),
             );
         }
+        "/api/export_resolve_script" => {
+            let ca = state.current_analysis.read().unwrap();
+            let (takes, media_path, fps) = if let Some(ref res) = *ca {
+                (
+                    res.ranked_takes.clone(),
+                    res.video_info.file_path.clone(),
+                    res.video_info.frame_rate,
+                )
+            } else {
+                (get_demo_takes(), "FEATURE_MASTER.MOV".to_string(), 24.0)
+            };
+            let py = aesthetic_core::generate_resolve_timeline_script(
+                "AESTHETIC_SELECTS",
+                &media_path,
+                &takes,
+                fps,
+            );
+            send_attachment_response(
+                stream,
+                "200 OK",
+                "text/x-python; charset=UTF-8",
+                "AESTHETIC_Resolve_Import.py",
+                py.as_bytes(),
+            );
+        }
+        "/api/rescore_sidecars" => {
+            if let Some(path_str) = query_map.get("path") {
+                let sidecars_path = Path::new(path_str);
+                match aesthetic_core::rescore_from_sidecars(sidecars_path) {
+                    Ok((takes, _frames)) => {
+                        let max_end = takes
+                            .iter()
+                            .map(|t| t.end_sec)
+                            .fold(30.0f64, |a, b| a.max(b));
+                        let info = VideoSourceInfo {
+                            file_path: path_str.clone(),
+                            duration_sec: max_end,
+                            frame_rate: 24.0,
+                            width: 1920,
+                            height: 1080,
+                            codec: "cached_sidecars".to_string(),
+                            color_primaries: Some("bt709".to_string()),
+                            transfer_characteristic: Some("bt709".to_string()),
+                        };
+                        let seq = aesthetic_core::compute_reel_sequence_metrics(&takes, &info);
+                        let res = BatchAnalysisResult {
+                            video_info: info.clone(),
+                            ranked_takes: takes.clone(),
+                            sequence_metrics: seq.clone(),
+                            edl_content: generate_cmx3600_edl(
+                                "RESCORED_SELECTS",
+                                path_str,
+                                &takes,
+                                24.0,
+                            ),
+                            csv_content: generate_csv_selects(path_str, &takes, 24.0),
+                            fcpxml_content: Some(generate_fcpxml(
+                                "RESCORED_SELECTS",
+                                path_str,
+                                &takes,
+                                24.0,
+                            )),
+                            contact_sheet_html: None,
+                            sidecars_count: takes.len(),
+                            extracted_clips_count: 0,
+                        };
+                        {
+                            let mut loaded = state.loaded_media.write().unwrap();
+                            *loaded = Some(info);
+                            let mut ca = state.current_analysis.write().unwrap();
+                            *ca = Some(res);
+                        }
+                        let json = serde_json::json!({
+                            "success": true,
+                            "takes_count": takes.len(),
+                            "takes": takes,
+                            "sequence_metrics": seq
+                        });
+                        send_response(
+                            stream,
+                            "200 OK",
+                            "application/json",
+                            json.to_string().as_bytes(),
+                        );
+                    }
+                    Err(err) => {
+                        let json = serde_json::json!({ "success": false, "error": err });
+                        send_response(
+                            stream,
+                            "400 Bad Request",
+                            "application/json",
+                            json.to_string().as_bytes(),
+                        );
+                    }
+                }
+            } else {
+                let json =
+                    serde_json::json!({ "success": false, "error": "Missing 'path' parameter" });
+                send_response(
+                    stream,
+                    "400 Bad Request",
+                    "application/json",
+                    json.to_string().as_bytes(),
+                );
+            }
+        }
         "/api/export_contact_sheet" => {
             let ca = state.current_analysis.read().unwrap();
             let takes = if let Some(ref res) = *ca {
@@ -1063,11 +1169,18 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 memorability_score: overall_score,
             };
             let json = match aesthetic_core::log_select_feedback_event(&ev) {
-                Ok(total) => serde_json::json!({
-                    "success": true,
-                    "total_events": total,
-                    "event": ev
-                }),
+                Ok(total) => {
+                    if let Ok(mut ca) = state.current_analysis.write() {
+                        if let Some(ref mut res) = *ca {
+                            aesthetic_core::apply_reel_diversity_ranking(&mut res.ranked_takes);
+                        }
+                    }
+                    serde_json::json!({
+                        "success": true,
+                        "total_events": total,
+                        "event": ev
+                    })
+                }
                 Err(err) => serde_json::json!({
                     "success": false,
                     "error": err

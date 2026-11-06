@@ -65,6 +65,12 @@ pub struct ExposurePhysics {
     pub dynamic_range_stops: f32,
     pub snr_luma: f32,
     pub snr_chroma: f32,
+    /// Peak Signal-to-Noise Ratio in dB (temporal burst / reference QC pack)
+    #[serde(default)]
+    pub psnr_db: f32,
+    /// Structural Similarity Index (0.0 - 1.0, temporal burst / reference QC pack)
+    #[serde(default)]
+    pub ssim_score: f32,
     pub false_color_zones: FalseColorZones,
     #[serde(default)]
     pub el_zones: ElZoneDistribution,

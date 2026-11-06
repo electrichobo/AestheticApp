@@ -233,5 +233,20 @@ fn test_reel_continuity_and_sidecar_rescore() {
     assert_eq!(rescored.len(), 1);
     assert!(loaded_frames.contains_key("take_001"));
     assert!(rescored[0].scores.overall > 0.0);
+    assert!(!rescored[0].rationale_summary.is_empty());
+    assert!(rescored[0].measured.exposure.psnr_db > 15.0);
+    assert!(rescored[0].measured.exposure.ssim_score > 0.5);
+    assert!(rescored[0].scores.storytelling_score > 0.0);
+    assert!(rescored[0].scores.cinematic_technique_score > 0.0);
+    assert!(rescored[0].scores.memorability_score > 0.0);
+
+    let py = aesthetic_core::generate_resolve_timeline_script(
+        "AESTHETIC_TEST",
+        "test.mov",
+        &rescored,
+        24.0,
+    );
+    assert!(py.contains("DaVinciResolveScript"));
+    assert!(py.contains("timeline.AddMarker"));
     let _ = std::fs::remove_dir_all(&tmp_dir);
 }
