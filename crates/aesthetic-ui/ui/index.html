@@ -280,6 +280,16 @@
                 <span class="master-icon">★</span>
                 <span class="master-text" id="master-text">Calibrated against 184 Oscar, ASC &amp; BSC award-winning films...</span>
               </div>
+              <div class="master-look-export-bar" id="master-look-export-bar" style="margin-top: 10px; display: flex; align-items: center; justify-content: space-between; background: rgba(15, 23, 42, 0.7); padding: 8px 12px; border-radius: 4px; border: 1px solid rgba(148, 163, 184, 0.15);">
+                <div style="font-size: 11px; color: #94a3b8;">
+                  <span style="color: #ffbe5b; font-weight: 600;">Match Grade:</span>
+                  <span id="master-cdl-guidance" style="margin-left: 4px;">Pull shot towards reference dynamic range &amp; tone curve</span>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                  <a class="btn btn-secondary btn-sm" id="btn-export-master-cdl" href="/api/export_master_cdl" download style="text-decoration: none; font-size: 11px; padding: 3px 10px;" title="Export ASC CDL XML to emulate matched Master film">Emulate Look (.CDL)</a>
+                  <a class="btn btn-secondary btn-sm" id="btn-export-master-cube" href="/api/export_master_cube" download style="text-decoration: none; font-size: 11px; padding: 3px 10px;" title="Export 3D LUT (.cube) to emulate matched Master film">Emulate Look (.CUBE)</a>
+                </div>
+              </div>
             </div>
 
             <!-- Golden Baseline Benchmark Comparison Table (Award-Winning Cinema Distribution) -->

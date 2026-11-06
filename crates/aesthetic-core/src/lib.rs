@@ -25,7 +25,8 @@ pub use export::{
 };
 pub use inference::{DepthMap, ModelInferenceEngine};
 pub use multicam::{
-    compute_cross_angle_setup_matching, generate_3d_lut_cube, generate_asc_cdl_xml,
+    compute_cross_angle_setup_matching, compute_master_baseline_cdl_grade, generate_3d_lut_cube,
+    generate_asc_cdl_xml,
 };
 pub use video::{extract_frame_rgb, extract_trimmed_clip, probe_video_metadata};
 

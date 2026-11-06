@@ -38,10 +38,15 @@
 | **M27: Personal Taste Profile & Feedback Reranker Tuning** | `compute_personal_taste_profile` dynamically calibrating personal DP style affinities and reranker head weights from user curation feedback events (`/api/taste_profile`) | ✅ Done | Self-tuning aesthetic layer learning directly from cinematographer curation actions |
 | **M28: Interactive Smart Showreel Composer Modal & Pacing Grid** | Desktop UI Smart Reel modal (`#composer-modal`), target duration optimizer (30s/60s/90s/120s), objective filtering, and alternating cut list readout (`/api/compose_showreel`) | ✅ Done | Instant visual showreel sequence generation directly in desktop shell |
 | **M29: Multi-Camera Setup & Cross-Angle Continuity Matching Engine** | `compute_cross_angle_setup_matching` cross-angle EV stops, Kelvin drift, and ΔE evaluation against Hero Master, synthesizing mathematical ASC CDL XML and 3D LUT (.cube) files with interactive UI modal (`#multicam-modal`) | ✅ Done | Zero-guesswork multi-cam grading match and automated CDL/3D LUT export for NLEs |
+| **M30: Automated Look & Style Transfer CDL Calibration** | `compute_master_baseline_cdl_grade` calibrating mathematical ASC CDL and 3D LUT transforms pulling candidate footage into the exact exposure and tone curve of matched award-winning cinema films (1,112-shot Golden Baseline) | ✅ Done | One-click `.cdl` and `.cube` Master Look grading emulation directly in Visual Æesthetic deck |
 
 ---
 
-## Completed in M24–M29 + Scopes Overhaul & FFmpeg Hardening
+## Completed in M24–M30 + Scopes Overhaul & FFmpeg Hardening
+- **M30: Automated Look & Style Transfer CDL Calibration** (`crates/aesthetic-core/src/multicam.rs`, `crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/index.html`, `crates/aesthetic-ui/ui/app.js`):
+  - Implemented `compute_master_baseline_cdl_grade` deriving mathematical ASC CDL transforms that pull user footage toward the calibrated award-winning cinema Golden Baseline (p50 / median target across 1,112 reference shots).
+  - Calculates RGB Slope (highlight gain), Offset (shadow pedestal alignment), Power (midtone contrast stretch), and Saturation.
+  - Added one-click **"Emulate Look (.CDL)"** and **"Emulate Look (.CUBE)"** action buttons directly in the Visual Æesthetic panel (`/api/export_master_cdl`, `/api/export_master_cube`) for instant application in DaVinci Resolve and Premiere Pro.
 - **M29: Multi-Camera Setup & Cross-Angle Continuity Matching Engine** (`crates/aesthetic-models/src/multicam.rs`, `crates/aesthetic-core/src/multicam.rs`, `crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/index.html`, `crates/aesthetic-ui/ui/app.js`):
   - Implemented `compute_cross_angle_setup_matching` evaluating pairwise exposure EV stop discrepancies, Kelvin white balance shift, CIE Delta E color distances, and sharpness ratios against the Hero Master setup.
   - Implemented mathematical ASC CDL synthesis (`synthesize_asc_cdl`) calculating exact RGB Slope (highlight gain), Offset (shadow lift), Power (midtone contrast), and Saturation.

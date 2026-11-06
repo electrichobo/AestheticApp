@@ -131,6 +131,17 @@ function updateEvaluationUI(resData) {
       masterText.textContent = `Golden Baseline (184 Oscar / ASC / BSC Films) — ${family}${ancillary}`;
     }
 
+    const btnCdl = document.getElementById('btn-export-master-cdl');
+    const btnCube = document.getElementById('btn-export-master-cube');
+    const cdlGuidance = document.getElementById('master-cdl-guidance');
+    const takeId = data.take_id || 'active_take';
+    if (btnCdl) btnCdl.href = `/api/export_master_cdl?take=${encodeURIComponent(takeId)}`;
+    if (btnCube) btnCube.href = `/api/export_master_cube?take=${encodeURIComponent(takeId)}`;
+    if (cdlGuidance) {
+      const matchName = data.style?.cinematographer_match || 'Award Cinema Baseline';
+      cdlGuidance.textContent = `Emulate ${matchName}`;
+    }
+
     // Populate discovered stylistic & physical craft tags
     if (styleTagsFlow) {
       styleTagsFlow.innerHTML = '';

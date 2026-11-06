@@ -1456,6 +1456,60 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
             let filename = format!("{}_to_{}_match.cube", source_id, target_id);
             send_attachment_response(stream, "200 OK", "text/plain", &filename, cube.as_bytes());
         }
+        "/api/export_master_cdl" => {
+            let take_id = query_map.get("take").map(|s| s.as_str());
+            let ca = state.current_analysis.read().unwrap();
+            let takes = if let Some(ref res) = *ca {
+                res.ranked_takes.clone()
+            } else {
+                get_demo_takes()
+            };
+            drop(ca);
+
+            let take = takes
+                .iter()
+                .find(|t| take_id.map(|id| t.take_id == id).unwrap_or(true))
+                .unwrap_or_else(|| takes.first().unwrap());
+
+            let cdl = aesthetic_core::compute_master_baseline_cdl_grade(take, None, None, None);
+            let film_match = take
+                .style
+                .cinematographer_match
+                .as_deref()
+                .unwrap_or("Cinema_Baseline");
+            let clean_match = film_match.replace(' ', "_").replace(['(', ')', '/'], "");
+            let xml = aesthetic_core::generate_asc_cdl_xml(&cdl, &take.take_id, &clean_match);
+            let filename = format!("{}_to_{}_look.cdl", take.take_id, clean_match);
+            send_attachment_response(stream, "200 OK", "application/xml", &filename, xml.as_bytes());
+        }
+        "/api/export_master_cube" => {
+            let take_id = query_map.get("take").map(|s| s.as_str());
+            let size = query_map.get("size").and_then(|s| s.parse().ok()).unwrap_or(17);
+            let ca = state.current_analysis.read().unwrap();
+            let takes = if let Some(ref res) = *ca {
+                res.ranked_takes.clone()
+            } else {
+                get_demo_takes()
+            };
+            drop(ca);
+
+            let take = takes
+                .iter()
+                .find(|t| take_id.map(|id| t.take_id == id).unwrap_or(true))
+                .unwrap_or_else(|| takes.first().unwrap());
+
+            let cdl = aesthetic_core::compute_master_baseline_cdl_grade(take, None, None, None);
+            let film_match = take
+                .style
+                .cinematographer_match
+                .as_deref()
+                .unwrap_or("Cinema_Baseline");
+            let clean_match = film_match.replace(' ', "_").replace(['(', ')', '/'], "");
+            let title = format!("AESTHETIC_{}_to_{}", take.take_id, clean_match);
+            let cube = aesthetic_core::generate_3d_lut_cube(&cdl, &title, size);
+            let filename = format!("{}_to_{}_look.cube", take.take_id, clean_match);
+            send_attachment_response(stream, "200 OK", "text/plain", &filename, cube.as_bytes());
+        }
         _ => {
             send_response(stream, "404 NOT FOUND", "text/plain", b"Not Found");
         }

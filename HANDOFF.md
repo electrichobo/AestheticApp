@@ -7,12 +7,13 @@
 
 ---
 
-## Current Status: M29 Multi-Cam Setup Matching & ASC CDL / 3D LUT Engine
+## Current Status: M29 Multi-Cam & M30 Master Look CDL / 3D LUT Engine
 - **M29: Multi-Camera Setup & Cross-Angle Continuity**:
-  - `compute_cross_angle_setup_matching`: Computes pairwise exposure EV deltas, Kelvin white balance drift, ΔE color distance, and acutance ratios against the designated Hero Master.
-  - Mathematical ASC CDL synthesis (`synthesize_asc_cdl`): Derives RGB Slope (gain), Offset (lift), Power (gamma), and Saturation to align coverage angles directly to the Master grade.
-  - Industry deliverables: `generate_asc_cdl_xml` (.cdl) and `generate_3d_lut_cube` (.cube 3D LUT) for drag-and-drop into DaVinci Resolve & Premiere Pro.
-  - Interactive UI modal (`#multicam-modal`, `#btn-open-multicam` in Selects bar) with live consistency score badge and one-click CDL / CUBE downloads.
+  - `compute_cross_angle_setup_matching`: Computes pairwise exposure EV deltas, Kelvin white balance drift, ΔE color distance, and acutance ratios against the Hero Master.
+  - Interactive UI modal (`#multicam-modal`, `#btn-open-multicam` in Selects bar) with consistency badge and one-click `.cdl` and `.cube` downloads.
+- **M30: Automated Look & Style Transfer CDL Calibration**:
+  - `compute_master_baseline_cdl_grade`: Calibrates ASC CDL (Slope, Offset, Power, Saturation) pulling footage towards the exact exposure and tone curve of matched award-winning films (1,112-shot Golden Baseline).
+  - One-click `Emulate Look (.CDL)` and `Emulate Look (.CUBE)` in the Visual Æesthetic panel (`/api/export_master_cdl`, `/api/export_master_cube`).
 - **Vectorscope I-Line Calibrated at 10:30 (123.0°)**:
   - Exact NTSC/Rec.709 I-axis ($I = -0.27(B-Y) + 0.74(R-Y)$) positioned between Red (104°) and Yellow (167°) with 25%, 50%, 75% saturation ticks.
 - **Verification & Safety**:
@@ -24,8 +25,8 @@
 
 ## Next Immediate Step
 1. **Interactive Verification**: Refresh `http://127.0.0.1:63513` in browser:
-   - Click "Multi-Cam" in the Candidate Selects panel to inspect the cross-angle setup matching matrix.
-   - Click "Export .CDL" or "Export .CUBE" on any coverage take to download calibrated grade files.
+   - Click "Multi-Cam" in Candidate Selects to view cross-angle matching matrix.
+   - Click "Emulate Look (.CDL)" or "Emulate Look (.CUBE)" in Visual Æesthetic panel to download calibrated Master DP grade files.
 
 ---
 

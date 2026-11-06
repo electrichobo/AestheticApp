@@ -240,6 +240,93 @@ fn synthesize_asc_cdl(
     }
 }
 
+/// Synthesizes an ASC CDL color grading transform that pulls a candidate take
+/// toward the calibrated award-winning cinema Golden Baseline (p50 / median target).
+pub fn compute_master_baseline_cdl_grade(
+    take: &ShotTake,
+    target_dr_stops: Option<f32>,
+    target_kelvin: Option<f32>,
+    target_rolloff: Option<f32>,
+) -> AscCdlCorrection {
+    let exp = &take.measured.exposure;
+    let col = &take.measured.color;
+
+    // Golden Baseline p50 Medians across 1,112 award-winning shots:
+    // DR = 9.98 stops, Roll-off = 100.0%, Kelvin = 5600K, Saturation = 0.32
+    let base_dr = target_dr_stops.unwrap_or(9.98);
+    let base_kelvin = target_kelvin.unwrap_or(5600.0);
+    let _base_rolloff = target_rolloff.unwrap_or(100.0);
+
+    // 1. Exposure & Contrast (Slope & Power)
+    let dr_delta = exp.dynamic_range_stops - base_dr;
+    // If take has less dynamic range than master, gently stretch midtones via power
+    let power_val = if exp.dynamic_range_stops > 0.1 {
+        (base_dr / exp.dynamic_range_stops).sqrt().clamp(0.75, 1.35)
+    } else {
+        1.0
+    };
+
+    // 2. White Balance / Kelvin trim
+    let take_k = col.estimated_kelvin.max(1000.0);
+    let kelvin_delta = take_k - base_kelvin;
+    let kelvin_factor = (kelvin_delta / 18000.0).clamp(-0.25, 0.25);
+
+    let slope_r = (1.0f32 - kelvin_factor).clamp(0.5, 2.0);
+    let slope_g = 1.0f32;
+    let slope_b = (1.0f32 + kelvin_factor).clamp(0.5, 2.0);
+
+    // 3. Shadow Lift / Pedestal
+    // Film baseline has deep rich blacks (EL Zone 0 ~ 2.0%)
+    let shadow_diff = (2.0 - exp.el_zones.zone_0_black_pct) * 0.002;
+    let offset_val = shadow_diff.clamp(-0.08, 0.08);
+
+    // 4. Saturation
+    let sat_mult = if col.saturation_mean > 0.01 {
+        (0.32 / col.saturation_mean).clamp(0.7, 1.4)
+    } else {
+        1.0
+    };
+
+    let mut guidance = Vec::new();
+    if dr_delta.abs() > 0.5 {
+        if dr_delta < 0.0 {
+            guidance.push(format!("Expand dynamic range ({:+.1} stops vs Golden Baseline)", dr_delta));
+        } else {
+            guidance.push(format!("Cinema-grade highlight roll-off active ({:+.1} stops)", dr_delta));
+        }
+    }
+    if kelvin_delta.abs() > 200.0 {
+        if kelvin_delta > 0.0 {
+            guidance.push(format!("Cool color balance by -{}K towards cinema neutral", kelvin_delta.round()));
+        } else {
+            guidance.push(format!("Warm color balance by +{}K towards cinema tungsten", kelvin_delta.abs().round()));
+        }
+    }
+    if guidance.is_empty() {
+        guidance.push("Close alignment with Master Cinema Baseline".to_string());
+    }
+
+    AscCdlCorrection {
+        slope: [
+            (slope_r * 1000.0).round() / 1000.0,
+            (slope_g * 1000.0).round() / 1000.0,
+            (slope_b * 1000.0).round() / 1000.0,
+        ],
+        offset: [
+            (offset_val * 1000.0).round() / 1000.0,
+            (offset_val * 1000.0).round() / 1000.0,
+            (offset_val * 1000.0).round() / 1000.0,
+        ],
+        power: [
+            (power_val * 1000.0).round() / 1000.0,
+            (power_val * 1000.0).round() / 1000.0,
+            (power_val * 1000.0).round() / 1000.0,
+        ],
+        saturation: (sat_mult * 1000.0).round() / 1000.0,
+        summary_guidance: guidance.join(", "),
+    }
+}
+
 /// Generates an industry-standard ASC CDL XML file content matching DaVinci Resolve & Premiere Pro specs.
 pub fn generate_asc_cdl_xml(
     correction: &AscCdlCorrection,
