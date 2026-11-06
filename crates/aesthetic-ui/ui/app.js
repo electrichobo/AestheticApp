@@ -1664,6 +1664,90 @@ if (floatingHeader && floatingModal) {
 }
 
 // ============================================================================
+// Smart Showreel Composer Controller (M28)
+const btnOpenComposer = document.getElementById('btn-open-composer');
+const composerModal = document.getElementById('composer-modal');
+const modalComposerClose = document.getElementById('modal-composer-close');
+const btnComposerCancel = document.getElementById('btn-composer-cancel');
+const btnComposerAssemble = document.getElementById('btn-composer-assemble');
+const reelDurationSelect = document.getElementById('reel-target-duration');
+const reelObjectiveSelect = document.getElementById('reel-objective');
+const composerResultBox = document.getElementById('composer-result-box');
+
+if (btnOpenComposer && composerModal) {
+  btnOpenComposer.addEventListener('click', () => {
+    composerModal.style.display = 'flex';
+    if (composerResultBox) composerResultBox.style.display = 'none';
+  });
+}
+
+function closeComposerModal() {
+  if (composerModal) composerModal.style.display = 'none';
+}
+
+if (modalComposerClose) modalComposerClose.addEventListener('click', closeComposerModal);
+if (btnComposerCancel) btnComposerCancel.addEventListener('click', closeComposerModal);
+
+if (btnComposerAssemble) {
+  btnComposerAssemble.addEventListener('click', async () => {
+    const dur = reelDurationSelect ? reelDurationSelect.value : '60';
+    const obj = reelObjectiveSelect ? reelObjectiveSelect.value : 'commercial';
+
+    btnComposerAssemble.disabled = true;
+    btnComposerAssemble.textContent = 'Optimizing Pacing & Cuts...';
+    if (composerResultBox) {
+      composerResultBox.style.display = 'block';
+      composerResultBox.innerHTML = 'Solving constraint optimization for pacing rhythm and Kelvin continuity...';
+    }
+
+    try {
+      const res = await fetch(`/api/compose_showreel?duration=${dur}&objective=${obj}`);
+      const data = await res.json();
+      if (data.success && data.assembled_takes) {
+        let rowsHtml = '';
+        data.assembled_takes.forEach((t, i) => {
+          rowsHtml += `<tr>
+            <td style="padding: 4px 8px; color: #e5a93c; font-weight: 700;">#${i + 1}</td>
+            <td style="padding: 4px 8px;">${t.take_id}</td>
+            <td style="padding: 4px 8px;">${t.style.shot_scale}</td>
+            <td style="padding: 4px 8px;">${t.style.lighting_key}</td>
+            <td style="padding: 4px 8px;">${t.duration_sec.toFixed(1)}s</td>
+            <td style="padding: 4px 8px; color: #4ade80;">${t.scores.overall.toFixed(1)}</td>
+          </tr>`;
+        });
+
+        composerResultBox.innerHTML = `
+          <strong>[✓] Smart Showreel Assembled!</strong><br>
+          • Target Duration: ${data.target_duration_sec}s | Assembled: ${data.assembled_duration_sec.toFixed(1)}s (${data.shots_count} shots)<br>
+          • Pacing Rhythm: Alternating Shot Scales | Minimized Kelvin Jump<br><br>
+          <table style="width: 100%; font-size: 11px; border-collapse: collapse; text-align: left; background: #121419; border-radius: 4px;">
+            <thead>
+              <tr style="border-bottom: 1px solid #333; color: #888;">
+                <th style="padding: 4px 8px;">Cut</th>
+                <th style="padding: 4px 8px;">Take</th>
+                <th style="padding: 4px 8px;">Scale</th>
+                <th style="padding: 4px 8px;">Key</th>
+                <th style="padding: 4px 8px;">Dur</th>
+                <th style="padding: 4px 8px;">Score</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        `;
+      } else {
+        composerResultBox.innerHTML = `<span style="color: #ff6666;">Error assembling showreel: ${data.error || 'Failed'}</span>`;
+      }
+    } catch (err) {
+      if (composerResultBox) {
+        composerResultBox.innerHTML = `<span style="color: #ff6666;">Communication error: ${err}</span>`;
+      }
+    } finally {
+      btnComposerAssemble.disabled = false;
+      btnComposerAssemble.textContent = 'Assemble Smart Reel';
+    }
+  });
+}
+
 // Media Server Baseline Ingest Modal & Deduplication Controller
 // ============================================================================
 const btnServerIngest = document.getElementById('btn-server-ingest');

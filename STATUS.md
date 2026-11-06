@@ -1,9 +1,9 @@
 # AESTHETIC — Development Status
 
-## Current Milestone: M24–M27 — Live Resolve IPC Bridge, Batch Queue, Smart Showreel Composer & Personal Taste Profile Tuning
+## Current Milestone: M24–M28 — Live Resolve IPC Bridge, Batch Queue, Smart Showreel Composer & UI Modal, Personal Taste Tuning
 - **Phase**: Ground-Up Rebuild in Rust
 - **Target**: Windows x64 (primary), Linux, macOS
-- **Active Focus**: Live DaVinci Resolve Studio IPC bridge (`send_to_live_resolve`), multi-video directory queue (`analyze_folder_queue`), smart showreel duration & pacing optimizer (`compose_smart_showreel`), and personalized aesthetic profile tuning (`compute_personal_taste_profile`).
+- **Active Focus**: Live DaVinci Resolve Studio IPC bridge (`send_to_live_resolve`), multi-video directory queue (`analyze_folder_queue`), smart showreel duration & pacing optimizer (`compose_smart_showreel`), interactive desktop Smart Reel modal (`#composer-modal`), and personalized aesthetic profile tuning (`compute_personal_taste_profile`).
 
 ---
 
@@ -36,10 +36,24 @@
 | **M25: Batch Folder Video Queue & Progressive Sidecars** | `analyze_folder_queue` batch analyzing entire production directories (e.g. series seasons, dailies) with per-file sidecars & contact sheets (`batch <dir>`, UI folder queue) | ✅ Done | Automated multi-video processing across full episode folders |
 | **M26: Smart Showreel Composer & Target Duration Assembly** | `compose_smart_showreel` optimization engine assembling curated reels to target durations (60s, 90s, 120s) with shot-scale alternating rhythm & CCT continuity | ✅ Done | Objective-driven showreel assembly (Commercial, Dramatic, Kinetic, Balanced) |
 | **M27: Personal Taste Profile & Feedback Reranker Tuning** | `compute_personal_taste_profile` dynamically calibrating personal DP style affinities and reranker head weights from user curation feedback events (`/api/taste_profile`) | ✅ Done | Self-tuning aesthetic layer learning directly from cinematographer curation actions |
+| **M28: Interactive Smart Showreel Composer Modal & Pacing Grid** | Desktop UI Smart Reel modal (`#composer-modal`), target duration optimizer (30s/60s/90s/120s), objective filtering, and alternating cut list readout (`/api/compose_showreel`) | ✅ Done | Instant visual showreel sequence generation directly in desktop shell |
 
 ---
 
-## Completed in M24–M27
+## Completed in M24–M28
+- **M28: Interactive Smart Showreel Composer Modal & Pacing Grid** (`crates/aesthetic-ui/ui/index.html`, `crates/aesthetic-ui/ui/app.js`, `crates/aesthetic-ui/src/main.rs`):
+  - Added dedicated **"Smart Reel"** button to the Candidate Selects panel header.
+  - Implemented the `#composer-modal` and `/api/compose_showreel` endpoint displaying target vs assembled duration, shot scale pacing, and tabular cut list order.
+- **M24: Direct Live DaVinci Resolve Studio IPC Bridge** (`crates/aesthetic-core/src/export.rs`, `crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/app.js`, `crates/aesthetic-cli/src/main.rs`):
+  - Implemented `send_to_live_resolve` executing the Python Resolve bridge against the running DaVinci Resolve Studio scripting IPC socket.
+  - Added **"Send to Live Resolve (Direct)"** in the UI Export menu and `--live-resolve` flag to `aesthetic-cli rescore`.
+- **M25: Batch Folder Video Queue & Progressive Sidecars** (`crates/aesthetic-core/src/pipeline.rs`, `crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/app.js`, `crates/aesthetic-cli/src/main.rs`):
+  - Implemented `analyze_folder_queue` automatically discovering all supported video media files in a folder and sequentially analyzing, scoring, and outputting organized sidecars and contact sheets.
+  - Added **"Batch Analyze Folder"** in UI Import menu and `aesthetic-cli batch <folder> [--out <dir>]`.
+- **M26: Smart Showreel Composer & Target Duration Assembly** (`crates/aesthetic-core/src/pipeline.rs`):
+  - Implemented `compose_smart_showreel` optimization engine assembling curated reels to target durations (60s, 90s, 120s) balancing objective focus (Commercial Lighting, Dramatic Narrative, Action Kinetic, Balanced Hero), shot scale alternation rhythm, and color temperature continuity.
+- **M27: Personal Taste Profile & Feedback Reranker Tuning** (`crates/aesthetic-core/src/pipeline.rs`, `crates/aesthetic-ui/src/main.rs`):
+  - Implemented `compute_personal_taste_profile` dynamically calibrating personal style affinities and adapting the 6 narrative reranker weights based on user curation actions (`/api/taste_profile`).
 - **M24: Direct Live DaVinci Resolve Studio IPC Bridge** (`crates/aesthetic-core/src/export.rs`, `crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/app.js`, `crates/aesthetic-cli/src/main.rs`):
   - Implemented `send_to_live_resolve` executing the Python Resolve bridge against the running DaVinci Resolve Studio scripting IPC socket.
   - Added **"Send to Live Resolve (Direct)"** in the UI Export menu and `--live-resolve` flag to `aesthetic-cli rescore`.

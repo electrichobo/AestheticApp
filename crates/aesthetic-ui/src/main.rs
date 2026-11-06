@@ -1270,6 +1270,45 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
             let json = serde_json::to_value(&profile).unwrap_or_default();
             send_response(stream, "200 OK", "application/json", json.to_string().as_bytes());
         }
+        "/api/compose_showreel" => {
+            let duration = query_map
+                .get("duration")
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(60.0);
+            let obj_str = query_map.get("objective").map(|s| s.as_str()).unwrap_or("commercial");
+            let objective = match obj_str {
+                "dramatic" => aesthetic_core::ShowreelObjective::DramaticNarrative,
+                "action" => aesthetic_core::ShowreelObjective::ActionKinetic,
+                "balanced" => aesthetic_core::ShowreelObjective::BalancedHero,
+                _ => aesthetic_core::ShowreelObjective::CommercialLighting,
+            };
+
+            let ca = state.current_analysis.read().unwrap();
+            let (takes, media_path, fps) = if let Some(ref res) = *ca {
+                (
+                    res.ranked_takes.clone(),
+                    res.video_info.file_path.clone(),
+                    res.video_info.frame_rate,
+                )
+            } else {
+                (get_demo_takes(), "FEATURE_MASTER.MOV".to_string(), 24.0)
+            };
+            drop(ca);
+
+            let assembled = aesthetic_core::compose_smart_showreel(&takes, duration, objective);
+            let total_dur: f64 = assembled.iter().map(|t| t.duration_sec).sum();
+
+            let json = serde_json::json!({
+                "success": true,
+                "target_duration_sec": duration,
+                "assembled_duration_sec": total_dur,
+                "shots_count": assembled.len(),
+                "assembled_takes": assembled,
+                "source_media": media_path,
+                "fps": fps
+            });
+            send_response(stream, "200 OK", "application/json", json.to_string().as_bytes());
+        }
         _ => {
             send_response(stream, "404 NOT FOUND", "text/plain", b"Not Found");
         }
