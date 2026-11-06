@@ -51,9 +51,10 @@
 - **M24: Direct Live DaVinci Resolve Studio IPC Bridge** (`crates/aesthetic-core/src/export.rs`, `crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/app.js`, `crates/aesthetic-cli/src/main.rs`):
   - Implemented `send_to_live_resolve` executing the Python Resolve bridge against the running DaVinci Resolve Studio scripting IPC socket.
   - Added **"Send to Live Resolve (Direct)"** in the UI Export menu and `--live-resolve` flag to `aesthetic-cli rescore`.
-- **M25: Batch Folder Video Queue & Progressive Sidecars** (`crates/aesthetic-core/src/pipeline.rs`, `crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/app.js`, `crates/aesthetic-cli/src/main.rs`):
-  - Implemented `analyze_folder_queue` automatically discovering all supported video media files in a folder and sequentially analyzing, scoring, and outputting organized sidecars and contact sheets.
+- **M25: Batch Folder Video Queue & Progressive Sidecars & Unified NLE Exports** (`crates/aesthetic-core/src/pipeline.rs`, `crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/app.js`, `crates/aesthetic-cli/src/main.rs`):
+  - Implemented `analyze_folder_queue` automatically discovering all supported video media files in a folder and sequentially analyzing, scoring, and outputting organized sidecars, contact sheets, per-file EDLs/XMLs, and unified season-wide `season_all_hero_selects.edl` and `season_all_hero_selects.xml`.
   - Added **"Batch Analyze Folder"** in UI Import menu and `aesthetic-cli batch <folder> [--out <dir>]`.
+  - Updated `/api/export_edl`, `/api/export_fcpxml`, and `/api/export_csv` to attach active source video stems and trigger direct browser attachment downloads.
 - **M26: Smart Showreel Composer & Target Duration Assembly** (`crates/aesthetic-core/src/pipeline.rs`):
   - Implemented `compose_smart_showreel` optimization engine assembling curated reels to target durations (60s, 90s, 120s) balancing objective focus (Commercial Lighting, Dramatic Narrative, Action Kinetic, Balanced Hero), shot scale alternation rhythm, and color temperature continuity.
 - **M27: Personal Taste Profile & Feedback Reranker Tuning** (`crates/aesthetic-core/src/pipeline.rs`, `crates/aesthetic-ui/src/main.rs`):

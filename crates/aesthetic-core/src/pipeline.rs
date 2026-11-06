@@ -1662,6 +1662,7 @@ pub fn analyze_folder_queue(
     let start_time = std::time::Instant::now();
     let mut total_takes = 0;
     let mut per_file_takes = Vec::new();
+    let mut all_batch_takes = Vec::new();
 
     for vpath in &video_files {
         let file_stem = vpath
@@ -1670,22 +1671,66 @@ pub fn analyze_folder_queue(
             .unwrap_or("video");
         let sub_sidecars = out_sidecars_dir.join(file_stem);
         let contact_sheet = out_sidecars_dir.join(format!("{}_contact_sheet.html", file_stem));
+        let edl_file = out_sidecars_dir.join(format!("{}_selects.edl", file_stem));
+        let xml_file = out_sidecars_dir.join(format!("{}_selects.xml", file_stem));
+        let csv_file = out_sidecars_dir.join(format!("{}_selects.csv", file_stem));
 
         let options = BatchOptions {
             sample_step_sec,
             top_n: top_per_video,
             export_sidecars_dir: Some(sub_sidecars.clone()),
             export_contact_sheet_path: Some(contact_sheet),
+            export_edl_path: Some(edl_file),
+            export_fcpxml_path: Some(xml_file),
+            export_csv_path: Some(csv_file),
             ..Default::default()
         };
 
         if let Ok(res) = analyze_video_file(vpath, &options) {
             let n_takes = res.ranked_takes.len();
             total_takes += n_takes;
+            all_batch_takes.extend(res.ranked_takes);
             per_file_takes.push((file_stem.to_string(), n_takes));
         } else {
             per_file_takes.push((file_stem.to_string(), 0));
         }
+    }
+
+    // Export unified season batch deliverables (EDL, FCPXML, CSV, Resolve Script)
+    if !all_batch_takes.is_empty() {
+        all_batch_takes.sort_by(|a, b| {
+            b.scores
+                .overall
+                .partial_cmp(&a.scores.overall)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let season_edl = crate::export::generate_cmx3600_edl(
+            "SEASON_HERO_SELECTS",
+            "SEASON_BATCH",
+            &all_batch_takes,
+            24.0,
+        );
+        let _ = std::fs::write(out_sidecars_dir.join("season_all_hero_selects.edl"), season_edl);
+
+        let season_xml = crate::export::generate_fcpxml(
+            "SEASON_HERO_SELECTS",
+            "SEASON_BATCH",
+            &all_batch_takes,
+            24.0,
+        );
+        let _ = std::fs::write(out_sidecars_dir.join("season_all_hero_selects.xml"), season_xml);
+
+        let season_csv = crate::export::generate_csv_selects("SEASON_BATCH", &all_batch_takes, 24.0);
+        let _ = std::fs::write(out_sidecars_dir.join("season_all_hero_selects.csv"), season_csv);
+
+        let season_py = crate::export::generate_resolve_timeline_script(
+            "SEASON_HERO_SELECTS",
+            &folder_path.to_string_lossy(),
+            &all_batch_takes,
+            24.0,
+        );
+        let _ = std::fs::write(out_sidecars_dir.join("season_all_hero_selects.py"), season_py);
     }
 
     let elapsed_sec = start_time.elapsed().as_secs_f64();

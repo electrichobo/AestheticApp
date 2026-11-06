@@ -927,41 +927,73 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
         }
         "/api/export_edl" => {
             let ca = state.current_analysis.read().unwrap();
-            let takes = if let Some(ref res) = *ca {
-                res.ranked_takes.clone()
+            let (takes, media_path, fps) = if let Some(ref res) = *ca {
+                (
+                    res.ranked_takes.clone(),
+                    res.video_info.file_path.clone(),
+                    res.video_info.frame_rate,
+                )
             } else {
-                get_demo_takes()
+                (get_demo_takes(), "FEATURE_MASTER.MOV".to_string(), 24.0)
             };
-            let edl = generate_cmx3600_edl("AESTHETIC_SELECTS", "FEATURE_MASTER.MOV", &takes, 24.0);
-            send_response(
+            let clip_stem = Path::new(&media_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("AESTHETIC_SELECTS");
+            let edl = generate_cmx3600_edl("AESTHETIC_SELECTS", clip_stem, &takes, fps);
+            send_attachment_response(
                 stream,
                 "200 OK",
                 "text/plain; charset=UTF-8",
+                &format!("{}_selects.edl", clip_stem),
                 edl.as_bytes(),
             );
         }
         "/api/export_csv" => {
             let ca = state.current_analysis.read().unwrap();
-            let takes = if let Some(ref res) = *ca {
-                res.ranked_takes.clone()
+            let (takes, media_path, fps) = if let Some(ref res) = *ca {
+                (
+                    res.ranked_takes.clone(),
+                    res.video_info.file_path.clone(),
+                    res.video_info.frame_rate,
+                )
             } else {
-                get_demo_takes()
+                (get_demo_takes(), "FEATURE_MASTER.MOV".to_string(), 24.0)
             };
-            let csv = generate_csv_selects("FEATURE_MASTER.MOV", &takes, 24.0);
-            send_response(stream, "200 OK", "text/csv; charset=UTF-8", csv.as_bytes());
+            let clip_stem = Path::new(&media_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("AESTHETIC_SELECTS");
+            let csv = generate_csv_selects(clip_stem, &takes, fps);
+            send_attachment_response(
+                stream,
+                "200 OK",
+                "text/csv; charset=UTF-8",
+                &format!("{}_selects.csv", clip_stem),
+                csv.as_bytes(),
+            );
         }
         "/api/export_fcpxml" => {
             let ca = state.current_analysis.read().unwrap();
-            let takes = if let Some(ref res) = *ca {
-                res.ranked_takes.clone()
+            let (takes, media_path, fps) = if let Some(ref res) = *ca {
+                (
+                    res.ranked_takes.clone(),
+                    res.video_info.file_path.clone(),
+                    res.video_info.frame_rate,
+                )
             } else {
-                get_demo_takes()
+                (get_demo_takes(), "FEATURE_MASTER.MOV".to_string(), 24.0)
             };
-            let xml = generate_fcpxml("AESTHETIC_SELECTS", "FEATURE_MASTER.MOV", &takes, 24.0);
-            send_response(
+            let clip_stem = Path::new(&media_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("AESTHETIC_SELECTS");
+            let xml = generate_fcpxml("AESTHETIC_SELECTS", &media_path, &takes, fps);
+            send_attachment_response(
                 stream,
                 "200 OK",
                 "application/xml; charset=UTF-8",
+                &format!("{}_selects.xml", clip_stem),
                 xml.as_bytes(),
             );
         }

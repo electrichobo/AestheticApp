@@ -79,3 +79,5 @@ test_*.py
 # Logo/asset test files
 *.tif
 *.tiff
+
+assets/curated/

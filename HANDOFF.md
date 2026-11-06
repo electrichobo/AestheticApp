@@ -7,18 +7,19 @@
 
 ---
 
-## Current Status: M20–M28 Complete + FFmpeg Inclusion Hardened
-- **FFmpeg Inclusion & Multi-Tier Discovery**:
-  - Implemented multi-tier binary resolution in `aesthetic_core::video`: custom env vars (`AESTHETIC_FFMPEG_PATH`, `FFMPEG_PATH`), CWD + ancestor hierarchy traversal, running executable adjacent directory (`target/release/ffmpeg.exe`, `target/debug/ffmpeg.exe`), and canonical workspace path fallback.
-  - Added zero-dependency `build.rs` to `aesthetic-ui` and `aesthetic-cli` to automatically copy `tools/ffmpeg.exe` adjacent to built executables.
-- **M24–M28**: Live Resolve Studio bridge, batch queue processing, smart showreel composer modal, and adaptive taste profile calibration.
-- **Golden Baseline**: 1,112 real measured reference shots across 199 award-winning films (`manifest.json` v2.0.0-measured, 0 synthetic seeds).
-- **Quality**: Workspace tests passing (27 tests), zero clippy warnings (`-D warnings`).
+## Current Status: Batch Season Pipeline & NLE Exports Active
+- **Acting Dead Season 1 Ingested & Evaluated**:
+  - Processed all 9 files (8 full episodes + trailer, 45 hero takes) under `assets/curated/acting_dead/`.
+  - Exported per-episode and unified season-wide CMX 3600 standard EDLs (`season_all_hero_selects.edl`), Final Cut Pro XMLs (`season_all_hero_selects.xml`), CSV manifests, Resolve Python scripts (`season_all_hero_selects.py`), and visual contact sheets with embedded lossless PNG stills.
+- **Interactive UI Server**:
+  - Active on `http://127.0.0.1:63513` with multi-tier FFmpeg discovery and content-disposition NLE download attachments.
+- **Quality**:
+  - Workspace tests passing (27 tests), zero clippy warnings (`-D warnings`).
 
 ---
 
 ## Next Immediate Step
-1. **Production Operation**: Launch `aesthetic-ui` or run batch analysis on production folders (`aesthetic-cli batch`).
+1. **Interactive Review**: Open `http://127.0.0.1:63513` in browser or import `season_all_hero_selects.xml` into DaVinci Resolve or Premiere.
 
 ---
 
