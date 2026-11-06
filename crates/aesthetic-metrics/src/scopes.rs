@@ -34,7 +34,19 @@ pub struct RgbParade {
 pub struct Vectorscope {
     pub resolution: usize, // e.g. 128 or 256
     pub density: Vec<f32>,
-    pub skin_tone_angle_deg: f32, // standard I-line (~57.0 degrees)
+    pub skin_tone_angle_deg: f32, // standard central I-line (~57.0 degrees)
+    #[serde(default = "default_skin_min")]
+    pub skin_tone_cone_min_deg: f32, // inclusive multi-ethnic cone start (~48.0 degrees)
+    #[serde(default = "default_skin_max")]
+    pub skin_tone_cone_max_deg: f32, // inclusive multi-ethnic cone end (~66.0 degrees)
+}
+
+fn default_skin_min() -> f32 {
+    48.0
+}
+
+fn default_skin_max() -> f32 {
+    66.0
 }
 
 /// 256-bucket Histogram for Luma and individual RGB channels.
@@ -178,11 +190,12 @@ pub fn compute_parade(img: &RgbImage, num_cols: usize) -> RgbParade {
     }
 }
 
-/// Compute a circular Vectorscope (Cb vs Cr) from an RGB image.
+/// Compute a circular Vectorscope (Cb vs Cr) from an RGB image with broadcast chroma gain.
 pub fn compute_vectorscope(img: &RgbImage, res: usize) -> Vectorscope {
     let mut counts = vec![0u32; res * res];
     let center = (res as f32) / 2.0;
     let radius = center * 0.90;
+    let zoom = 2.5f32; // 2.5x broadcast chroma gain so natural cinematic tones extend legibly outward
 
     for p in img.pixels() {
         let r = p[0] as f32;
@@ -195,8 +208,8 @@ pub fn compute_vectorscope(img: &RgbImage, res: usize) -> Vectorscope {
         let cb = -0.1146 * r - 0.3854 * g + 0.5000 * b; // range ~ [-128, 128]
         let cr = 0.5000 * r - 0.4542 * g - 0.0458 * b;
 
-        let grid_x = (center + (cb / 128.0) * radius).round() as isize;
-        let grid_y = (center - (cr / 128.0) * radius).round() as isize; // Invert Y for Cartesian plot
+        let grid_x = (center + ((cb * zoom) / 128.0) * radius).round() as isize;
+        let grid_y = (center - ((cr * zoom) / 128.0) * radius).round() as isize; // Invert Y for Cartesian plot
 
         if grid_x >= 0 && grid_x < res as isize && grid_y >= 0 && grid_y < res as isize {
             counts[(grid_y as usize) * res + (grid_x as usize)] += 1;
@@ -218,7 +231,9 @@ pub fn compute_vectorscope(img: &RgbImage, res: usize) -> Vectorscope {
     Vectorscope {
         resolution: res,
         density,
-        skin_tone_angle_deg: 57.0, // Standard I-bar angle
+        skin_tone_angle_deg: 57.0, // Standard central I-bar angle
+        skin_tone_cone_min_deg: 48.0, // Inclusive melanin/hemoglobin spectrum start
+        skin_tone_cone_max_deg: 66.0, // Inclusive spectrum end
     }
 }
 

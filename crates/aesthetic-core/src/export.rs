@@ -989,21 +989,23 @@ pub fn rescore_from_sidecars(
         if png_path.exists() {
             if let Ok(dyn_img) = image::open(&png_path) {
                 let rgb = dyn_img.to_rgb8();
-                let emb = inference.infer_embedding(&rgb);
-                let kf = craft
-                    .as_ref()
-                    .map(|c| c.lighting.key_to_fill_ratio)
-                    .unwrap_or(2.5);
-                if let Some((shot, sim)) = store.nearest_measured_reference_with_craft(
-                    &emb,
-                    measured.exposure.dynamic_range_stops,
-                    measured.optics.sharpness_laplacian,
-                    kf,
-                ) {
-                    style.cinematographer_match =
-                        Some(format!("{} ({})", shot.cinematographer, shot.film_title));
-                    style.match_confidence = (sim * 100.0).clamp(0.0, 100.0);
-                    style.style_family = shot.style_label.clone();
+                if style.cinematographer_match.is_none() {
+                    let emb = inference.infer_embedding(&rgb);
+                    let kf = craft
+                        .as_ref()
+                        .map(|c| c.lighting.key_to_fill_ratio)
+                        .unwrap_or(2.5);
+                    if let Some((shot, sim)) = store.nearest_measured_reference_with_craft(
+                        &emb,
+                        measured.exposure.dynamic_range_stops,
+                        measured.optics.sharpness_laplacian,
+                        kf,
+                    ) {
+                        style.cinematographer_match =
+                            Some(format!("{} ({})", shot.cinematographer, shot.film_title));
+                        style.match_confidence = (sim * 100.0).clamp(0.0, 100.0);
+                        style.style_family = shot.style_label.clone();
+                    }
                 }
                 hero_frames.insert(take_id.clone(), rgb);
             }

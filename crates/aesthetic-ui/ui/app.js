@@ -12,6 +12,18 @@ let currentTime = 16.0;
 let currentInTime = 14.2;
 let currentOutTime = 18.7;
 let videoDuration = 60.0;
+let vectorscopeZoom = 2.5; // Broadcast 2.5x zoom so natural cinematic chroma fills graticule
+
+if (canvas) {
+  canvas.addEventListener('click', () => {
+    if (currentScope === 'vectorscope') {
+      const levels = [1.0, 2.0, 2.5, 4.0];
+      const curIdx = levels.indexOf(vectorscopeZoom);
+      vectorscopeZoom = levels[(curIdx + 1) % levels.length];
+      renderCurrentScope();
+    }
+  });
+}
 
 // Scope switching
 document.querySelectorAll('.scope-tab').forEach(tab => {
@@ -490,11 +502,12 @@ function drawRgbParade(c, w, h, p) {
   c.fillText('B', w - 22, 24);
 }
 
-// 3. High-Resolution Vectorscope (Target boxes, 75% & 100% saturation rings, 57° skin tone I-line)
+// 3. High-Resolution Vectorscope (Target boxes, 75% & 100% saturation rings, Multi-Ethnic Skin Tone Cone)
 function drawVectorscope(c, w, h, vs) {
   const cx = w / 2;
   const cy = h / 2;
   const radius = Math.min(w, h) * 0.43;
+  const zoom = typeof vectorscopeZoom === 'number' ? vectorscopeZoom : 2.5;
 
   // Render phosphor cloud first from live frame pixels or backend density
   if (cachedFramePixels && cachedFrameWidth > 0 && cachedFrameHeight > 0) {
@@ -509,8 +522,8 @@ function drawVectorscope(c, w, h, vs) {
       const r = px[p], g = px[p + 1], b = px[p + 2];
       const cb = -0.1146 * r - 0.3854 * g + 0.5000 * b;
       const cr = 0.5000 * r - 0.4542 * g - 0.0458 * b;
-      const vx = Math.round(cx + (cb / 128.0) * radius);
-      const vy = Math.round(cy - (cr / 128.0) * radius);
+      const vx = Math.round(cx + ((cb * zoom) / 128.0) * radius);
+      const vy = Math.round(cy - ((cr * zoom) / 128.0) * radius);
       if (vx >= 2 && vx < w - 2 && vy >= 2 && vy < h - 2) {
         accum[vy * w + vx] += 1.0;
         accum[vy * w + (vx - 1)] += 0.45;
@@ -552,6 +565,45 @@ function drawVectorscope(c, w, h, vs) {
     }
   }
 
+  // 1. Inclusive Multi-Ethnic Skin Tone Cone (48° to 66°, covering Fitzpatrick I–VI melanin & hemoglobin spectrum)
+  const minConeRad = (48.0 * Math.PI) / 180;
+  const maxConeRad = (66.0 * Math.PI) / 180;
+  c.beginPath();
+  c.moveTo(cx, cy);
+  c.arc(cx, cy, radius, -maxConeRad, -minConeRad);
+  c.closePath();
+  c.fillStyle = 'rgba(235, 170, 85, 0.15)';
+  c.fill();
+  c.strokeStyle = 'rgba(235, 170, 85, 0.40)';
+  c.lineWidth = 1.0;
+  c.stroke();
+
+  // 2. Central Reference I-Line (~57 degrees)
+  c.strokeStyle = 'rgba(240, 180, 75, 0.92)';
+  c.lineWidth = 2.0;
+  c.beginPath();
+  c.moveTo(cx, cy);
+  const skinRad = (57.0 * Math.PI) / 180;
+  c.lineTo(cx + Math.cos(skinRad) * radius, cy - Math.sin(skinRad) * radius);
+  c.stroke();
+
+  // Graduation markers along the skin axis
+  [0.25, 0.50, 0.75].forEach(mult => {
+    const tx = cx + Math.cos(skinRad) * radius * mult;
+    const ty = cy - Math.sin(skinRad) * radius * mult;
+    c.beginPath();
+    c.arc(tx, ty, 2.2, 0, Math.PI * 2);
+    c.fillStyle = '#ffbe5b';
+    c.fill();
+  });
+
+  c.fillStyle = '#ffbe5b';
+  c.font = 'bold 11px monospace';
+  c.fillText('SKIN TONE CONE (48°–66°)', cx + Math.cos(skinRad) * (radius * 0.76) + 10, cy - Math.sin(skinRad) * (radius * 0.76) - 4);
+  c.font = '9px monospace';
+  c.fillStyle = 'rgba(235, 175, 75, 0.85)';
+  c.fillText('Fitzpatrick I–VI Spectrum', cx + Math.cos(skinRad) * (radius * 0.76) + 10, cy - Math.sin(skinRad) * (radius * 0.76) + 8);
+
   // Concentric Saturation Graticule Rings (25%, 50%, 75%, 100%)
   c.strokeStyle = 'rgba(110, 140, 180, 0.25)';
   c.lineWidth = 1.2;
@@ -591,18 +643,16 @@ function drawVectorscope(c, w, h, vs) {
     c.fillText(t.label, tx + 11, ty + 5);
   });
 
-  // Skin tone I-line (~57 degrees)
-  c.strokeStyle = 'rgba(229, 169, 59, 0.85)';
-  c.lineWidth = 2.0;
-  c.beginPath();
-  c.moveTo(cx, cy);
-  const skinRad = (57.0 * Math.PI) / 180;
-  c.lineTo(cx + Math.cos(skinRad) * radius, cy - Math.sin(skinRad) * radius);
-  c.stroke();
-
-  c.fillStyle = '#e5a93b';
-  c.font = 'bold 14px monospace';
-  c.fillText('I-LINE SKIN (57°)', cx + Math.cos(skinRad) * (radius * 0.78) + 8, cy - Math.sin(skinRad) * (radius * 0.78));
+  // Zoom readout badge in top-left
+  c.fillStyle = 'rgba(15, 20, 28, 0.85)';
+  c.strokeStyle = 'rgba(110, 140, 180, 0.35)';
+  c.lineWidth = 1.0;
+  c.strokeRect(12, 12, 178, 22);
+  c.fillRect(12, 12, 178, 22);
+  c.fillStyle = '#38bdf8';
+  c.font = 'bold 10px monospace';
+  c.fillText(`ZOOM: ${zoom.toFixed(1)}× (Click to cycle)`, 18, 27);
+}
 }
 
 // 4. Smooth Anti-Aliased Spline Histograms
@@ -1365,14 +1415,15 @@ if (btnOpen) {
       if (!filePath) {
         filePath = prompt('Enter media file path to analyze:');
       }
-      if (!filePath) return;
+      if (!filePath || !filePath.trim()) return;
+      filePath = filePath.trim().replace(/^["']|["']$/g, '').trim();
 
       const takesList = document.getElementById('takes-list');
       if (takesList) {
         takesList.innerHTML = '<div class="empty-state">Analyzing video stream & computing cinematographic matrix...</div>';
       }
 
-      const res = await fetch(`/api/analyze?path=${encodeURIComponent(filePath.trim())}`);
+      const res = await fetch(`/api/analyze?path=${encodeURIComponent(filePath)}`);
       const data = await res.json();
       if (data.success) {
         await loadSelects();
@@ -1418,24 +1469,19 @@ const btnOpenSidecars = document.getElementById('btn-open-sidecars');
 if (btnOpenSidecars) {
   btnOpenSidecars.addEventListener('click', async () => {
     try {
-      let dirPath = null;
-      try {
-        const browseRes = await fetch('/api/browse_dir');
-        const browseData = await browseRes.json();
-        if (browseData.success && browseData.path) {
-          dirPath = browseData.path;
-        }
-      } catch (e) {}
+      let dirPath = prompt(
+        'Open Cached Sidecars Folder:\n\nEnter directory path containing JSON+PNG sidecars\n(e.g. assets/curated/acting_dead or an individual episode folder):',
+        'assets/curated/acting_dead'
+      );
+      if (!dirPath || !dirPath.trim()) return;
+      dirPath = dirPath.trim().replace(/^["']|["']$/g, '').trim();
 
-      if (!dirPath) {
-        dirPath = prompt(
-          'Enter path to cached sidecars directory:\n(e.g. assets/curated/acting_dead or an individual episode folder)',
-          'assets/curated/acting_dead'
-        );
+      const takesList = document.getElementById('takes-list');
+      if (takesList) {
+        takesList.innerHTML = '<div class="empty-state">Loading cached sidecars & computing baseline similarity...</div>';
       }
-      if (!dirPath) return;
 
-      const res = await fetch(`/api/rescore_sidecars?path=${encodeURIComponent(dirPath.trim())}`);
+      const res = await fetch(`/api/rescore_sidecars?path=${encodeURIComponent(dirPath)}`);
       const data = await res.json();
       if (data.success) {
         await loadSelects();
@@ -1467,11 +1513,12 @@ if (btnBatchFolder) {
           'O:\\ELECTRICHOBO\\FINALS AND MEZZANINES\\02 DIRECTOR OF PHOTOGRAPHY\\Acting Dead'
         );
       }
-      if (!folderPath) return;
+      if (!folderPath || !folderPath.trim()) return;
+      folderPath = folderPath.trim().replace(/^["']|["']$/g, '').trim();
 
       btnBatchFolder.disabled = true;
       alert(`[AESTHETIC Batch Queue]\nStarting batch analysis on directory:\n${folderPath}\nThis runs sequentially across all video files and saves individual sidecars.`);
-      const res = await fetch(`/api/batch_folder?folder=${encodeURIComponent(folderPath.trim())}&step=2.0`);
+      const res = await fetch(`/api/batch_folder?folder=${encodeURIComponent(folderPath)}&step=2.0`);
       const data = await res.json();
       if (data.folder_path) {
         alert(`[✓] Batch Analysis Finished!\nProcessed ${data.total_files_processed} files in ${data.elapsed_sec.toFixed(1)}s.\nTotal Hero Selects Extracted: ${data.total_takes_extracted}\nOutput saved to: ${data.output_sidecars_dir}`);

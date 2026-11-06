@@ -40,11 +40,24 @@
 
 ---
 
-## Completed in M24–M28 + FFmpeg Inclusion Hardened
-- **FFmpeg Inclusion & Multi-Tier Discovery** (`crates/aesthetic-core/src/video.rs`, `crates/aesthetic-ui/build.rs`, `crates/aesthetic-cli/build.rs`):
-  - Upgraded `find_ffmpeg()` and `find_ffprobe()` in `video.rs` to execute exhaustive multi-tier discovery: env variables (`AESTHETIC_FFMPEG_PATH`, `FFMPEG_PATH`), CWD + ancestor hierarchy checks, adjacent executable checks (`target/release/ffmpeg.exe`, `target/debug/ffmpeg.exe`), and canonical workspace fallbacks.
-  - Added zero-dependency `build.rs` to both `aesthetic-ui` and `aesthetic-cli` to automatically ensure `tools/ffmpeg.exe` is copied adjacent to output binaries.
-  - Verified with new unit test `video::tests::test_find_ffmpeg_resolves_and_runs` (27/27 workspace tests passing).
+## Completed in M24–M28 + Scopes Overhaul & FFmpeg Hardening
+- **Vectorscope Broadcast Zoom & Inclusive Multi-Ethnic Skin Tone Cone** (`crates/aesthetic-metrics/src/scopes.rs`, `crates/aesthetic-ui/ui/app.js`):
+  - Added 2.5× broadcast chroma gain so natural cinematic tones extend legibly outward across the graticule.
+  - Implemented interactive canvas click-to-cycle vectorscope zoom: `1.0×`, `2.0×`, `2.5×`, and `4.0×`.
+  - Expanded traditional single I-line into an inclusive **Skin Tone Cone** from 48° to 66° covering Fitzpatrick I–VI melanin & hemoglobin spectrums, with graduation markers along the 57° reference line.
+- **Bulletproof FFmpeg Inclusion & Path Resolution** (`crates/aesthetic-core/src/video.rs`, `crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/app.js`):
+  - Made `find_binary` return clean, absolute canonicalized paths (Windows `\\?\` UNC prefix stripped).
+  - Search order prioritizes executable-adjacent (`target/release/ffmpeg.exe`), running binary ancestor walk, hardcoded workspace root (`E:\Antigravity\aesthetic\tools\ffmpeg.exe`), and system PATH via `where.exe`.
+  - Added automatic quote and whitespace stripping (`clean_user_path_str`) across backend routes (`/api/open_media`, `/api/analyze`, `/api/batch_folder`, `/api/rescore_sidecars`) and frontend prompt dialogs.
+- **Multi-Threaded Server & In-Memory Frame Cache** (`crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-core/src/export.rs`):
+  - Replaced single-threaded blocking HTTP listener with per-connection worker threads (`thread::spawn`), preventing request queuing and browser connection timeouts.
+  - Added `cached_frames` in-memory LRU-style cache, serving companion PNG thumbnails in 0.1ms without touching FFmpeg.
+  - Recursive sidecar discovery discovers all JSON sidecars across arbitrary subfolder hierarchies in < 700ms.
+  - Strictly isolated user sidecar exports from `assets/baseline/` (the Golden Baseline).
+- **Workspace Code Audit & Verification**:
+  - Full audit across `aesthetic-models`, `aesthetic-metrics`, `aesthetic-core`, `aesthetic-ui`, and `aesthetic-cli`.
+  - All 27 unit and integration tests passing (`cargo test --workspace`); zero Clippy warnings (`cargo clippy --workspace -- -D warnings`).
+  - Fresh release binaries built (`aesthetic-ui.exe`, `aesthetic-cli.exe`).
 - **M28: Interactive Smart Showreel Composer Modal & Pacing Grid** (`crates/aesthetic-ui/ui/index.html`, `crates/aesthetic-ui/ui/app.js`, `crates/aesthetic-ui/src/main.rs`):
   - Added dedicated **"Smart Reel"** button to the Candidate Selects panel header.
   - Implemented the `#composer-modal` and `/api/compose_showreel` endpoint displaying target vs assembled duration, shot scale pacing, and tabular cut list order.

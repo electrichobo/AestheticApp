@@ -7,14 +7,35 @@ use aesthetic_models::manifest::VideoSourceInfo;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Locate a binary by name, checking env vars, workspace tools/, parent ancestors, and PATH.
+/// Normalizes a path to an absolute path without Windows extended-length prefix (`\\?\`).
+fn clean_absolute_path(path: &Path) -> Option<PathBuf> {
+    if !path.exists() {
+        return None;
+    }
+    let abs = if path.is_absolute() {
+        path.to_path_buf()
+    } else if let Ok(cwd) = std::env::current_dir() {
+        cwd.join(path)
+    } else {
+        path.to_path_buf()
+    };
+
+    let s = abs.to_string_lossy();
+    if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        Some(PathBuf::from(stripped))
+    } else {
+        Some(abs)
+    }
+}
+
+/// Locate a binary by name, checking env vars, adjacent to executable, ancestor trees, workspace tools/, and system PATH.
 fn find_binary(name: &str, custom_env: Option<&str>) -> Option<PathBuf> {
     // 1. Explicit environment variable override
     if let Some(env_var) = custom_env {
         if let Ok(val) = std::env::var(env_var) {
-            let p = PathBuf::from(&val);
-            if p.exists() {
-                return Some(p);
+            let p = PathBuf::from(val.trim().trim_matches('"').trim_matches('\''));
+            if let Some(clean) = clean_absolute_path(&p) {
+                return Some(clean);
             }
         }
     }
@@ -25,77 +46,100 @@ fn find_binary(name: &str, custom_env: Option<&str>) -> Option<PathBuf> {
         name.to_string()
     };
 
-    // 2. Relative to current working directory
-    let cwd_tools = Path::new("tools").join(&exe_name);
-    if cwd_tools.exists() {
-        return Some(cwd_tools);
-    }
-    let cwd_file = PathBuf::from(&exe_name);
-    if cwd_file.exists() {
-        return Some(cwd_file);
-    }
-
-    // 3. Walk up ancestor tree from current working directory
-    if let Ok(cwd) = std::env::current_dir() {
-        let mut cur = cwd.as_path();
-        while let Some(parent) = cur.parent() {
-            let candidate_tools = parent.join("tools").join(&exe_name);
-            if candidate_tools.exists() {
-                return Some(candidate_tools);
-            }
-            let candidate_root = parent.join(&exe_name);
-            if candidate_root.exists() {
-                return Some(candidate_root);
-            }
-            cur = parent;
-        }
-    }
-
-    // 4. Walk up ancestor tree from running executable location
+    // 2. Adjacent to running executable location (e.g., target/release/ffmpeg.exe)
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(parent) = current_exe.parent() {
             let adjacent = parent.join(&exe_name);
-            if adjacent.exists() {
-                return Some(adjacent);
+            if let Some(clean) = clean_absolute_path(&adjacent) {
+                return Some(clean);
             }
 
+            // Walk up ancestor tree from running executable location (e.g., target/release/../../tools/ffmpeg.exe)
             let mut cur = parent;
             while let Some(ancestor) = cur.parent() {
                 let candidate_tools = ancestor.join("tools").join(&exe_name);
-                if candidate_tools.exists() {
-                    return Some(candidate_tools);
+                if let Some(clean) = clean_absolute_path(&candidate_tools) {
+                    return Some(clean);
                 }
                 let candidate_root = ancestor.join(&exe_name);
-                if candidate_root.exists() {
-                    return Some(candidate_root);
+                if let Some(clean) = clean_absolute_path(&candidate_root) {
+                    return Some(clean);
                 }
                 cur = ancestor;
             }
         }
     }
 
-    // 5. Standard Windows workspace installations
-    let known_paths = [
-        format!(r"E:\Antigravity\aesthetic\tools\{}", exe_name),
-        format!(r"C:\ffmpeg\bin\{}", exe_name),
-        format!(r"C:\Program Files\ffmpeg\bin\{}", exe_name),
-    ];
-    for p in &known_paths {
-        let pb = PathBuf::from(p);
-        if pb.exists() {
-            return Some(pb);
+    // 3. Known project workspace tools directory (E:\Antigravity\aesthetic\tools\...)
+    let workspace_tool = PathBuf::from(r"E:\Antigravity\aesthetic\tools").join(&exe_name);
+    if let Some(clean) = clean_absolute_path(&workspace_tool) {
+        return Some(clean);
+    }
+
+    // 4. Relative to current working directory & its ancestors
+    let cwd_tools = Path::new("tools").join(&exe_name);
+    if let Some(clean) = clean_absolute_path(&cwd_tools) {
+        return Some(clean);
+    }
+    let cwd_file = PathBuf::from(&exe_name);
+    if let Some(clean) = clean_absolute_path(&cwd_file) {
+        return Some(clean);
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut cur = cwd.as_path();
+        while let Some(parent) = cur.parent() {
+            let candidate_tools = parent.join("tools").join(&exe_name);
+            if let Some(clean) = clean_absolute_path(&candidate_tools) {
+                return Some(clean);
+            }
+            let candidate_root = parent.join(&exe_name);
+            if let Some(clean) = clean_absolute_path(&candidate_root) {
+                return Some(clean);
+            }
+            cur = parent;
         }
     }
 
-    // 6. Test system PATH availability
-    if let Ok(status) = Command::new(name)
+    // 5. Standard Windows installation paths
+    let known_paths = [
+        format!(r"C:\ffmpeg\bin\{}", exe_name),
+        format!(r"C:\Program Files\ffmpeg\bin\{}", exe_name),
+        format!(r"C:\ProgramData\chocolatey\bin\{}", exe_name),
+        format!(r"C:\tools\ffmpeg\bin\{}", exe_name),
+    ];
+    for p in &known_paths {
+        let pb = PathBuf::from(p);
+        if let Some(clean) = clean_absolute_path(&pb) {
+            return Some(clean);
+        }
+    }
+
+    // 6. Windows `where.exe` query to locate binary in system PATH as an absolute path
+    #[cfg(windows)]
+    {
+        if let Ok(out) = Command::new("where.exe").arg(&exe_name).output() {
+            if out.status.success() {
+                if let Ok(s) = String::from_utf8(out.stdout) {
+                    for line in s.lines() {
+                        let candidate = PathBuf::from(line.trim());
+                        if let Some(clean) = clean_absolute_path(&candidate) {
+                            return Some(clean);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 7. Test system PATH availability fallback
+    if let Ok(status) = Command::new(&exe_name)
         .arg("-version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
     {
         if status.success() {
-            return Some(PathBuf::from(name));
+            return Some(PathBuf::from(&exe_name));
         }
     }
 
@@ -196,10 +240,10 @@ fn probe_with_ffmpeg(video_path: &Path) -> Result<VideoSourceInfo, String> {
         "FFmpeg executable not found. Ensure tools/ffmpeg.exe exists or add ffmpeg to PATH.".to_string()
     })?;
 
-    let output = Command::new(ffmpeg)
+    let output = Command::new(&ffmpeg)
         .args(["-i", video_path.to_str().unwrap_or_default()])
         .output()
-        .map_err(|e| format!("Failed to execute ffmpeg: {}", e))?;
+        .map_err(|e| format!("Failed to execute ffmpeg at {:?}: {}", ffmpeg, e))?;
 
     let stderr = String::from_utf8_lossy(&output.stderr);
 
@@ -321,10 +365,10 @@ pub fn extract_frames_burst(
         "-".to_string(),
     ]);
 
-    let output = Command::new(ffmpeg)
+    let output = Command::new(&ffmpeg)
         .args(&args)
         .output()
-        .map_err(|e| format!("Failed to execute ffmpeg: {}", e))?;
+        .map_err(|e| format!("Failed to execute ffmpeg at {:?}: {}", ffmpeg, e))?;
 
     if !output.status.success() || output.stdout.is_empty() {
         return Err(format!(
@@ -468,7 +512,7 @@ pub fn extract_trimmed_clip(
         "FFmpeg executable not found. Ensure tools/ffmpeg.exe exists or add ffmpeg to PATH.".to_string()
     })?;
 
-    let status = Command::new(ffmpeg)
+    let status = Command::new(&ffmpeg)
         .args([
             "-y",
             "-ss",
@@ -482,7 +526,7 @@ pub fn extract_trimmed_clip(
             output_path.to_str().unwrap_or_default(),
         ])
         .status()
-        .map_err(|e| format!("Failed to execute ffmpeg trim: {}", e))?;
+        .map_err(|e| format!("Failed to execute ffmpeg trim at {:?}: {}", ffmpeg, e))?;
 
     if !status.success() {
         return Err("ffmpeg clip extraction failed".to_string());

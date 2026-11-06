@@ -84,7 +84,7 @@ fn main() {
     let running_clone = running.clone();
     let server_state = state.clone();
 
-    // Spawn server thread
+    // Spawn server thread with per-connection worker threads for true concurrency
     let server_handle = thread::spawn(move || {
         for stream in listener.incoming() {
             if !running_clone.load(Ordering::Relaxed) {
@@ -92,7 +92,9 @@ fn main() {
             }
             if let Ok(mut stream) = stream {
                 let state_ref = server_state.clone();
-                handle_http_request(&mut stream, &state_ref);
+                thread::spawn(move || {
+                    handle_http_request(&mut stream, &state_ref);
+                });
             }
         }
     });
@@ -151,6 +153,12 @@ fn find_edge_browser() -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Clean user-provided path string by trimming whitespace and surrounding quotes.
+#[inline]
+fn clean_user_path_str(raw: &str) -> &str {
+    raw.trim().trim_matches('"').trim_matches('\'').trim()
 }
 
 /// Handle incoming HTTP requests and API endpoints.
@@ -596,7 +604,8 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
         }
         "/api/open_media" => {
             if let Some(path_str) = query_map.get("path") {
-                let path = Path::new(path_str);
+                let clean = clean_user_path_str(path_str);
+                let path = Path::new(clean);
                 if let Ok(dyn_img) = image::open(path) {
                     let rgb = dyn_img.to_rgb8();
                     let (w, h) = rgb.dimensions();
@@ -749,7 +758,8 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
         }
         "/api/analyze" => {
             if let Some(path_str) = query_map.get("path") {
-                let path = Path::new(path_str);
+                let clean = clean_user_path_str(path_str);
+                let path = Path::new(clean);
                 let top_n = query_map
                     .get("top")
                     .and_then(|n| n.parse::<usize>().ok())
@@ -1068,18 +1078,19 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
         }
         "/api/batch_folder" => {
             if let Some(folder_str) = query_map.get("folder") {
+                let clean_folder = clean_user_path_str(folder_str);
                 let out_dir_str = query_map
                     .get("out")
                     .cloned()
-                    .unwrap_or_else(|| format!("{}_aesthetic_sidecars", folder_str));
+                    .unwrap_or_else(|| format!("{}_aesthetic_sidecars", clean_folder));
                 let step = query_map
                     .get("step")
                     .and_then(|s| s.parse::<f64>().ok())
                     .unwrap_or(2.0);
                 let top_n = query_map.get("top").and_then(|s| s.parse::<usize>().ok());
 
-                let folder_path = Path::new(folder_str);
-                let out_path = Path::new(&out_dir_str);
+                let folder_path = Path::new(clean_folder);
+                let out_path = Path::new(clean_user_path_str(&out_dir_str));
 
                 match aesthetic_core::analyze_folder_queue(folder_path, out_path, step, top_n) {
                     Ok(summary) => {
@@ -1114,7 +1125,8 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
         }
         "/api/rescore_sidecars" => {
             if let Some(path_str) = query_map.get("path") {
-                let sidecars_path = Path::new(path_str);
+                let clean = clean_user_path_str(path_str);
+                let sidecars_path = Path::new(clean);
                 match aesthetic_core::rescore_from_sidecars(sidecars_path) {
                     Ok((takes, _frames)) => {
                         let max_end = takes
