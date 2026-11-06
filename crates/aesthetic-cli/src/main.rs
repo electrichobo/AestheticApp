@@ -289,6 +289,10 @@ fn run_baseline_ingest(media_path: &Path, flags: &[String]) {
 
     match res {
         Ok(summary) => {
+            let baseline_dir = Path::new("assets").join("baseline");
+            if let Err(e) = store.save_to_dir(&baseline_dir) {
+                eprintln!("Warning: Failed to save baseline to disk: {}", e);
+            }
             println!("\n[✓] Ingestion Successful!");
             println!("  * Reference Shots Ingested: {}", summary.shots_added);
             println!(
@@ -638,13 +642,10 @@ fn run_server_ingest(server_dir: &Path, flags: &[String]) {
         let mut skipped = 0;
         for job in matched_jobs {
             let award_title = job.2.title;
-            let award_year = job.2.year;
-            let exists = store.manifest.films.iter().any(|f| {
-                f.title.eq_ignore_ascii_case(award_title)
-                    && (f.year == award_year
-                        || f.year == 0
-                        || (f.year as i32 - award_year as i32).abs() <= 1)
-            });
+            let exists = store
+                .measured_shots()
+                .iter()
+                .any(|s| s.film_title.eq_ignore_ascii_case(award_title));
             if exists {
                 skipped += 1;
             } else {
@@ -701,6 +702,8 @@ fn run_server_ingest(server_dir: &Path, flags: &[String]) {
                     summary.new_dynamic_range_p50, summary.new_highlight_rolloff_p50
                 );
                 total_shots += summary.shots_added;
+                let baseline_dir = Path::new("assets").join("baseline");
+                let _ = store.save_to_dir(&baseline_dir);
             }
             Err(err) => {
                 eprintln!("  [!] Failed to ingest {}: {}", folder, err);

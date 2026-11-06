@@ -1,529 +1,79 @@
 {
-  "version": "",
-  "total_films": 60,
-  "total_reference_shots": 176,
+  "version": "2.0.0-measured",
+  "total_films": 135,
+  "total_reference_shots": 760,
   "films": [
     {
-      "title": "Persona",
-      "cinematographer": "Sven Nykvist",
-      "director": null,
-      "year": 1970,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
+      "title": "2001: A Space Odyssey",
+      "cinematographer": "Geoffrey Unsworth",
+      "director": "Stanley Kubrick",
+      "year": 1968,
+      "aspect_ratio": "3840:1744",
+      "shot_count": 6,
+      "average_dynamic_range": 9.33638
     },
     {
-      "title": "The Revenant",
-      "cinematographer": "Emmanuel Lubezki",
-      "director": null,
-      "year": 1977,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "The Godfather",
-      "cinematographer": "Gordon Willis",
-      "director": null,
-      "year": 1984,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Last Year at Marienbad",
-      "cinematographer": "Sacha Vierny",
-      "director": null,
-      "year": 1991,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
+      "title": "Chinatown",
+      "cinematographer": "John A. Alonzo",
+      "director": "Roman Polanski",
+      "year": 1974,
+      "aspect_ratio": "3828:1620",
+      "shot_count": 6,
+      "average_dynamic_range": 9.16729
     },
     {
       "title": "Apocalypse Now",
       "cinematographer": "Vittorio Storaro",
-      "director": null,
-      "year": 1998,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Seven Samurai",
-      "cinematographer": "Asakazu Nakai",
-      "director": null,
-      "year": 2005,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "In the Mood for Love",
-      "cinematographer": "Christopher Doyle",
-      "director": null,
-      "year": 2012,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "8½",
-      "cinematographer": "Giuseppe Rotunno",
-      "director": null,
-      "year": 2019,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Skyfall",
-      "cinematographer": "Roger Deakins",
-      "director": null,
-      "year": 1974,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Barry Lyndon",
-      "cinematographer": "John Alcott",
-      "director": null,
-      "year": 1981,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Citizen Kane",
-      "cinematographer": "Gregg Toland",
-      "director": null,
-      "year": 1988,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "The Double Life of Véronique",
-      "cinematographer": "Sławomir Idziak",
-      "director": null,
-      "year": 1995,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Close Encounters of the Third Kind",
-      "cinematographer": "Vilmos Zsigmond",
-      "director": null,
-      "year": 2002,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Tokyo Story",
-      "cinematographer": "Yūharu Atsuta",
-      "director": null,
-      "year": 2009,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Casino",
-      "cinematographer": "Robert Richardson",
-      "director": null,
-      "year": 2016,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Vertigo",
-      "cinematographer": "Robert Burks",
-      "director": null,
-      "year": 1971,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Breathless",
-      "cinematographer": "Raoul Coutard",
-      "director": null,
-      "year": 1978,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Touch of Evil",
-      "cinematographer": "Russell Metty",
-      "director": null,
-      "year": 1985,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "The Grand Budapest Hotel",
-      "cinematographer": "Robert Yeoman",
-      "director": null,
-      "year": 1992,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Taxi Driver",
-      "cinematographer": "Michael Chapman",
-      "director": null,
-      "year": 1999,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "8½",
-      "cinematographer": "Gianni Di Venanzo",
-      "director": null,
-      "year": 2006,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "The Rules of the Game",
-      "cinematographer": "Christian Matras",
-      "director": null,
-      "year": 2013,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Once Upon a Time in the West",
-      "cinematographer": "Tonino Delli Colli",
-      "director": null,
-      "year": 2020,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "The Cranes Are Flying",
-      "cinematographer": "Sergey Urusevsky",
-      "director": null,
-      "year": 1975,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Lawrence of Arabia",
-      "cinematographer": "Freddie Young",
-      "director": null,
-      "year": 1982,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "There Will Be Blood",
-      "cinematographer": "Robert Elswit",
-      "director": null,
-      "year": 1989,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Rashomon",
-      "cinematographer": "Kazuo Miyagawa",
-      "director": null,
-      "year": 1996,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "The Searchers",
-      "cinematographer": "Winton C. Hoch",
-      "director": null,
-      "year": 2003,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "The Passion of Joan of Arc",
-      "cinematographer": "Rudolph Maté",
-      "director": null,
-      "year": 2010,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Black Narcissus",
-      "cinematographer": "Jack Cardiff",
-      "director": null,
-      "year": 2017,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "La Dolce Vita",
-      "cinematographer": "Otello Martelli",
-      "director": null,
-      "year": 1972,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "The Seventh Seal",
-      "cinematographer": "Gunnar Fischer",
-      "director": null,
+      "director": "Francis Ford Coppola",
       "year": 1979,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
+      "aspect_ratio": "3840:1604",
+      "shot_count": 6,
+      "average_dynamic_range": 8.57862
     },
     {
-      "title": "Amélie",
-      "cinematographer": "Bruno Delbonnel",
-      "director": null,
-      "year": 1986,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
+      "title": "Blade Runner",
+      "cinematographer": "Jordan Cronenweth",
+      "director": "Ridley Scott",
+      "year": 1982,
+      "aspect_ratio": "3840:1600",
+      "shot_count": 6,
+      "average_dynamic_range": 9.68171
     },
     {
-      "title": "Paris, Texas",
-      "cinematographer": "Robby Müller",
-      "director": null,
-      "year": 1993,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
+      "title": "Braveheart",
+      "cinematographer": "John Toll",
+      "director": "Mel Gibson",
+      "year": 1995,
+      "aspect_ratio": "3840:2160",
+      "shot_count": 6,
+      "average_dynamic_range": 8.54217
     },
     {
-      "title": "Goodfellas",
-      "cinematographer": "Michael Ballhaus",
-      "director": null,
-      "year": 2000,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
+      "title": "The Lord of the Rings: The Fellowship of the Ring",
+      "cinematographer": "Andrew Lesnie",
+      "director": "Peter Jackson",
+      "year": 2001,
+      "aspect_ratio": "3840:1608",
+      "shot_count": 6,
+      "average_dynamic_range": 8.17811
     },
     {
       "title": "Saving Private Ryan",
       "cinematographer": "Janusz Kamiński",
-      "director": null,
-      "year": 2007,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Scarface",
-      "cinematographer": "Lee Garmes",
-      "director": null,
-      "year": 2014,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Suspiria",
-      "cinematographer": "Luciano Tovoli",
-      "director": null,
-      "year": 2021,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "The 400 Blows",
-      "cinematographer": "Henri Decaë",
-      "director": null,
-      "year": 1976,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Blow-Up",
-      "cinematographer": "Carlo di Palma",
-      "director": null,
-      "year": 1983,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Battleship Potemkin",
-      "cinematographer": "Eduard Tisse",
-      "director": null,
-      "year": 1990,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Barbie",
-      "cinematographer": "Rodrigo Prieto",
-      "director": null,
-      "year": 1997,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "The Empire Strikes Back",
-      "cinematographer": "Peter Suschitzky",
-      "director": null,
-      "year": 2004,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "2001: A Space Odyssey",
-      "cinematographer": "Geoffrey Unsworth",
-      "director": null,
-      "year": 2011,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Some Like It Hot",
-      "cinematographer": "Charles Lang",
-      "director": null,
-      "year": 2018,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "The Third Man",
-      "cinematographer": "Robert Krasker",
-      "director": null,
-      "year": 1973,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Se7en",
-      "cinematographer": "Darius Khondji",
-      "director": null,
-      "year": 1980,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Days of Heaven",
-      "cinematographer": "Néstor Almendros",
-      "director": null,
-      "year": 1987,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "In the Mood for Love",
-      "cinematographer": "Mark Lee Ping-Bing",
-      "director": null,
-      "year": 1994,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Oppenheimer",
-      "cinematographer": "Hoyte van Hoytema",
-      "director": null,
-      "year": 2001,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Dune",
-      "cinematographer": "Greig Fraser",
-      "director": null,
-      "year": 2008,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "The Piano",
-      "cinematographer": "Stuart Dryburgh",
-      "director": null,
-      "year": 2015,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Road to Perdition",
-      "cinematographer": "Conrad Hall",
-      "director": null,
-      "year": 1970,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "The Black Stallion",
-      "cinematographer": "Caleb Deschanel",
-      "director": null,
-      "year": 1977,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Slumdog Millionaire",
-      "cinematographer": "Anthony Dod Mantle",
-      "director": null,
-      "year": 1984,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Challengers",
-      "cinematographer": "Sayombhu Mukdeeprom",
-      "director": null,
-      "year": 1991,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
-    },
-    {
-      "title": "Black Swan",
-      "cinematographer": "Matthew Libatique",
-      "director": null,
+      "director": "Steven Spielberg",
       "year": 1998,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
+      "aspect_ratio": "3840:2160",
+      "shot_count": 6,
+      "average_dynamic_range": 9.35497
     },
     {
-      "title": "Eternal Sunshine of the Spotless Mind",
-      "cinematographer": "Ellen Kuras",
-      "director": null,
-      "year": 2005,
-      "aspect_ratio": "2.39:1",
-      "shot_count": 3,
-      "average_dynamic_range": 13.8
+      "title": "Gladiator",
+      "cinematographer": "John Mathieson",
+      "director": "Ridley Scott",
+      "year": 2000,
+      "aspect_ratio": "3840:2160",
+      "shot_count": 6,
+      "average_dynamic_range": 8.932
     },
     {
       "title": "West Side Story",
@@ -531,8 +81,8 @@
       "director": "Steven Spielberg",
       "year": 2021,
       "aspect_ratio": "3840:2160",
-      "shot_count": 1,
-      "average_dynamic_range": 3.054448
+      "shot_count": 6,
+      "average_dynamic_range": 8.51482
     },
     {
       "title": "Vertigo",
@@ -540,36 +90,1161 @@
       "director": "Alfred Hitchcock",
       "year": 1958,
       "aspect_ratio": "3840:2076",
-      "shot_count": 1,
-      "average_dynamic_range": 4.0588937
+      "shot_count": 6,
+      "average_dynamic_range": 8.80173
+    },
+    {
+      "title": "Inglourious Basterds",
+      "cinematographer": "Robert Richardson",
+      "director": "Quentin Tarantino",
+      "year": 2009,
+      "aspect_ratio": "3840:1600",
+      "shot_count": 5,
+      "average_dynamic_range": 9.61163
+    },
+    {
+      "title": "Batman Begins",
+      "cinematographer": "Wally Pfister",
+      "director": "Christopher Nolan",
+      "year": 2005,
+      "aspect_ratio": "3840:1600",
+      "shot_count": 5,
+      "average_dynamic_range": 10.92483
+    },
+    {
+      "title": "The Dark Knight",
+      "cinematographer": "Wally Pfister",
+      "director": "Christopher Nolan",
+      "year": 2008,
+      "aspect_ratio": "3840:1600",
+      "shot_count": 5,
+      "average_dynamic_range": 10.91726
+    },
+    {
+      "title": "There Will Be Blood",
+      "cinematographer": "Robert Elswit",
+      "director": "Paul Thomas Anderson",
+      "year": 2007,
+      "aspect_ratio": "1868:800",
+      "shot_count": 11,
+      "average_dynamic_range": 10.58156
+    },
+    {
+      "title": "The Prestige",
+      "cinematographer": "Wally Pfister",
+      "director": "Christopher Nolan",
+      "year": 2006,
+      "aspect_ratio": "3840:1600",
+      "shot_count": 5,
+      "average_dynamic_range": 9.24474
+    },
+    {
+      "title": "Inception",
+      "cinematographer": "Wally Pfister",
+      "director": "Christopher Nolan",
+      "year": 2010,
+      "aspect_ratio": "3840:1600",
+      "shot_count": 5,
+      "average_dynamic_range": 9.71772
+    },
+    {
+      "title": "Mad Max: Fury Road",
+      "cinematographer": "John Seale",
+      "director": "George Miller",
+      "year": 2015,
+      "aspect_ratio": "3840:1600",
+      "shot_count": 11,
+      "average_dynamic_range": 9.09153
+    },
+    {
+      "title": "Prisoners",
+      "cinematographer": "Roger Deakins",
+      "director": "Denis Villeneuve",
+      "year": 2013,
+      "aspect_ratio": "3840:2160",
+      "shot_count": 5,
+      "average_dynamic_range": 8.96232
+    },
+    {
+      "title": "Dune: Part Two",
+      "cinematographer": "Greig Fraser",
+      "director": "Denis Villeneuve",
+      "year": 2024,
+      "aspect_ratio": "3840:1600",
+      "shot_count": 5,
+      "average_dynamic_range": 8.8134
+    },
+    {
+      "title": "Oppenheimer",
+      "cinematographer": "Hoyte van Hoytema",
+      "director": "Christopher Nolan",
+      "year": 2023,
+      "aspect_ratio": "3840:1744",
+      "shot_count": 11,
+      "average_dynamic_range": 9.55864
+    },
+    {
+      "title": "Top Gun: Maverick",
+      "cinematographer": "Claudio Miranda",
+      "director": "Joseph Kosinski",
+      "year": 2022,
+      "aspect_ratio": "3840:1608",
+      "shot_count": 5,
+      "average_dynamic_range": 9.06805
+    },
+    {
+      "title": "Ford v Ferrari",
+      "cinematographer": "Phedon Papamichael",
+      "director": "James Mangold",
+      "year": 2019,
+      "aspect_ratio": "3840:1610",
+      "shot_count": 5,
+      "average_dynamic_range": 9.28633
+    },
+    {
+      "title": "The Grand Budapest Hotel",
+      "cinematographer": "Robert Yeoman",
+      "director": "Wes Anderson",
+      "year": 2014,
+      "aspect_ratio": "3840:2076",
+      "shot_count": 11,
+      "average_dynamic_range": 8.95326
+    },
+    {
+      "title": "1917",
+      "cinematographer": "Roger Deakins",
+      "director": "Sam Mendes",
+      "year": 2019,
+      "aspect_ratio": "3840:1604",
+      "shot_count": 5,
+      "average_dynamic_range": 8.24599
+    },
+    {
+      "title": "Black Hawk Down",
+      "cinematographer": "Slawomir Idziak",
+      "director": "Ridley Scott",
+      "year": 2001,
+      "aspect_ratio": "3840:1600",
+      "shot_count": 5,
+      "average_dynamic_range": 10.21627
+    },
+    {
+      "title": "Once Upon a Time in Hollywood",
+      "cinematographer": "Robert Richardson",
+      "director": "Quentin Tarantino",
+      "year": 2019,
+      "aspect_ratio": "3840:2160",
+      "shot_count": 5,
+      "average_dynamic_range": 9.89649
+    },
+    {
+      "title": "Blade Runner 2049",
+      "cinematographer": "Roger Deakins",
+      "director": "Denis Villeneuve",
+      "year": 2017,
+      "aspect_ratio": "3840:1600",
+      "shot_count": 5,
+      "average_dynamic_range": 8.98983
+    },
+    {
+      "title": "Dune",
+      "cinematographer": "Greig Fraser",
+      "director": "Denis Villeneuve",
+      "year": 2021,
+      "aspect_ratio": "3840:2160",
+      "shot_count": 10,
+      "average_dynamic_range": 9.10704
+    },
+    {
+      "title": "Dunkirk",
+      "cinematographer": "Hoyte van Hoytema",
+      "director": "Christopher Nolan",
+      "year": 2017,
+      "aspect_ratio": "3840:1740",
+      "shot_count": 5,
+      "average_dynamic_range": 7.28177
+    },
+    {
+      "title": "First Man",
+      "cinematographer": "Linus Sandgren",
+      "director": "Damien Chazelle",
+      "year": 2018,
+      "aspect_ratio": "3840:1608",
+      "shot_count": 5,
+      "average_dynamic_range": 9.90934
+    },
+    {
+      "title": "Poor Things",
+      "cinematographer": "Robbie Ryan",
+      "director": "Yorgos Lanthimos",
+      "year": 2023,
+      "aspect_ratio": "3840:2160",
+      "shot_count": 11,
+      "average_dynamic_range": 9.87765
+    },
+    {
+      "title": "The Patriot",
+      "cinematographer": "Caleb Deschanel",
+      "director": "Roland Emmerich",
+      "year": 2000,
+      "aspect_ratio": "3832:1600",
+      "shot_count": 5,
+      "average_dynamic_range": 10.69594
+    },
+    {
+      "title": "The Batman",
+      "cinematographer": "Greig Fraser",
+      "director": "Matt Reeves",
+      "year": 2022,
+      "aspect_ratio": "3840:2160",
+      "shot_count": 9,
+      "average_dynamic_range": 8.74536
+    },
+    {
+      "title": "Titanic",
+      "cinematographer": "Russell Carpenter",
+      "director": "James Cameron",
+      "year": 1997,
+      "aspect_ratio": "3840:2160",
+      "shot_count": 5,
+      "average_dynamic_range": 9.02249
+    },
+    {
+      "title": "Avatar",
+      "cinematographer": "Mauro Fiore",
+      "director": "James Cameron",
+      "year": 2009,
+      "aspect_ratio": "3840:2160",
+      "shot_count": 5,
+      "average_dynamic_range": 9.48458
+    },
+    {
+      "title": "Hugo",
+      "cinematographer": "Robert Richardson",
+      "director": "Martin Scorsese",
+      "year": 2011,
+      "aspect_ratio": "3840:2154",
+      "shot_count": 5,
+      "average_dynamic_range": 9.09891
+    },
+    {
+      "title": "Sense and Sensibility",
+      "cinematographer": "Michael Coulter",
+      "director": "Ang Lee",
+      "year": 1995,
+      "aspect_ratio": "3840:2160",
+      "shot_count": 5,
+      "average_dynamic_range": 10.18497
+    },
+    {
+      "title": "Memoirs of a Geisha",
+      "cinematographer": "Dion Beebe",
+      "director": "Rob Marshall",
+      "year": 2005,
+      "aspect_ratio": "3840:1604",
+      "shot_count": 5,
+      "average_dynamic_range": 7.69649
+    },
+    {
+      "title": "Harry Potter and the Half-Blood Prince",
+      "cinematographer": "Bruno Delbonnel",
+      "director": "David Yates",
+      "year": 2009,
+      "aspect_ratio": "3840:1600",
+      "shot_count": 5,
+      "average_dynamic_range": 8.59106
+    },
+    {
+      "title": "Elvis",
+      "cinematographer": "Mandy Walker",
+      "director": "Baz Luhrmann",
+      "year": 2022,
+      "aspect_ratio": "3840:1604",
+      "shot_count": 5,
+      "average_dynamic_range": 8.15158
+    },
+    {
+      "title": "The Revenant",
+      "cinematographer": "Emmanuel Lubezki",
+      "director": "Alejandro G. Iñárritu",
+      "year": 2015,
+      "aspect_ratio": "3840:1600",
+      "shot_count": 11,
+      "average_dynamic_range": 9.25695
+    },
+    {
+      "title": "La La Land",
+      "cinematographer": "Linus Sandgren",
+      "director": "Damien Chazelle",
+      "year": 2016,
+      "aspect_ratio": "3840:1504",
+      "shot_count": 15,
+      "average_dynamic_range": 9.01337
+    },
+    {
+      "title": "The Aviator",
+      "cinematographer": "Robert Richardson",
+      "director": "Martin Scorsese",
+      "year": 2004,
+      "aspect_ratio": "1920:816",
+      "shot_count": 5,
+      "average_dynamic_range": 10.61518
+    },
+    {
+      "title": "Gravity",
+      "cinematographer": "Emmanuel Lubezki",
+      "director": "Alfonso Cuarón",
+      "year": 2013,
+      "aspect_ratio": "3840:2160",
+      "shot_count": 5,
+      "average_dynamic_range": 9.76864
+    },
+    {
+      "title": "Birdman",
+      "cinematographer": "Emmanuel Lubezki",
+      "director": "Alejandro G. Iñárritu",
+      "year": 2014,
+      "aspect_ratio": "1920:1040",
+      "shot_count": 10,
+      "average_dynamic_range": 10.25567
+    },
+    {
+      "title": "Slumdog Millionaire",
+      "cinematographer": "Anthony Dod Mantle",
+      "director": "Danny Boyle",
+      "year": 2008,
+      "aspect_ratio": "1920:798",
+      "shot_count": 5,
+      "average_dynamic_range": 11.06706
+    },
+    {
+      "title": "Master and Commander: The Far Side of the World",
+      "cinematographer": "Russell Boyd",
+      "director": "Peter Weir",
+      "year": 2003,
+      "aspect_ratio": "3840:1600",
+      "shot_count": 5,
+      "average_dynamic_range": 7.84008
+    },
+    {
+      "title": "Life of Pi",
+      "cinematographer": "Claudio Miranda",
+      "director": "Ang Lee",
+      "year": 2012,
+      "aspect_ratio": "3840:2076",
+      "shot_count": 5,
+      "average_dynamic_range": 8.07042
+    },
+    {
+      "title": "Road to Perdition",
+      "cinematographer": "Conrad L. Hall",
+      "director": "Sam Mendes",
+      "year": 2002,
+      "aspect_ratio": "1908:808",
+      "shot_count": 5,
+      "average_dynamic_range": 10.1346
+    },
+    {
+      "title": "The English Patient",
+      "cinematographer": "John Seale",
+      "director": "Anthony Minghella",
+      "year": 1996,
+      "aspect_ratio": "1920:1040",
+      "shot_count": 5,
+      "average_dynamic_range": 8.80487
+    },
+    {
+      "title": "Days of Heaven",
+      "cinematographer": "Néstor Almendros",
+      "director": "Terrence Malick",
+      "year": 1978,
+      "aspect_ratio": "1920:1038",
+      "shot_count": 5,
+      "average_dynamic_range": 7.83093
+    },
+    {
+      "title": "Mank",
+      "cinematographer": "Erik Messerschmidt",
+      "director": "David Fincher",
+      "year": 2020,
+      "aspect_ratio": "3840:2160",
+      "shot_count": 5,
+      "average_dynamic_range": 8.91937
+    },
+    {
+      "title": "Sleepy Hollow",
+      "cinematographer": "Emmanuel Lubezki",
+      "director": "Tim Burton",
+      "year": 1999,
+      "aspect_ratio": "3840:2160",
+      "shot_count": 5,
+      "average_dynamic_range": 8.43313
+    },
+    {
+      "title": "The Social Network",
+      "cinematographer": "Jeff Cronenweth",
+      "director": "David Fincher",
+      "year": 2010,
+      "aspect_ratio": "3840:1592",
+      "shot_count": 5,
+      "average_dynamic_range": 8.15849
+    },
+    {
+      "title": "Apollo 13",
+      "cinematographer": "Dean Cundey",
+      "director": "Ron Howard",
+      "year": 1995,
+      "aspect_ratio": "3840:1632",
+      "shot_count": 5,
+      "average_dynamic_range": 9.0031
+    },
+    {
+      "title": "Roma",
+      "cinematographer": "Alfonso Cuarón",
+      "director": null,
+      "year": 2018,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.26468
+    },
+    {
+      "title": "Cold War",
+      "cinematographer": "Łukasz Żal",
+      "director": null,
+      "year": 2018,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 11.2103
+    },
+    {
+      "title": "Children of Men",
+      "cinematographer": "Emmanuel Lubezki",
+      "director": null,
+      "year": 2006,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 11.24019
+    },
+    {
+      "title": "The Tree of Life",
+      "cinematographer": "Emmanuel Lubezki",
+      "director": null,
+      "year": 2011,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 9.81127
+    },
+    {
+      "title": "No Country for Old Men",
+      "cinematographer": "Roger Deakins",
+      "director": null,
+      "year": 2007,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 11.03878
+    },
+    {
+      "title": "Sicario",
+      "cinematographer": "Roger Deakins",
+      "director": null,
+      "year": 2015,
+      "aspect_ratio": "Varied",
+      "shot_count": 4,
+      "average_dynamic_range": 9.48887
+    },
+    {
+      "title": "Skyfall",
+      "cinematographer": "Roger Deakins",
+      "director": null,
+      "year": 2012,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 6,
+      "average_dynamic_range": 8.16081
+    },
+    {
+      "title": "Fargo",
+      "cinematographer": "Roger Deakins",
+      "director": null,
+      "year": 1996,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 8.9857
+    },
+    {
+      "title": "The Assassination of Jesse James by the Coward Robert Ford",
+      "cinematographer": "Roger Deakins",
+      "director": null,
+      "year": 2007,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 11.54233
+    },
+    {
+      "title": "In the Mood for Love",
+      "cinematographer": "Christopher Doyle",
+      "director": null,
+      "year": 2000,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 6,
+      "average_dynamic_range": 9.99455
+    },
+    {
+      "title": "Barry Lyndon",
+      "cinematographer": "John Alcott",
+      "director": null,
+      "year": 1975,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 6,
+      "average_dynamic_range": 9.97584
+    },
+    {
+      "title": "The Shining",
+      "cinematographer": "John Alcott",
+      "director": null,
+      "year": 1980,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 10.03129
+    },
+    {
+      "title": "The Godfather",
+      "cinematographer": "Gordon Willis",
+      "director": null,
+      "year": 1972,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 10.1547
+    },
+    {
+      "title": "Manhattan",
+      "cinematographer": "Gordon Willis",
+      "director": null,
+      "year": 1979,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 8.91068
+    },
+    {
+      "title": "Citizen Kane",
+      "cinematographer": "Gregg Toland",
+      "director": null,
+      "year": 1941,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 9.91025
+    },
+    {
+      "title": "The Lighthouse",
+      "cinematographer": "Jarin Blaschke",
+      "director": null,
+      "year": 2019,
+      "aspect_ratio": "Varied",
+      "shot_count": 4,
+      "average_dynamic_range": 8.85361
+    },
+    {
+      "title": "The Northman",
+      "cinematographer": "Jarin Blaschke",
+      "director": null,
+      "year": 2022,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 8.24746
+    },
+    {
+      "title": "Moonlight",
+      "cinematographer": "James Laxton",
+      "director": null,
+      "year": 2016,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 10.40671
+    },
+    {
+      "title": "Her",
+      "cinematographer": "Hoyte van Hoytema",
+      "director": null,
+      "year": 2013,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 9.52589
+    },
+    {
+      "title": "Nope",
+      "cinematographer": "Hoyte van Hoytema",
+      "director": null,
+      "year": 2022,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 9.18148
+    },
+    {
+      "title": "Interstellar",
+      "cinematographer": "Hoyte van Hoytema",
+      "director": null,
+      "year": 2014,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 10.49153
+    },
+    {
+      "title": "Inside Llewyn Davis",
+      "cinematographer": "Bruno Delbonnel",
+      "director": null,
+      "year": 2013,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.88068
+    },
+    {
+      "title": "The Tragedy of Macbeth",
+      "cinematographer": "Bruno Delbonnel",
+      "director": null,
+      "year": 2021,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 8.99148
+    },
+    {
+      "title": "Paris, Texas",
+      "cinematographer": "Robby Müller",
+      "director": null,
+      "year": 1984,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 6,
+      "average_dynamic_range": 9.41392
+    },
+    {
+      "title": "Ran",
+      "cinematographer": "Asakazu Nakai",
+      "director": null,
+      "year": 1985,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.88628
+    },
+    {
+      "title": "Lawrence of Arabia",
+      "cinematographer": "Freddie Young",
+      "director": null,
+      "year": 1962,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 6,
+      "average_dynamic_range": 10.3365
+    },
+    {
+      "title": "The Conformist",
+      "cinematographer": "Vittorio Storaro",
+      "director": null,
+      "year": 1970,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.50161
+    },
+    {
+      "title": "The Last Emperor",
+      "cinematographer": "Vittorio Storaro",
+      "director": null,
+      "year": 1987,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.69262
+    },
+    {
+      "title": "Portrait of a Lady on Fire",
+      "cinematographer": "Claire Mathon",
+      "director": null,
+      "year": 2019,
+      "aspect_ratio": "Varied",
+      "shot_count": 3,
+      "average_dynamic_range": 7.62878
+    },
+    {
+      "title": "The Power of the Dog",
+      "cinematographer": "Ari Wegner",
+      "director": null,
+      "year": 2021,
+      "aspect_ratio": "Varied",
+      "shot_count": 4,
+      "average_dynamic_range": 9.37688
+    },
+    {
+      "title": "Tár",
+      "cinematographer": "Florian Hoffmeister",
+      "director": null,
+      "year": 2022,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 9.5784
+    },
+    {
+      "title": "Phantom Thread",
+      "cinematographer": "Paul Thomas Anderson",
+      "director": null,
+      "year": 2017,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 7.64969
+    },
+    {
+      "title": "The Master",
+      "cinematographer": "Mihai Mălaimare Jr.",
+      "director": null,
+      "year": 2012,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 9.73329
+    },
+    {
+      "title": "Carol",
+      "cinematographer": "Edward Lachman",
+      "director": null,
+      "year": 2015,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 10.68248
+    },
+    {
+      "title": "Far from Heaven",
+      "cinematographer": "Edward Lachman",
+      "director": null,
+      "year": 2002,
+      "aspect_ratio": "Varied",
+      "shot_count": 4,
+      "average_dynamic_range": 7.90825
+    },
+    {
+      "title": "Se7en",
+      "cinematographer": "Darius Khondji",
+      "director": null,
+      "year": 1995,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 6,
+      "average_dynamic_range": 10.56719
+    },
+    {
+      "title": "Uncut Gems",
+      "cinematographer": "Darius Khondji",
+      "director": null,
+      "year": 2019,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 11.2717
+    },
+    {
+      "title": "Crouching Tiger, Hidden Dragon",
+      "cinematographer": "Peter Pau",
+      "director": null,
+      "year": 2000,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 8.91199
+    },
+    {
+      "title": "Pan's Labyrinth",
+      "cinematographer": "Guillermo Navarro",
+      "director": null,
+      "year": 2006,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 9.33385
+    },
+    {
+      "title": "Brokeback Mountain",
+      "cinematographer": "Rodrigo Prieto",
+      "director": null,
+      "year": 2005,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 8.59333
+    },
+    {
+      "title": "Silence",
+      "cinematographer": "Rodrigo Prieto",
+      "director": null,
+      "year": 2016,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 8.04134
+    },
+    {
+      "title": "The Favourite",
+      "cinematographer": "Robbie Ryan",
+      "director": null,
+      "year": 2018,
+      "aspect_ratio": "Varied",
+      "shot_count": 5,
+      "average_dynamic_range": 11.06272
+    },
+    {
+      "title": "Killers of the Flower Moon",
+      "cinematographer": "Rodrigo Prieto",
+      "director": null,
+      "year": 2023,
+      "aspect_ratio": "Varied",
+      "shot_count": 4,
+      "average_dynamic_range": 11.6867
+    },
+    {
+      "title": "No Time to Die",
+      "cinematographer": "Linus Sandgren",
+      "director": null,
+      "year": 2021,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 11.29612
+    },
+    {
+      "title": "12 Years a Slave",
+      "cinematographer": "Sean Bobbitt",
+      "director": null,
+      "year": 2013,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.65092
+    },
+    {
+      "title": "Goodfellas",
+      "cinematographer": "Michael Ballhaus",
+      "director": null,
+      "year": 1990,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 2,
+      "average_dynamic_range": 7.74868
+    },
+    {
+      "title": "PlayTime",
+      "cinematographer": "Jean Badal",
+      "director": null,
+      "year": 1967,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 9.92318
+    },
+    {
+      "title": "Being There",
+      "cinematographer": "Caleb Deschanel",
+      "director": null,
+      "year": 1979,
+      "aspect_ratio": "Varied",
+      "shot_count": 6,
+      "average_dynamic_range": 10.22424
+    },
+    {
+      "title": "Frameset Curated Cinema Reference",
+      "cinematographer": "ASC / BSC Curated Showcase",
+      "director": null,
+      "year": 2024,
+      "aspect_ratio": "Varied",
+      "shot_count": 11,
+      "average_dynamic_range": 10.75396
+    },
+    {
+      "title": "Persona",
+      "cinematographer": "Sven Nykvist",
+      "director": null,
+      "year": 1966,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 10.0564
+    },
+    {
+      "title": "Last Year at Marienbad",
+      "cinematographer": "Sacha Vierny",
+      "director": null,
+      "year": 1961,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 8.01139
+    },
+    {
+      "title": "Seven Samurai",
+      "cinematographer": "Asakazu Nakai",
+      "director": null,
+      "year": 1954,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 10.74173
+    },
+    {
+      "title": "8½",
+      "cinematographer": "Gianni Di Venanzo",
+      "director": null,
+      "year": 1963,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 10.42109
+    },
+    {
+      "title": "The Double Life of Véronique",
+      "cinematographer": "Sławomir Idziak",
+      "director": null,
+      "year": 1991,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 9.03091
+    },
+    {
+      "title": "Close Encounters of the Third Kind",
+      "cinematographer": "Vilmos Zsigmond",
+      "director": null,
+      "year": 1977,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 10.85824
+    },
+    {
+      "title": "Casino",
+      "cinematographer": "Robert Richardson",
+      "director": null,
+      "year": 1995,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 11.38699
+    },
+    {
+      "title": "Breathless",
+      "cinematographer": "Raoul Coutard",
+      "director": null,
+      "year": 1960,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 10.04146
+    },
+    {
+      "title": "Touch of Evil",
+      "cinematographer": "Russell Metty",
+      "director": null,
+      "year": 1958,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 8.81165
+    },
+    {
+      "title": "Taxi Driver",
+      "cinematographer": "Michael Chapman",
+      "director": null,
+      "year": 1976,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 9.01667
+    },
+    {
+      "title": "Once Upon a Time in the West",
+      "cinematographer": "Tonino Delli Colli",
+      "director": null,
+      "year": 1968,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 11.222
+    },
+    {
+      "title": "The Cranes Are Flying",
+      "cinematographer": "Sergey Urusevsky",
+      "director": null,
+      "year": 1957,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 10.50167
+    },
+    {
+      "title": "Rashomon",
+      "cinematographer": "Kazuo Miyagawa",
+      "director": null,
+      "year": 1950,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 11.05131
+    },
+    {
+      "title": "The Searchers",
+      "cinematographer": "Winton C. Hoch",
+      "director": null,
+      "year": 1956,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 9.70595
+    },
+    {
+      "title": "The Passion of Joan of Arc",
+      "cinematographer": "Rudolph Maté",
+      "director": null,
+      "year": 1928,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 9.94249
+    },
+    {
+      "title": "Black Narcissus",
+      "cinematographer": "Jack Cardiff",
+      "director": null,
+      "year": 1947,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 8.55982
+    },
+    {
+      "title": "La Dolce Vita",
+      "cinematographer": "Otello Martelli",
+      "director": null,
+      "year": 1960,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 9.50946
+    },
+    {
+      "title": "The Seventh Seal",
+      "cinematographer": "Gunnar Fischer",
+      "director": null,
+      "year": 1957,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 9.73691
+    },
+    {
+      "title": "Amélie",
+      "cinematographer": "Bruno Delbonnel",
+      "director": null,
+      "year": 2001,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 11.28261
+    },
+    {
+      "title": "Suspiria",
+      "cinematographer": "Luciano Tovoli",
+      "director": null,
+      "year": 1977,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 10.35742
+    },
+    {
+      "title": "The 400 Blows",
+      "cinematographer": "Henri Decaë",
+      "director": null,
+      "year": 1959,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 10.75272
+    },
+    {
+      "title": "Blow-Up",
+      "cinematographer": "Carlo di Palma",
+      "director": null,
+      "year": 1966,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 9.28568
+    },
+    {
+      "title": "Battleship Potemkin",
+      "cinematographer": "Eduard Tisse",
+      "director": null,
+      "year": 1925,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 9.99917
+    },
+    {
+      "title": "Barbie",
+      "cinematographer": "Rodrigo Prieto",
+      "director": null,
+      "year": 2023,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 8.74225
+    },
+    {
+      "title": "The Empire Strikes Back",
+      "cinematographer": "Peter Suschitzky",
+      "director": null,
+      "year": 1980,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 10.94063
+    },
+    {
+      "title": "Some Like It Hot",
+      "cinematographer": "Charles Lang",
+      "director": null,
+      "year": 1959,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 10.73767
+    },
+    {
+      "title": "The Third Man",
+      "cinematographer": "Robert Krasker",
+      "director": null,
+      "year": 1949,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 10.94021
+    },
+    {
+      "title": "The Piano",
+      "cinematographer": "Stuart Dryburgh",
+      "director": null,
+      "year": 1993,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 8.53225
+    },
+    {
+      "title": "Challengers",
+      "cinematographer": "Sayombhu Mukdeeprom",
+      "director": null,
+      "year": 2024,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 4,
+      "average_dynamic_range": 9.89894
+    },
+    {
+      "title": "Black Swan",
+      "cinematographer": "Matthew Libatique",
+      "director": null,
+      "year": 2010,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 4,
+      "average_dynamic_range": 9.23096
+    },
+    {
+      "title": "Eternal Sunshine of the Spotless Mind",
+      "cinematographer": "Ellen Kuras",
+      "director": null,
+      "year": 2004,
+      "aspect_ratio": "2.39:1",
+      "shot_count": 5,
+      "average_dynamic_range": 9.69629
     }
   ],
   "dynamic_range_quantiles": {
-    "min": 8.0,
-    "p10": 10.5,
-    "p25": 12.0,
-    "p50": 13.5,
-    "p75": 14.8,
-    "p90": 16.0,
-    "max": 18.0
+    "min": 1.95,
+    "p10": 7.32831,
+    "p25": 8.62184,
+    "p50": 9.73145,
+    "p75": 10.85235,
+    "p90": 11.65197,
+    "max": 11.99438
   },
   "highlight_rolloff_quantiles": {
-    "min": 25.0,
-    "p10": 60.0,
-    "p25": 75.0,
-    "p50": 88.0,
-    "p75": 93.0,
-    "p90": 97.0,
+    "min": 0.0,
+    "p10": 97.15256,
+    "p25": 99.99302,
+    "p50": 100.0,
+    "p75": 100.0,
+    "p90": 100.0,
     "max": 100.0
   },
   "sharpness_quantiles": {
-    "min": 10.0,
-    "p10": 35.0,
-    "p25": 75.0,
-    "p50": 130.0,
-    "p75": 185.0,
-    "p90": 240.0,
-    "max": 400.0
+    "min": 1.4457,
+    "p10": 10.57755,
+    "p25": 18.83556,
+    "p50": 40.42753,
+    "p75": 96.90262,
+    "p90": 198.46956,
+    "max": 1492.4647
   },
   "mtf_quantiles": {
     "min": 0.0,

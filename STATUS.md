@@ -1,9 +1,9 @@
 # AESTHETIC — Development Status
 
-## Current Milestone: M12 — Desktop UI, Scopes & Visual Æesthetic Overhaul
+## Current Milestone: M13 — 760-Shot Measured Golden Baseline & Cut-Aware Shot Segmentation
 - **Phase**: Ground-Up Rebuild in Rust
 - **Target**: Windows x64 (primary), Linux, macOS
-- **Active Focus**: Zero horizontal scroll UI, real frame & thumbnail decoding, broadcast-grade scopes directly from playhead, unified "Visual Æesthetic" benchmark comparison, pop-out contact sheet with collapsible metrics trees, modernized Import/Export dropdowns.
+- **Active Focus**: 100% pixel-measured Golden Baseline (`n=760` across 135 award-winning films from `M:\movies`, `film-grab.com`, `shot.cafe`, and `frameset.app`), cut-aware 3-frame burst & same-setup deduplication, mean-centered Pearson + craft nearest-reference matching, and lossless PNG sidecar attachments.
 
 ---
 
@@ -24,6 +24,22 @@
 | **M10: Showreel Assembly & Forensic Overlays** | Stage 1 candidate selects bin, interactive In/Out handle trimming, Stage 2 real-time diagnostic viewport modes (EL Zone, Peaking, 3D Light, Eyeline/Gaze) | ✅ Done | Dynamic showreel assembly & forensic camera intelligence active in UI |
 | **M11: Awards Registry & Media Server Ingestion** | 184 Oscar, ASC, BSC & Landmark titles registry, shot-boundary segmentation (cut-isolated setups), single-pass burst extraction, media server scanner with deduplication & GUI force toggle, optical flow motion dynamics | ✅ Done | Scanning `M:\movies` matching 55 award films with continuous setup extraction, motion dynamics & GUI controls |
 | **M12: Desktop UI, Scopes & Visual Æesthetic Overhaul** | Zero-scroll UI, decoded frame/thumbnail endpoints, broadcast scopes from active playhead, unified "Visual Æesthetic" window, capped 100% similarity, non-judgmental deltas, pop-out contact sheet with collapsible metrics trees & sidecar metadata, resizable floating panels, Import/Export dropdowns | ✅ Done | Polished broadcast-grade desktop shell with real image output and objective benchmarking |
+| **M13: 760-Shot Measured Golden Baseline & Cut-Aware Segmentation** | Full 55-film media server ingest + 92 multi-shot web still galleries (`film-grab.com`, `shot.cafe`, `frameset.app`) = 760 real measured shots across 135 award films, cut-aware 3-frame burst & same-setup deduplication, mean-centered spatial+craft reference matching, lossless PNG sidecars | ✅ Done | 100% pixel-measured Golden Baseline (`n=760`, 0 synthetic seeds) verified against real test footage |
+
+---
+
+## Completed in M13
+- **100% Real Pixel-Measured Golden Baseline (`n=760` across 135 Award-Winning Films)** (`assets/baseline/manifest.json`, `assets/baseline/shots.json`, `crates/aesthetic-core/src/baseline_store.rs`):
+  - Completed full `ingest-server` extraction across all 55 matched award-winning feature films on `M:\movies` (285 continuous decoded video setups).
+  - Extracted and ingested 92 multi-shot high-resolution uncompressed still collections (475 real frames, 5–12 distinct shots per film) from `film-grab.com`, `shot.cafe`, and `frameset.app`.
+  - Purged all synthetic `REF_` seed entries and reconciled `manifest.json` (`version = "2.0.0-measured"`): `Dynamic Range p10 = 7.33 / p25 = 8.62 / p50 = 9.73 / p75 = 10.85 / p90 = 11.65 stops`, `Highlight Roll-Off p10 = 97.15% / p50 = 100.0%`, `Laplacian Acutance p10 = 10.58 / p50 = 40.43 / p90 = 198.47`.
+- **Cut-Aware 3-Frame Burst & Same-Setup Consolidation** (`crates/aesthetic-core/src/pipeline.rs`):
+  - `analyze_video_file` extracts a 3-frame burst (`0.25s` interval) at each candidate sample point, steps past hard cuts (`MAD > 26.0`), and merges consecutive samples from the same camera setup (`MAD < 10.5`) into a single optimal `1.5s–4.0s` usable window.
+- **Mean-Centered Spatial + Craft Reference Matching** (`crates/aesthetic-core/src/inference.rs`, `crates/aesthetic-core/src/baseline_store.rs`, `crates/aesthetic-core/src/pipeline.rs`):
+  - Upgraded `infer_embedding` to a resolution-invariant `32x36` spatial-chromatic grid and implemented `nearest_measured_reference_with_craft` combining mean-centered Pearson spatial correlation with dynamic range, log-acutance, and key-to-fill craft proximity, eliminating positive-orthant hubness.
+- **Lossless PNG Sidecars & Embedded Contact Sheets** (`crates/aesthetic-core/src/export.rs`, `crates/aesthetic-core/src/pipeline.rs`):
+  - `export_shot_sidecars_with_frames` writes `<take_id>.png` alongside `<take_id>.json` (`"hero_frame_png"`).
+  - `generate_contact_sheet_html_with_frames` embeds lossless PNG stills directly (`data:image/png;base64,...`).
 
 ---
 

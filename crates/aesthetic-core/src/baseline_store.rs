@@ -1282,16 +1282,48 @@ impl BaselineStore {
                             };
 
                         let physics = compute_objective_physics(&active);
-                        let depth = inference.infer_depth(&active);
+                        // Skip non-photographic black leader or title/credits cards
+                        if physics.exposure.histogram_mean < 14.0
+                            || physics.exposure.el_zones.zone_0_black_pct > 82.0
+                            || physics.color.palette_entropy < 1.0
+                        {
+                            current_t += 5.0;
+                            continue;
+                        }
+
                         let mut craft = inference.infer_craft(&active);
+                        let proxy = |img: &image::RgbImage| -> image::RgbImage {
+                            let (w, h) = img.dimensions();
+                            if w <= 480 {
+                                return img.clone();
+                            }
+                            let nh = ((h as f32) * 480.0 / (w as f32)).round().max(1.0) as u32;
+                            image::imageops::resize(
+                                img,
+                                480,
+                                nh,
+                                image::imageops::FilterType::Triangle,
+                            )
+                        };
+                        let pa = proxy(&burst[0]);
+                        let pb = proxy(&burst[1]);
+                        let depth_proxy = inference.infer_depth(&pa);
                         let motion = crate::inference::compute_motion_dynamics(
-                            &burst[0],
-                            &burst[1],
+                            &pa,
+                            &pb,
                             0.25,
-                            Some(&depth),
+                            Some(&depth_proxy),
                         );
                         craft.motion = motion.clone();
                         let embedding = inference.infer_embedding(&active);
+
+                        if added_count == 0 {
+                            // Remove any stale measured shots for this film before adding fresh ones
+                            self.reference_shots.retain(|s| {
+                                !s.is_measured()
+                                    || !s.film_title.eq_ignore_ascii_case(meta_info.title)
+                            });
+                        }
 
                         let shot_id = format!(
                             "{}_shot_{:04}",
@@ -1335,16 +1367,32 @@ impl BaselineStore {
         let avg_dr = dr_sum / (added_count as f32);
         let aspect_ratio = format!("{}:{}", meta.width, meta.height);
 
-        self.manifest.films.push(IngestedReferenceFilm {
-            title: meta_info.title.to_string(),
-            cinematographer: meta_info.cinematographer.to_string(),
-            director: meta_info.director.map(|d| d.to_string()),
-            year: meta_info.year,
-            aspect_ratio,
-            shot_count: added_count,
-            average_dynamic_range: avg_dr,
-        });
+        if let Some(existing) = self
+            .manifest
+            .films
+            .iter_mut()
+            .find(|f| f.title.eq_ignore_ascii_case(meta_info.title))
+        {
+            existing.cinematographer = meta_info.cinematographer.to_string();
+            existing.director = meta_info.director.map(|d| d.to_string());
+            existing.year = meta_info.year;
+            existing.aspect_ratio = aspect_ratio;
+            existing.shot_count = added_count;
+            existing.average_dynamic_range = avg_dr;
+        } else {
+            self.manifest.films.push(IngestedReferenceFilm {
+                title: meta_info.title.to_string(),
+                cinematographer: meta_info.cinematographer.to_string(),
+                director: meta_info.director.map(|d| d.to_string()),
+                year: meta_info.year,
+                aspect_ratio,
+                shot_count: added_count,
+                average_dynamic_range: avg_dr,
+            });
+        }
         self.manifest.total_films = self.manifest.films.len();
+        self.manifest.total_reference_shots = self.reference_shots.len();
+        self.recompute_quantiles();
 
         Ok(IngestSummary {
             film_title: meta_info.title.to_string(),
@@ -1386,7 +1434,11 @@ impl BaselineStore {
 
         let physics = compute_objective_physics(&active);
         let inference = ModelInferenceEngine::new();
+        let craft = inference.infer_craft(&active);
         let embedding = inference.infer_embedding(&active);
+        let style_label = aesthetic_models::awards::find_award_match(title, year)
+            .map(|a| a.style_family.to_string())
+            .unwrap_or_else(|| "Prestige Naturalism".to_string());
 
         let shot_id = format!(
             "{}_still_{:04}",
@@ -1403,8 +1455,8 @@ impl BaselineStore {
             dynamic_range_stops: physics.exposure.dynamic_range_stops,
             highlight_rolloff: physics.exposure.highlight_rolloff,
             sharpness_laplacian: physics.optics.sharpness_laplacian,
-            key_fill_ratio: 3.5,
-            style_label: "Still Frame Reference".to_string(),
+            key_fill_ratio: craft.lighting.key_to_fill_ratio,
+            style_label,
             motion_optical_flow: None,
             camera_motion_ratio: None,
         });
@@ -1487,7 +1539,11 @@ impl BaselineStore {
         valid_paths.sort();
 
         let mut added = 0;
+        let mut dr_sum = 0.0f32;
         let inference = ModelInferenceEngine::new();
+        let style_label = aesthetic_models::awards::find_award_match(title, year)
+            .map(|a| a.style_family.to_string())
+            .unwrap_or_else(|| "Prestige Naturalism".to_string());
 
         for path in &valid_paths {
             if let Ok(dyn_img) = image::open(path) {
@@ -1501,6 +1557,12 @@ impl BaselineStore {
                 };
 
                 let physics = compute_objective_physics(&active);
+                if physics.exposure.histogram_mean < 12.0
+                    || physics.exposure.el_zones.zone_0_black_pct > 85.0
+                {
+                    continue;
+                }
+                let craft = inference.infer_craft(&active);
                 let embedding = inference.infer_embedding(&active);
 
                 let shot_id = format!(
@@ -1508,6 +1570,7 @@ impl BaselineStore {
                     title.to_lowercase().replace(' ', "_"),
                     self.reference_shots.len() + 1
                 );
+                dr_sum += physics.exposure.dynamic_range_stops;
 
                 self.add_reference_shot(ReferenceShot {
                     shot_id,
@@ -1518,8 +1581,8 @@ impl BaselineStore {
                     dynamic_range_stops: physics.exposure.dynamic_range_stops,
                     highlight_rolloff: physics.exposure.highlight_rolloff,
                     sharpness_laplacian: physics.optics.sharpness_laplacian,
-                    key_fill_ratio: 3.5,
-                    style_label: "Still Frame Reference".to_string(),
+                    key_fill_ratio: craft.lighting.key_to_fill_ratio,
+                    style_label: style_label.clone(),
                     motion_optical_flow: None,
                     camera_motion_ratio: None,
                 });
@@ -1531,6 +1594,8 @@ impl BaselineStore {
             return Err("Failed to decode any images in the directory".to_string());
         }
 
+        let avg_dr = dr_sum / (added as f32);
+
         // Update manifest catalog
         let existing = self
             .manifest
@@ -1539,6 +1604,7 @@ impl BaselineStore {
             .find(|f| f.title.eq_ignore_ascii_case(title));
         if let Some(film) = existing {
             film.shot_count += added;
+            film.average_dynamic_range = avg_dr;
         } else {
             self.manifest.films.push(IngestedReferenceFilm {
                 title: title.to_string(),
@@ -1547,7 +1613,7 @@ impl BaselineStore {
                 year: year.unwrap_or(2024),
                 aspect_ratio: "Varied".to_string(),
                 shot_count: added,
-                average_dynamic_range: 13.0,
+                average_dynamic_range: avg_dr,
             });
         }
 
@@ -1779,8 +1845,8 @@ impl BaselineStore {
         rows
     }
 
-    /// Nearest measured award reference shot by visual layout embedding.
-    /// Returns the shot and raw cosine similarity (0.0 - 1.0).
+    /// Nearest measured award reference shot by mean-centered spatial embedding.
+    /// Returns the shot and normalized similarity (0.0 - 1.0).
     pub fn nearest_measured_reference(
         &self,
         candidate_embedding: &[f32],
@@ -1788,11 +1854,67 @@ impl BaselineStore {
         self.measured_shots()
             .into_iter()
             .map(|s| {
-                // cosine_similarity maps [-1, 1] -> [0, 100]; convert back to raw cosine.
-                let raw = cosine_similarity(candidate_embedding, &s.embedding) / 50.0 - 1.0;
-                (s, raw.clamp(0.0, 1.0))
+                let corr = centered_cosine(candidate_embedding, &s.embedding);
+                (s, corr.clamp(0.0, 1.0))
             })
             .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+    }
+
+    /// Nearest measured award reference shot combining mean-centered spatial lighting
+    /// correlation with cinematographic physics & craft proximity (dynamic range,
+    /// key-to-fill lighting ratio, and log-acutance).
+    pub fn nearest_measured_reference_with_craft(
+        &self,
+        candidate_embedding: &[f32],
+        dynamic_range_stops: f32,
+        sharpness_laplacian: f32,
+        key_fill_ratio: f32,
+    ) -> Option<(&ReferenceShot, f32)> {
+        let cand_sh_ln = sharpness_laplacian.max(1.0).ln();
+        let cand_kf_ln = key_fill_ratio.max(0.5).ln();
+
+        self.measured_shots()
+            .into_iter()
+            .map(|s| {
+                let spatial_corr = centered_cosine(candidate_embedding, &s.embedding);
+                let dr_diff = ((dynamic_range_stops - s.dynamic_range_stops) / 2.5).abs();
+                let sh_diff = ((cand_sh_ln - s.sharpness_laplacian.max(1.0).ln()) / 1.35).abs();
+                let kf_diff = ((cand_kf_ln - s.key_fill_ratio.max(0.5).ln()) / 0.75).abs();
+                let craft_dist = 0.40 * dr_diff + 0.30 * sh_diff + 0.30 * kf_diff;
+                let craft_sim = (-craft_dist).exp();
+                let combined = (0.55 * spatial_corr + 0.45 * craft_sim).clamp(0.0, 1.0);
+                (s, combined)
+            })
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+    }
+}
+
+/// Mean-centered Pearson spatial cosine correlation mapped to `[0.0, 1.0]`.
+/// Eliminates positive-orthant hubness caused by flat/low-contrast gray frames.
+fn centered_cosine(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let n = a.len() as f32;
+    let mean_a: f32 = a.iter().sum::<f32>() / n;
+    let mean_b: f32 = b.iter().sum::<f32>() / n;
+
+    let mut dot = 0.0f32;
+    let mut var_a = 0.0f32;
+    let mut var_b = 0.0f32;
+    for (x, y) in a.iter().zip(b.iter()) {
+        let da = *x - mean_a;
+        let db = *y - mean_b;
+        dot += da * db;
+        var_a += da * da;
+        var_b += db * db;
+    }
+    let denom = (var_a * var_b).sqrt();
+    if denom > 1e-6 {
+        let r = (dot / denom).clamp(-1.0, 1.0);
+        (0.5 * (r + 1.0)).clamp(0.0, 1.0)
+    } else {
+        0.0
     }
 }
 
@@ -1955,13 +2077,10 @@ pub fn scan_and_ingest_media_server(
         let mut skipped = 0;
         for job in matched_jobs.clone() {
             let award_title = job.2.title;
-            let award_year = job.2.year;
-            let exists = store.manifest.films.iter().any(|f| {
-                f.title.eq_ignore_ascii_case(award_title)
-                    && (f.year == award_year
-                        || f.year == 0
-                        || (f.year as i32 - award_year as i32).abs() <= 1)
-            });
+            let exists = store
+                .measured_shots()
+                .iter()
+                .any(|s| s.film_title.eq_ignore_ascii_case(award_title));
             if exists {
                 skipped += 1;
             } else {

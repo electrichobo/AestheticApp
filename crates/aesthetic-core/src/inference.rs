@@ -242,22 +242,24 @@ impl ModelInferenceEngine {
     pub fn infer_embedding(&self, img: &RgbImage) -> Vec<f32> {
         let (w, h) = img.dimensions();
         let mut embedding = vec![0.0f32; 1152];
+        if w == 0 || h == 0 {
+            embedding[0] = 1.0;
+            return embedding;
+        }
 
-        // Sample spatial-chromatic features into 1152 bins
-        let step_x = (w / 32).max(1);
-        let step_y = (h / 36).max(1);
-
+        // Sample an aspect-ratio-invariant 32x36 spatial grid (1152 bins)
         let mut idx = 0;
-        for y in (0..h).step_by(step_y as usize) {
-            for x in (0..w).step_by(step_x as usize) {
-                if idx >= 1152 {
-                    break;
-                }
+        for gy in 0..36u32 {
+            let y = ((gy * h) / 36).min(h - 1);
+            for gx in 0..32u32 {
+                let x = ((gx * w) / 32).min(w - 1);
                 let p = img.get_pixel(x, y);
-                let luma =
-                    (0.2126 * (p[0] as f32) + 0.7152 * (p[1] as f32) + 0.0722 * (p[2] as f32))
-                        / 255.0;
-                embedding[idx] = luma;
+                let r = p[0] as f32 / 255.0;
+                let g = p[1] as f32 / 255.0;
+                let b = p[2] as f32 / 255.0;
+                let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                let warm_cool = (r - b) * 0.35;
+                embedding[idx] = luma + warm_cool;
                 idx += 1;
             }
         }

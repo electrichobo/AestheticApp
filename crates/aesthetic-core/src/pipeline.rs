@@ -287,7 +287,12 @@ pub fn enrich_take(
     // Ancillary tag only: nearest measured award reference or closest master DP signature.
     let emb = inference.infer_embedding(frame);
     if store.measured_shots().len() >= crate::baseline_store::MIN_MEASURED_SHOTS_FOR_CALIBRATION {
-        if let Some((shot, sim)) = store.nearest_measured_reference(&emb) {
+        if let Some((shot, sim)) = store.nearest_measured_reference_with_craft(
+            &emb,
+            take.measured.exposure.dynamic_range_stops,
+            take.measured.optics.sharpness_laplacian,
+            craft.lighting.key_to_fill_ratio,
+        ) {
             take.style.cinematographer_match =
                 Some(format!("{} ({})", shot.cinematographer, shot.film_title));
             take.style.match_confidence = (sim * 100.0).clamp(0.0, 100.0);
@@ -319,11 +324,11 @@ pub fn analyze_video_file(
     let (dr_q, rolloff_q, sharp_q, _) = store.scoring_quantiles();
 
     // Adaptive step scaling: if default 1.0s step is passed on a long video (> 24s),
-    // sample ~20 evenly distributed windows across the active program (skipping 3% head/tail leader).
+    // sample ~26 evenly distributed windows across the active program (skipping 3% head/tail leader).
     let effective_step = if (options.sample_step_sec - 1.0).abs() < 1e-4
         && video_info.duration_sec > 24.0
     {
-        (video_info.duration_sec * 0.94 / 20.0).max(2.0)
+        (video_info.duration_sec * 0.94 / 26.0).max(2.0)
     } else {
         options.sample_step_sec.max(0.5)
     };
@@ -346,42 +351,119 @@ pub fn analyze_video_file(
         t += effective_step;
     }
 
-    let mut takes = Vec::new();
+    let mut takes: Vec<ShotTake> = Vec::new();
     let mut hero_frames: std::collections::HashMap<String, RgbImage> =
         std::collections::HashMap::new();
-    for (idx, &ts) in candidate_timestamps.iter().enumerate() {
-        let frames_opt = extract_frames_burst(video_path, ts, 2, 4.0, None)
+    let mut prev_setup_frame: Option<(RgbImage, f64, f64)> = None; // (last_frame, setup_start_sec, setup_end_sec)
+    let mut setup_counter = 0usize;
+
+    for &ts in &candidate_timestamps {
+        let frames_opt = extract_frames_burst(video_path, ts, 3, 4.0, None)
             .ok()
             .or_else(|| extract_frame_rgb(video_path, ts).ok().map(|f| vec![f]));
 
         if let Some(frames) = frames_opt {
-            if let Some(frame) = frames.first() {
-                let take_id = format!("take_{:03}", idx + 1);
-                let mut take = evaluate_candidate_frame(
-                    frame,
-                    &take_id,
-                    idx + 1,
-                    ts,
-                    &dr_q,
-                    &rolloff_q,
-                    &sharp_q,
-                );
-
-                let next_ref = frames.get(1).map(|nf| (nf, 0.25));
-                enrich_take(&mut take, frame, next_ref, &store, &inference);
-
-                if take.style.shot_scale.is_empty() {
-                    take.style.shot_scale = if take.measured.optics.edge_density > 0.14 {
-                        "Wide".to_string()
-                    } else if take.measured.optics.vignetting_stops > 0.35 {
-                        "Medium Close-Up".to_string()
-                    } else {
-                        "Medium".to_string()
-                    };
+            if frames.is_empty() {
+                continue;
+            }
+            // Cut-aware pair selection within the 3-frame burst (0.25s spacing):
+            // If a hard cut occurs between frames[0] and frames[1], step past the cut to (frames[1], frames[2]).
+            let (frame, next_ref, eff_ts) = if frames.len() >= 3 {
+                let d01 = crate::scene::compute_frame_difference(&frames[0], &frames[1]);
+                let d12 = crate::scene::compute_frame_difference(&frames[1], &frames[2]);
+                if d01 > 26.0 && d12 <= 26.0 {
+                    (&frames[1], Some((&frames[2], 0.25)), ts + 0.25)
+                } else if d01 <= 26.0 {
+                    (&frames[0], Some((&frames[1], 0.25)), ts)
+                } else {
+                    (&frames[0], None, ts)
                 }
+            } else if frames.len() == 2 {
+                let d01 = crate::scene::compute_frame_difference(&frames[0], &frames[1]);
+                if d01 <= 26.0 {
+                    (&frames[0], Some((&frames[1], 0.25)), ts)
+                } else {
+                    (&frames[0], None, ts)
+                }
+            } else {
+                (&frames[0], None, ts)
+            };
 
+            // Check if this sample belongs to the same continuous camera setup as the previous take
+            let same_setup = if let Some((ref prev_img, _, _)) = prev_setup_frame {
+                crate::scene::compute_frame_difference(prev_img, frame) < 10.5
+            } else {
+                false
+            };
+
+            let temp_id = format!("take_{:03}", setup_counter + 1);
+            let mut candidate = evaluate_candidate_frame(
+                frame,
+                &temp_id,
+                setup_counter + 1,
+                eff_ts,
+                &dr_q,
+                &rolloff_q,
+                &sharp_q,
+            );
+            enrich_take(&mut candidate, frame, next_ref, &store, &inference);
+
+            if candidate.style.shot_scale.is_empty() {
+                candidate.style.shot_scale = if candidate.measured.optics.edge_density > 0.14 {
+                    "Wide".to_string()
+                } else if candidate.measured.optics.vignetting_stops > 0.35 {
+                    "Medium Close-Up".to_string()
+                } else {
+                    "Medium".to_string()
+                };
+            }
+
+            if same_setup && !takes.is_empty() {
+                let (_, setup_start, _) = prev_setup_frame.take().unwrap();
+                let setup_end = (eff_ts + options.min_take_duration_sec).min(video_info.duration_sec);
+                let prev_take = takes.last_mut().unwrap();
+                let existing_id = prev_take.take_id.clone();
+                let existing_scene = prev_take.scene_index;
+
+                // Keep the higher-scoring hero moment within this continuous camera setup
+                if candidate.scores.overall > prev_take.scores.overall {
+                    candidate.take_id = existing_id.clone();
+                    candidate.scene_index = existing_scene;
+                    let win_dur = (setup_end - setup_start)
+                        .clamp(options.min_take_duration_sec, options.max_take_duration_sec);
+                    let win_start = (eff_ts - win_dur * 0.35)
+                        .max(setup_start)
+                        .min((setup_end - win_dur).max(setup_start));
+                    candidate.start_sec = win_start;
+                    candidate.end_sec = win_start + win_dur;
+                    candidate.duration_sec = win_dur;
+                    candidate.hero_timestamp_sec = eff_ts;
+                    *prev_take = candidate;
+                    hero_frames.insert(existing_id, frame.clone());
+                } else {
+                    let win_dur = (setup_end - setup_start)
+                        .clamp(options.min_take_duration_sec, options.max_take_duration_sec);
+                    let hero_t = prev_take.hero_timestamp_sec;
+                    let win_start = (hero_t - win_dur * 0.35)
+                        .max(setup_start)
+                        .min((setup_end - win_dur).max(setup_start));
+                    prev_take.start_sec = win_start;
+                    prev_take.end_sec = win_start + win_dur;
+                    prev_take.duration_sec = win_dur;
+                }
+                prev_setup_frame = Some((frame.clone(), setup_start, setup_end));
+            } else {
+                setup_counter += 1;
+                let take_id = format!("take_{:03}", setup_counter);
+                candidate.take_id = take_id.clone();
+                candidate.scene_index = setup_counter;
+                let setup_end = (eff_ts + 2.5).min(video_info.duration_sec);
+                candidate.start_sec = eff_ts;
+                candidate.end_sec = setup_end;
+                candidate.duration_sec = (setup_end - eff_ts).max(options.min_take_duration_sec);
                 hero_frames.insert(take_id, frame.clone());
-                takes.push(take);
+                takes.push(candidate);
+                prev_setup_frame = Some((frame.clone(), eff_ts, setup_end));
             }
         }
     }
@@ -412,17 +494,26 @@ pub fn analyze_video_file(
     let csv_content = generate_csv_selects(clip_name, &takes, video_info.frame_rate);
 
     if let Some(ref edl_path) = options.export_edl_path {
+        if let Some(parent) = edl_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         std::fs::write(edl_path, &edl_content)
             .map_err(|e| format!("Failed to write EDL: {}", e))?;
     }
 
     if let Some(ref csv_path) = options.export_csv_path {
+        if let Some(parent) = csv_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         std::fs::write(csv_path, &csv_content)
             .map_err(|e| format!("Failed to write CSV: {}", e))?;
     }
 
     let mut fcpxml_content = None;
     if let Some(ref fcpxml_path) = options.export_fcpxml_path {
+        if let Some(parent) = fcpxml_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         let xml = generate_fcpxml(
             title,
             &video_path.to_string_lossy(),
@@ -435,6 +526,9 @@ pub fn analyze_video_file(
 
     let mut contact_sheet_html = None;
     if let Some(ref cs_path) = options.export_contact_sheet_path {
+        if let Some(parent) = cs_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         let html = generate_contact_sheet_html_with_frames(
             title,
             clip_name,
