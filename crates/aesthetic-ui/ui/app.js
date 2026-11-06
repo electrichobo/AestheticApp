@@ -1426,7 +1426,55 @@ if (btnOpenSidecars) {
   });
 }
 
+const btnBatchFolder = document.getElementById('btn-batch-folder');
+if (btnBatchFolder) {
+  btnBatchFolder.addEventListener('click', async () => {
+    try {
+      const browseRes = await fetch('/api/browse_dir');
+      const browseData = await browseRes.json();
+      if (!browseData.success || !browseData.path) return;
+      const folderPath = browseData.path;
+      btnBatchFolder.disabled = true;
+      alert(`[AESTHETIC Batch Queue]\nStarting batch analysis on directory:\n${folderPath}\nThis runs sequentially across all video files and saves individual sidecars.`);
+      const res = await fetch(`/api/batch_folder?folder=${encodeURIComponent(folderPath)}&step=2.0`);
+      const data = await res.json();
+      if (data.folder_path) {
+        alert(`[✓] Batch Analysis Finished!\nProcessed ${data.total_files_processed} files in ${data.elapsed_sec.toFixed(1)}s.\nTotal Hero Selects Extracted: ${data.total_takes_extracted}\nOutput saved to: ${data.output_sidecars_dir}`);
+      } else {
+        alert(`Batch analysis error: ${data.error || 'Failed'}`);
+      }
+    } catch (err) {
+      alert(`Error in batch processing: ${err}`);
+    } finally {
+      btnBatchFolder.disabled = false;
+    }
+  });
+}
+
 // Export Handlers
+const btnLiveResolve = document.getElementById('btn-live-resolve');
+if (btnLiveResolve) {
+  btnLiveResolve.addEventListener('click', async () => {
+    btnLiveResolve.disabled = true;
+    const origText = btnLiveResolve.innerHTML;
+    btnLiveResolve.innerHTML = '<span class="item-icon">⏳</span><div class="item-text"><div class="item-title">Connecting to Resolve...</div><div class="item-desc">Sending timeline and markers via IPC...</div></div>';
+    try {
+      const res = await fetch('/api/send_to_resolve?timeline=AESTHETIC_Hero_Selects');
+      const data = await res.json();
+      if (data.success) {
+        alert(`[✓] DaVinci Resolve Bridge Success!\n${data.message}`);
+      } else {
+        alert(`[!] DaVinci Resolve Bridge Notice:\n${data.message}`);
+      }
+    } catch (err) {
+      alert(`Error communicating with DaVinci Resolve Bridge: ${err}`);
+    } finally {
+      btnLiveResolve.disabled = false;
+      btnLiveResolve.innerHTML = origText;
+    }
+  });
+}
+
 const btnExportResolve = document.getElementById('btn-export-resolve');
 if (btnExportResolve) {
   btnExportResolve.addEventListener('click', () => {

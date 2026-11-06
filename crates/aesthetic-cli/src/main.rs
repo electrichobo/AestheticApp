@@ -57,6 +57,15 @@ fn main() {
             let server_dir = PathBuf::from(&args[2]);
             run_server_ingest(&server_dir, &args[3..]);
         }
+        "batch" => {
+            if args.len() < 3 {
+                println!("Error: Missing directory to batch analyze.");
+                println!("Usage: aesthetic-cli batch <folder> [--out <dir>] [--step <seconds>] [--top <N>]");
+                return;
+            }
+            let folder = PathBuf::from(&args[2]);
+            run_folder_batch(&folder, &args[3..]);
+        }
         "rescore" => {
             if args.len() < 3 {
                 println!("Error: Missing sidecars directory.");
@@ -103,7 +112,16 @@ fn print_usage() {
     );
     println!("      --force                Re-ingest films even if already present in baseline");
     println!("      --dry-run              Catalog matched award titles without extracting shots");
+    println!("  batch <folder>         Batch analyze all video files in a folder into organized sidecars");
+    println!("    Options:");
+    println!("      --out <dir>            Output root directory for sidecars");
+    println!("      --step <seconds>       Sample interval in seconds (default: 2.0)");
+    println!("      --top <N>              Top N takes per video file");
     println!("  rescore <sidecars_dir> Instantaneously re-score cached JSON+PNG sidecars against current baseline");
+    println!("    Options:");
+    println!("      --contact-sheet <file> Export updated visual HTML contact sheet");
+    println!("      --resolve <file.py>    Export DaVinci Resolve Python automation script");
+    println!("      --live-resolve         Directly assemble timeline in running DaVinci Resolve");
     println!("  feedback <id> <action> Log user select preference event (promote_hero | pin_select | reject_take)");
     println!("  awards-list            Display all 80+ Oscar, ASC, and BSC titles in the registry");
     println!("  baseline-info          Display current Golden Baseline statistics and films");
@@ -154,9 +172,64 @@ fn run_feedback_log(take_id: &str, action: &str, flags: &[String]) {
     }
 }
 
+fn run_folder_batch(folder: &Path, flags: &[String]) {
+    let mut out_dir = folder
+        .parent()
+        .unwrap_or(folder)
+        .join(format!("{}_sidecars", folder.file_name().and_then(|s| s.to_str()).unwrap_or("batch")));
+    let mut step = 2.0;
+    let mut top_n: Option<usize> = None;
+
+    let mut i = 0;
+    while i < flags.len() {
+        match flags[i].as_str() {
+            "--out" if i + 1 < flags.len() => {
+                out_dir = PathBuf::from(&flags[i + 1]);
+                i += 1;
+            }
+            "--step" if i + 1 < flags.len() => {
+                if let Ok(s) = flags[i + 1].parse::<f64>() {
+                    step = s;
+                }
+                i += 1;
+            }
+            "--top" if i + 1 < flags.len() => {
+                if let Ok(n) = flags[i + 1].parse::<usize>() {
+                    top_n = Some(n);
+                }
+                i += 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    println!("\n[Batch Video Queue Analysis (M25)]");
+    println!("  Folder:      {}", folder.display());
+    println!("  Output Dir:  {}", out_dir.display());
+    println!("  Sample Step: {:.1}s", step);
+
+    match aesthetic_core::analyze_folder_queue(folder, &out_dir, step, top_n) {
+        Ok(summary) => {
+            println!("\n[✓] Batch Processing Completed in {:.1}s!", summary.elapsed_sec);
+            println!("  Files Discovered: {}", summary.total_files_discovered);
+            println!("  Files Processed:  {}", summary.total_files_processed);
+            println!("  Total Hero Takes: {}", summary.total_takes_extracted);
+            println!("\nPer-File Take Breakdown:");
+            for (stem, count) in summary.per_file_takes {
+                println!("  - {:<40} : {} hero takes", stem, count);
+            }
+            println!("\nAll individual sidecars and contact sheets saved under:");
+            println!("  {}", summary.output_sidecars_dir);
+        }
+        Err(e) => eprintln!("Batch processing failed: {}", e),
+    }
+}
+
 fn run_sidecars_rescore(sidecars_dir: &Path, flags: &[String]) {
     let mut contact_sheet_path: Option<PathBuf> = None;
     let mut resolve_script_path: Option<PathBuf> = None;
+    let mut live_resolve: bool = false;
     let mut i = 0;
     while i < flags.len() {
         if (flags[i] == "--contact-sheet" || flags[i] == "--html") && i + 1 < flags.len() {
@@ -166,6 +239,8 @@ fn run_sidecars_rescore(sidecars_dir: &Path, flags: &[String]) {
         {
             resolve_script_path = Some(PathBuf::from(&flags[i + 1]));
             i += 1;
+        } else if flags[i] == "--live-resolve" {
+            live_resolve = true;
         }
         i += 1;
     }
@@ -229,6 +304,19 @@ fn run_sidecars_rescore(sidecars_dir: &Path, flags: &[String]) {
                         "[✓] DaVinci Resolve script exported to: {}",
                         py_path.display()
                     );
+                }
+            }
+            if live_resolve {
+                let res = aesthetic_core::send_to_live_resolve(
+                    "AESTHETIC_RESCORED",
+                    &sidecars_dir.to_string_lossy(),
+                    &takes,
+                    24.0,
+                );
+                if res.success {
+                    println!("\n[✓] Live DaVinci Resolve Bridge: {}", res.message);
+                } else {
+                    println!("\n[!] Live DaVinci Resolve Bridge: {}", res.message);
                 }
             }
         }

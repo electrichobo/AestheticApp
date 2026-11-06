@@ -1338,7 +1338,111 @@ pub fn log_select_feedback_event(
     Ok(content.lines().filter(|l| !l.trim().is_empty()).count())
 }
 
-/// Reads accumulated `SelectFeedbackEvent` records from `assets/feedback/events.jsonl` and computes
+/// Objective focus for smart showreel assembly optimization (M26).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ShowreelObjective {
+    /// Maximizes dynamic range latitude, contrast diversity, and exposure craftsmanship
+    CommercialLighting,
+    /// Maximizes close-up eyeline poise, depth plane separation, and narrative storytelling
+    DramaticNarrative,
+    /// Maximizes optical flow coherence, camera motion retention, and kinetic energy
+    ActionKinetic,
+    /// Maximizes overall score and style-family cluster diversity
+    BalancedHero,
+}
+
+/// Assembles a curated, pacing-optimized sequence of takes to meet a target duration (e.g. 60s, 90s, 120s),
+/// enforcing shot-scale alternating rhythm (Wide -> Medium -> Close-Up) and color temperature continuity (M26).
+pub fn compose_smart_showreel(
+    candidate_takes: &[ShotTake],
+    target_duration_sec: f64,
+    objective: ShowreelObjective,
+) -> Vec<ShotTake> {
+    if candidate_takes.is_empty() || target_duration_sec <= 0.0 {
+        return Vec::new();
+    }
+
+    // Filter out non-photographic leader and sort candidate pool by objective suitability
+    let mut pool: Vec<ShotTake> = candidate_takes
+        .iter()
+        .filter(|t| !t.concerns.iter().any(|c| c.code == "NON_PHOTOGRAPHIC_OR_CREDITS"))
+        .cloned()
+        .collect();
+
+    pool.sort_by(|a, b| {
+        let score_a = match objective {
+            ShowreelObjective::CommercialLighting => {
+                a.measured.exposure.dynamic_range_stops * 3.0
+                    + a.scores.cinematic_technique_score
+                    + a.scores.technical
+            }
+            ShowreelObjective::DramaticNarrative => {
+                a.scores.storytelling_score * 1.5
+                    + a.scores.hero_potency_score
+                    + if a.style.shot_scale.contains("Close-Up") { 15.0 } else { 0.0 }
+            }
+            ShowreelObjective::ActionKinetic => {
+                a.scores.temporal * 1.5
+                    + if a.style.motion_type.contains("Move") || a.style.motion_type.contains("Track") { 20.0 } else { 0.0 }
+                    + a.scores.three_second_impact_score
+            }
+            ShowreelObjective::BalancedHero => a.scores.overall,
+        };
+        let score_b = match objective {
+            ShowreelObjective::CommercialLighting => {
+                b.measured.exposure.dynamic_range_stops * 3.0
+                    + b.scores.cinematic_technique_score
+                    + b.scores.technical
+            }
+            ShowreelObjective::DramaticNarrative => {
+                b.scores.storytelling_score * 1.5
+                    + b.scores.hero_potency_score
+                    + if b.style.shot_scale.contains("Close-Up") { 15.0 } else { 0.0 }
+            }
+            ShowreelObjective::ActionKinetic => {
+                b.scores.temporal * 1.5
+                    + if b.style.motion_type.contains("Move") || b.style.motion_type.contains("Track") { 20.0 } else { 0.0 }
+                    + b.scores.three_second_impact_score
+            }
+            ShowreelObjective::BalancedHero => b.scores.overall,
+        };
+        score_b.partial_cmp(&score_a).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut selected: Vec<ShotTake> = Vec::new();
+    let mut current_duration = 0.0f64;
+
+    while current_duration < target_duration_sec && !pool.is_empty() {
+        // Find best next shot balancing objective score, shot scale alternation, and color temp delta
+        let best_idx = pool.iter().enumerate().max_by(|(_, a), (_, b)| {
+            let prev_scale = selected.last().map(|s| s.style.shot_scale.as_str()).unwrap_or("");
+            let prev_cct = selected.last().map(|s| s.measured.color.estimated_kelvin).unwrap_or(5600.0);
+
+            let scale_bonus_a = if a.style.shot_scale != prev_scale { 12.0 } else { -8.0 };
+            let scale_bonus_b = if b.style.shot_scale != prev_scale { 12.0 } else { -8.0 };
+
+            let cct_delta_a = (a.measured.color.estimated_kelvin - prev_cct).abs();
+            let cct_delta_b = (b.measured.color.estimated_kelvin - prev_cct).abs();
+            let cct_penalty_a = (cct_delta_a / 400.0).min(15.0);
+            let cct_penalty_b = (cct_delta_b / 400.0).min(15.0);
+
+            let val_a = a.scores.overall + scale_bonus_a - cct_penalty_a;
+            let val_b = b.scores.overall + scale_bonus_b - cct_penalty_b;
+
+            val_a.partial_cmp(&val_b).unwrap_or(std::cmp::Ordering::Equal)
+        }).map(|(idx, _)| idx).unwrap_or(0);
+
+        let take = pool.remove(best_idx);
+        current_duration += take.duration_sec;
+        selected.push(take);
+
+        if current_duration >= target_duration_sec {
+            break;
+        }
+    }
+
+    selected
+}
 /// a bounded preference boost (`[-3.5, +3.5]` points) matching preferred style families and shot scales.
 pub fn compute_feedback_preference_boost(take: &ShotTake) -> f32 {
     let file_path = Path::new("assets/feedback/events.jsonl");
@@ -1375,4 +1479,224 @@ pub fn compute_feedback_preference_boost(take: &ShotTake) -> f32 {
     } else {
         (boost / (count as f32).sqrt()).clamp(-3.5, 3.5)
     }
+}
+
+/// Personalized DP & Aesthetic Profile calibrated dynamically from user curation feedback events (M27).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PersonalTasteProfile {
+    pub total_feedback_events: usize,
+    pub promoted_heroes_count: usize,
+    pub pinned_selects_count: usize,
+    pub rejected_takes_count: usize,
+    pub preferred_style_families: Vec<(String, f32)>,
+    pub preferred_shot_scales: Vec<(String, f32)>,
+    pub calibrated_reranker_weights: CalibratedRerankerWeights,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CalibratedRerankerWeights {
+    pub hero_potency_weight: f32,
+    pub three_second_impact_weight: f32,
+    pub authorship_weight: f32,
+    pub storytelling_weight: f32,
+    pub cinematic_technique_weight: f32,
+    pub memorability_weight: f32,
+}
+
+impl Default for CalibratedRerankerWeights {
+    fn default() -> Self {
+        Self {
+            hero_potency_weight: 0.20,
+            three_second_impact_weight: 0.20,
+            authorship_weight: 0.15,
+            storytelling_weight: 0.15,
+            cinematic_technique_weight: 0.15,
+            memorability_weight: 0.15,
+        }
+    }
+}
+
+/// Computes the personalized taste profile by fitting frequency and action deltas over logged events (M27).
+pub fn compute_personal_taste_profile() -> PersonalTasteProfile {
+    let file_path = Path::new("assets/feedback/events.jsonl");
+    let Ok(content) = std::fs::read_to_string(file_path) else {
+        return PersonalTasteProfile {
+            total_feedback_events: 0,
+            promoted_heroes_count: 0,
+            pinned_selects_count: 0,
+            rejected_takes_count: 0,
+            preferred_style_families: Vec::new(),
+            preferred_shot_scales: Vec::new(),
+            calibrated_reranker_weights: CalibratedRerankerWeights::default(),
+        };
+    };
+
+    let mut style_map = std::collections::HashMap::<String, f32>::new();
+    let mut scale_map = std::collections::HashMap::<String, f32>::new();
+    let mut promoted = 0usize;
+    let mut pinned = 0usize;
+    let mut rejected = 0usize;
+    let mut total = 0usize;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(ev) =
+            serde_json::from_str::<aesthetic_models::window::SelectFeedbackEvent>(trimmed)
+        {
+            total += 1;
+            let weight = match ev.action.as_str() {
+                "promote_hero" => {
+                    promoted += 1;
+                    2.0f32
+                }
+                "pin_select" => {
+                    pinned += 1;
+                    1.0f32
+                }
+                "reject_take" => {
+                    rejected += 1;
+                    -1.5f32
+                }
+                _ => 0.5f32,
+            };
+
+            if !ev.style_family.is_empty() {
+                *style_map.entry(ev.style_family).or_insert(0.0) += weight;
+            }
+            if !ev.shot_scale.is_empty() {
+                *scale_map.entry(ev.shot_scale).or_insert(0.0) += weight;
+            }
+        }
+    }
+
+    let mut preferred_style_families: Vec<(String, f32)> = style_map.into_iter().collect();
+    preferred_style_families.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut preferred_shot_scales: Vec<(String, f32)> = scale_map.into_iter().collect();
+    preferred_shot_scales.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Adapt reranker weights according to promotion vs rejection tendencies
+    let mut weights = CalibratedRerankerWeights::default();
+    if total > 0 {
+        let hero_ratio = (promoted as f32 / total as f32).clamp(0.1, 0.6);
+        weights.hero_potency_weight = 0.15 + hero_ratio * 0.25;
+        weights.three_second_impact_weight = 0.15 + (1.0 - hero_ratio) * 0.10;
+        let sum = weights.hero_potency_weight
+            + weights.three_second_impact_weight
+            + weights.authorship_weight
+            + weights.storytelling_weight
+            + weights.cinematic_technique_weight
+            + weights.memorability_weight;
+        weights.hero_potency_weight /= sum;
+        weights.three_second_impact_weight /= sum;
+        weights.authorship_weight /= sum;
+        weights.storytelling_weight /= sum;
+        weights.cinematic_technique_weight /= sum;
+        weights.memorability_weight /= sum;
+    }
+
+    PersonalTasteProfile {
+        total_feedback_events: total,
+        promoted_heroes_count: promoted,
+        pinned_selects_count: pinned,
+        rejected_takes_count: rejected,
+        preferred_style_families,
+        preferred_shot_scales,
+        calibrated_reranker_weights: weights,
+    }
+}
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FolderBatchSummary {
+    pub folder_path: String,
+    pub total_files_discovered: usize,
+    pub total_files_processed: usize,
+    pub total_takes_extracted: usize,
+    pub output_sidecars_dir: String,
+    pub elapsed_sec: f64,
+    pub per_file_takes: Vec<(String, usize)>,
+}
+
+/// Discovers and sequentially analyzes all video files in `folder_path`, saving individual
+/// JSON+PNG sidecars into `<out_sidecars_dir>/<file_stem>/` and returning a consolidated summary (M25).
+pub fn analyze_folder_queue(
+    folder_path: &Path,
+    out_sidecars_dir: &Path,
+    sample_step_sec: f64,
+    top_per_video: Option<usize>,
+) -> Result<FolderBatchSummary, String> {
+    if !folder_path.is_dir() {
+        return Err(format!("Path '{}' is not a directory.", folder_path.display()));
+    }
+
+    let mut video_files: Vec<PathBuf> = Vec::new();
+    let entries = std::fs::read_dir(folder_path)
+        .map_err(|e| format!("Failed to read directory {}: {}", folder_path.display(), e))?;
+
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.is_file() {
+            if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                let ext_lower = ext.to_lowercase();
+                if matches!(
+                    ext_lower.as_str(),
+                    "mp4" | "mov" | "mkv" | "m4v" | "avi" | "webm"
+                ) {
+                    video_files.push(p);
+                }
+            }
+        }
+    }
+
+    video_files.sort();
+
+    if video_files.is_empty() {
+        return Err(format!(
+            "No supported video files found in '{}'.",
+            folder_path.display()
+        ));
+    }
+
+    let start_time = std::time::Instant::now();
+    let mut total_takes = 0;
+    let mut per_file_takes = Vec::new();
+
+    for vpath in &video_files {
+        let file_stem = vpath
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("video");
+        let sub_sidecars = out_sidecars_dir.join(file_stem);
+        let contact_sheet = out_sidecars_dir.join(format!("{}_contact_sheet.html", file_stem));
+
+        let options = BatchOptions {
+            sample_step_sec,
+            top_n: top_per_video,
+            export_sidecars_dir: Some(sub_sidecars.clone()),
+            export_contact_sheet_path: Some(contact_sheet),
+            ..Default::default()
+        };
+
+        if let Ok(res) = analyze_video_file(vpath, &options) {
+            let n_takes = res.ranked_takes.len();
+            total_takes += n_takes;
+            per_file_takes.push((file_stem.to_string(), n_takes));
+        } else {
+            per_file_takes.push((file_stem.to_string(), 0));
+        }
+    }
+
+    let elapsed_sec = start_time.elapsed().as_secs_f64();
+
+    Ok(FolderBatchSummary {
+        folder_path: folder_path.display().to_string(),
+        total_files_discovered: video_files.len(),
+        total_files_processed: per_file_takes.len(),
+        total_takes_extracted: total_takes,
+        output_sidecars_dir: out_sidecars_dir.display().to_string(),
+        elapsed_sec,
+        per_file_takes,
+    })
 }

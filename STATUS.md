@@ -1,9 +1,9 @@
 # AESTHETIC — Development Status
 
-## Current Milestone: M20–M23 — Cinematographic Rationale Engine, PSNR/SSIM QC Pack, UI Curation Controls, DaVinci Resolve Bridge & 1,112-Shot Golden Baseline
+## Current Milestone: M24–M27 — Live Resolve IPC Bridge, Batch Queue, Smart Showreel Composer & Personal Taste Profile Tuning
 - **Phase**: Ground-Up Rebuild in Rust
 - **Target**: Windows x64 (primary), Linux, macOS
-- **Active Focus**: Local deterministic Cinematographic Rationale Engine (`rationale_summary`), full-reference 3-frame burst `PSNR`/`SSIM` QC pack (`psnr_db`, `ssim_score`), interactive Desktop UI Contact Sheet curation controls (`[★ Promote Hero]`, `[📌 Pin Select]`, `[✕ Deprioritize]`), instant cached sidecar folder loader, direct DaVinci Resolve Python timeline/marker script generator (`generate_resolve_timeline_script`), and 1,112 real measured shots across 199 award-winning films.
+- **Active Focus**: Live DaVinci Resolve Studio IPC bridge (`send_to_live_resolve`), multi-video directory queue (`analyze_folder_queue`), smart showreel duration & pacing optimizer (`compose_smart_showreel`), and personalized aesthetic profile tuning (`compute_personal_taste_profile`).
 
 ---
 
@@ -32,6 +32,24 @@
 | **M21: Interactive Desktop UI Curation Controls & Cached Sidecars Loader** | One-click `[★ Promote Hero]`, `[📌 Pin Select]`, and `[✕ Deprioritize]` buttons in Contact Sheet modal with live MMR re-ranking + `"Open Cached Sidecars Folder"` in Import menu | ✅ Done | Instant UI re-ranking and cached sidecar folder loading without video re-decoding |
 | **M22: Direct DaVinci Resolve Timeline & Marker Bridge** | `generate_resolve_timeline_script` producing a `DaVinciResolveScript` `.py` script creating an `AESTHETIC_Hero_Selects` timeline with color-coded rationale & forensic markers (`--resolve` & UI export) | ✅ Done | Frame-accurate Resolve timeline assembly with Yellow/Blue/Red markers verified |
 | **M23: Expanded 1,112-Shot Golden Baseline Across 199 Award-Winning Films** | Ingested 67 additional multi-shot still collections (402 full-res stills) from `film-grab.com`, expanding `assets/baseline/` to 1,112 real measured shots across 199 award-winning films | ✅ Done | `manifest.json` (`n=1112`, 199 films, 0 synthetic seeds) reconciled and verified |
+| **M24: Direct Live DaVinci Resolve Studio IPC Bridge** | `send_to_live_resolve` executing one-click timeline and marker construction directly into running DaVinci Resolve Studio (`--live-resolve`, UI button, `/api/send_to_resolve`) | ✅ Done | Zero-terminal live Resolve Studio round-trip assembly |
+| **M25: Batch Folder Video Queue & Progressive Sidecars** | `analyze_folder_queue` batch analyzing entire production directories (e.g. series seasons, dailies) with per-file sidecars & contact sheets (`batch <dir>`, UI folder queue) | ✅ Done | Automated multi-video processing across full episode folders |
+| **M26: Smart Showreel Composer & Target Duration Assembly** | `compose_smart_showreel` optimization engine assembling curated reels to target durations (60s, 90s, 120s) with shot-scale alternating rhythm & CCT continuity | ✅ Done | Objective-driven showreel assembly (Commercial, Dramatic, Kinetic, Balanced) |
+| **M27: Personal Taste Profile & Feedback Reranker Tuning** | `compute_personal_taste_profile` dynamically calibrating personal DP style affinities and reranker head weights from user curation feedback events (`/api/taste_profile`) | ✅ Done | Self-tuning aesthetic layer learning directly from cinematographer curation actions |
+
+---
+
+## Completed in M24–M27
+- **M24: Direct Live DaVinci Resolve Studio IPC Bridge** (`crates/aesthetic-core/src/export.rs`, `crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/app.js`, `crates/aesthetic-cli/src/main.rs`):
+  - Implemented `send_to_live_resolve` executing the Python Resolve bridge against the running DaVinci Resolve Studio scripting IPC socket.
+  - Added **"Send to Live Resolve (Direct)"** in the UI Export menu and `--live-resolve` flag to `aesthetic-cli rescore`.
+- **M25: Batch Folder Video Queue & Progressive Sidecars** (`crates/aesthetic-core/src/pipeline.rs`, `crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/app.js`, `crates/aesthetic-cli/src/main.rs`):
+  - Implemented `analyze_folder_queue` automatically discovering all supported video media files in a folder and sequentially analyzing, scoring, and outputting organized sidecars and contact sheets.
+  - Added **"Batch Analyze Folder"** in UI Import menu and `aesthetic-cli batch <folder> [--out <dir>]`.
+- **M26: Smart Showreel Composer & Target Duration Assembly** (`crates/aesthetic-core/src/pipeline.rs`):
+  - Implemented `compose_smart_showreel` optimization engine assembling curated reels to target durations (60s, 90s, 120s) balancing objective focus (Commercial Lighting, Dramatic Narrative, Action Kinetic, Balanced Hero), shot scale alternation rhythm, and color temperature continuity.
+- **M27: Personal Taste Profile & Feedback Reranker Tuning** (`crates/aesthetic-core/src/pipeline.rs`, `crates/aesthetic-ui/src/main.rs`):
+  - Implemented `compute_personal_taste_profile` dynamically calibrating personal style affinities and adapting the 6 narrative reranker weights based on user curation actions (`/api/taste_profile`).
 
 ---
 

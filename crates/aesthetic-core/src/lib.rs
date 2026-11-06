@@ -20,17 +20,19 @@ pub use export::{
     export_shot_sidecars, export_shot_sidecars_with_frames, generate_cmx3600_edl,
     generate_contact_sheet_html, generate_contact_sheet_html_with_frames, generate_csv_selects,
     generate_fcpxml, generate_resolve_timeline_script, rescore_from_sidecars,
-    seconds_to_smpte_timecode,
+    seconds_to_smpte_timecode, send_to_live_resolve, LiveResolveResult,
 };
 pub use inference::{DepthMap, ModelInferenceEngine};
 pub use video::{extract_frame_rgb, extract_trimmed_clip, probe_video_metadata};
 
 pub use pipeline::{
-    analyze_video_file, apply_reel_diversity_ranking, compute_feedback_preference_boost,
+    analyze_folder_queue, analyze_video_file, apply_reel_diversity_ranking, compose_smart_showreel,
+    compute_feedback_preference_boost, compute_personal_taste_profile,
     compute_reel_sequence_metrics, detect_burst_light_flicker, detect_flat_log_encoding,
     detect_subtitle_or_lower_third_burnin, enrich_take, evaluate_candidate_frame,
     generate_cinematographic_rationale, log_select_feedback_event, BatchAnalysisResult,
-    BatchOptions,
+    BatchOptions, CalibratedRerankerWeights, FolderBatchSummary, PersonalTasteProfile,
+    ShowreelObjective,
 };
 pub use scene::{
     classify_transition, compute_frame_difference, detect_directional_wipe, TransitionType,

@@ -1229,7 +1229,7 @@ pub fn generate_resolve_timeline_script(
 
         let _ = writeln!(
             py,
-            "    media_pool.AppendToTimeline([{{'mediaPoolItem': clip, 'startFrame': {}, 'endFrame': {}}})",
+            "    media_pool.AppendToTimeline([{{'mediaPoolItem': clip, 'startFrame': {}, 'endFrame': {}}}])",
             start_frame, end_frame
         );
         let _ = writeln!(
@@ -1247,6 +1247,119 @@ pub fn generate_resolve_timeline_script(
         escaped_tl
     );
     py
+}
+
+/// Result of attempting to send selects directly to a running DaVinci Resolve instance (M24).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LiveResolveResult {
+    pub success: bool,
+    pub message: String,
+    pub project_name: Option<String>,
+    pub timeline_name: Option<String>,
+    pub imported_clips: usize,
+    pub markers_placed: usize,
+}
+
+/// Executes the DaVinci Resolve Python automation script directly via the local Python runtime
+/// communicating with the live Resolve Studio scripting IPC socket (M24).
+pub fn send_to_live_resolve(
+    timeline_name: &str,
+    media_file: &str,
+    takes: &[ShotTake],
+    fps: f64,
+) -> LiveResolveResult {
+    let script_code = generate_resolve_timeline_script(timeline_name, media_file, takes, fps);
+
+    // Write temporary script to OS temp directory
+    let temp_script = std::env::temp_dir().join(format!(
+        "aesthetic_resolve_bridge_{}.py",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    ));
+
+    if let Err(e) = std::fs::write(&temp_script, &script_code) {
+        return LiveResolveResult {
+            success: false,
+            message: format!("Failed to create temporary script file: {}", e),
+            project_name: None,
+            timeline_name: None,
+            imported_clips: 0,
+            markers_placed: 0,
+        };
+    }
+
+    // Standard Blackmagic DaVinci Resolve script paths on Windows
+    let default_script_module =
+        r"C:\ProgramData\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting\Modules";
+    let default_resolve_lib =
+        r"C:\Program Files\Blackmagic Design\DaVinci Resolve\fusionscript.dll";
+
+    let mut cmd = std::process::Command::new("python");
+    cmd.arg(&temp_script);
+
+    // Ensure PYTHONPATH and RESOLVE_SCRIPT_LIB are populated if Resolve is installed
+    let mut current_pythonpath = std::env::var("PYTHONPATH").unwrap_or_default();
+    if !current_pythonpath.contains("DaVinci Resolve") {
+        if !current_pythonpath.is_empty() {
+            current_pythonpath.push(';');
+        }
+        current_pythonpath.push_str(default_script_module);
+    }
+    cmd.env("PYTHONPATH", current_pythonpath);
+
+    if std::env::var("RESOLVE_SCRIPT_LIB").is_err() {
+        cmd.env("RESOLVE_SCRIPT_LIB", default_resolve_lib);
+    }
+
+    let output = match cmd.output() {
+        Ok(out) => out,
+        Err(e) => {
+            let _ = std::fs::remove_file(&temp_script);
+            return LiveResolveResult {
+                success: false,
+                message: format!("Failed to invoke Python runtime for Resolve bridge: {}", e),
+                project_name: None,
+                timeline_name: None,
+                imported_clips: 0,
+                markers_placed: 0,
+            };
+        }
+    };
+
+    let _ = std::fs::remove_file(&temp_script);
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if output.status.success() && stdout.contains("Successfully assembled") {
+        LiveResolveResult {
+            success: true,
+            message: format!("Timeline '{}' assembled in DaVinci Resolve with {} hero select markers.", timeline_name, takes.len()),
+            project_name: Some("Active Project".to_string()),
+            timeline_name: Some(timeline_name.to_string()),
+            imported_clips: 1,
+            markers_placed: takes.len(),
+        }
+    } else {
+        let err_detail = if !stderr.is_empty() {
+            stderr.trim().to_string()
+        } else if !stdout.is_empty() {
+            stdout.trim().to_string()
+        } else {
+            "DaVinci Resolve Studio is not running or external scripting is disabled in Preferences > General > External scripting using: Local.".to_string()
+        };
+
+        LiveResolveResult {
+            success: false,
+            message: format!("DaVinci Resolve Bridge: {}", err_detail),
+            project_name: None,
+            timeline_name: None,
+            imported_clips: 0,
+            markers_placed: 0,
+        }
+    }
 }
 
 /// Encodes an `RgbImage` (optionally downscaled to `max_width`) into a `data:image/png;base64,...` URI.

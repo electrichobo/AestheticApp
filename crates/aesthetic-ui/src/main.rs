@@ -990,6 +990,76 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 py.as_bytes(),
             );
         }
+        "/api/send_to_resolve" => {
+            let ca = state.current_analysis.read().unwrap();
+            let (takes, media_path, fps) = if let Some(ref res) = *ca {
+                (
+                    res.ranked_takes.clone(),
+                    res.video_info.file_path.clone(),
+                    res.video_info.frame_rate,
+                )
+            } else {
+                (get_demo_takes(), "FEATURE_MASTER.MOV".to_string(), 24.0)
+            };
+            let title = query_map
+                .get("timeline")
+                .map(|s| s.as_str())
+                .unwrap_or("AESTHETIC_Hero_Selects");
+            let result = aesthetic_core::send_to_live_resolve(title, &media_path, &takes, fps);
+            let json = serde_json::to_value(&result).unwrap_or_default();
+            send_response(
+                stream,
+                "200 OK",
+                "application/json",
+                json.to_string().as_bytes(),
+            );
+        }
+        "/api/batch_folder" => {
+            if let Some(folder_str) = query_map.get("folder") {
+                let out_dir_str = query_map
+                    .get("out")
+                    .cloned()
+                    .unwrap_or_else(|| format!("{}_aesthetic_sidecars", folder_str));
+                let step = query_map
+                    .get("step")
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .unwrap_or(2.0);
+                let top_n = query_map.get("top").and_then(|s| s.parse::<usize>().ok());
+
+                let folder_path = Path::new(folder_str);
+                let out_path = Path::new(&out_dir_str);
+
+                match aesthetic_core::analyze_folder_queue(folder_path, out_path, step, top_n) {
+                    Ok(summary) => {
+                        let json = serde_json::to_value(&summary).unwrap_or_default();
+                        send_response(
+                            stream,
+                            "200 OK",
+                            "application/json",
+                            json.to_string().as_bytes(),
+                        );
+                    }
+                    Err(err) => {
+                        let json = serde_json::json!({ "success": false, "error": err });
+                        send_response(
+                            stream,
+                            "400 Bad Request",
+                            "application/json",
+                            json.to_string().as_bytes(),
+                        );
+                    }
+                }
+            } else {
+                let json =
+                    serde_json::json!({ "success": false, "error": "Missing 'folder' parameter" });
+                send_response(
+                    stream,
+                    "400 Bad Request",
+                    "application/json",
+                    json.to_string().as_bytes(),
+                );
+            }
+        }
         "/api/rescore_sidecars" => {
             if let Some(path_str) = query_map.get("path") {
                 let sidecars_path = Path::new(path_str);
@@ -1175,10 +1245,12 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                             aesthetic_core::apply_reel_diversity_ranking(&mut res.ranked_takes);
                         }
                     }
+                    let profile = aesthetic_core::compute_personal_taste_profile();
                     serde_json::json!({
                         "success": true,
                         "total_events": total,
-                        "event": ev
+                        "event": ev,
+                        "taste_profile": profile
                     })
                 }
                 Err(err) => serde_json::json!({
@@ -1192,6 +1264,11 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 "application/json",
                 json.to_string().as_bytes(),
             );
+        }
+        "/api/taste_profile" => {
+            let profile = aesthetic_core::compute_personal_taste_profile();
+            let json = serde_json::to_value(&profile).unwrap_or_default();
+            send_response(stream, "200 OK", "application/json", json.to_string().as_bytes());
         }
         _ => {
             send_response(stream, "404 NOT FOUND", "text/plain", b"Not Found");

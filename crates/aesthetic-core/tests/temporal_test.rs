@@ -249,4 +249,8 @@ fn test_reel_continuity_and_sidecar_rescore() {
     assert!(py.contains("DaVinciResolveScript"));
     assert!(py.contains("timeline.AddMarker"));
     let _ = std::fs::remove_dir_all(&tmp_dir);
+
+    // Smart showreel composer test (M26)
+    let reel = aesthetic_core::compose_smart_showreel(&rescored, 2.0, aesthetic_core::ShowreelObjective::DramaticNarrative);
+    assert_eq!(reel.len(), 1);
 }
