@@ -42,6 +42,7 @@ const LOGO_ICON: &[u8] = include_bytes!("../ui/logo_icon.png");
 struct AppState {
     loaded_media: Arc<RwLock<Option<VideoSourceInfo>>>,
     current_analysis: Arc<RwLock<Option<BatchAnalysisResult>>>,
+    cached_frames: Arc<RwLock<std::collections::HashMap<String, RgbImage>>>,
 }
 
 fn main() {
@@ -223,6 +224,16 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
             send_response(stream, "200 OK", "image/jpeg", &bytes);
         }
         "/api/thumbnail" => {
+            if let Some(take_id) = query_map.get("take") {
+                let cf = state.cached_frames.read().unwrap();
+                if let Some(cached_img) = cf.get(take_id) {
+                    let thumb = image::imageops::thumbnail(cached_img, 320, 180);
+                    let mut bytes = Vec::new();
+                    let _ = thumb.write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Jpeg);
+                    send_response(stream, "200 OK", "image/jpeg", &bytes);
+                    return;
+                }
+            }
             let time_sec: f64 = query_map
                 .get("time")
                 .and_then(|t| t.parse().ok())
@@ -829,9 +840,18 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                     }
                 }
 
+                let file_stem = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("video");
+                let sidecars_dir = PathBuf::from("assets")
+                    .join("sidecars")
+                    .join(file_stem);
+
                 let options = BatchOptions {
                     sample_step_sec: step,
                     top_n,
+                    export_sidecars_dir: Some(sidecars_dir),
                     ..Default::default()
                 };
 
@@ -1138,6 +1158,8 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                             *loaded = Some(info);
                             let mut ca = state.current_analysis.write().unwrap();
                             *ca = Some(res);
+                            let mut cf = state.cached_frames.write().unwrap();
+                            *cf = _frames;
                         }
                         let json = serde_json::json!({
                             "success": true,
@@ -1360,9 +1382,40 @@ fn is_still_image_path(path: &Path) -> bool {
 }
 
 fn get_frame_for_time(state: &AppState, time_sec: f64) -> RgbImage {
+    // 1. Check in-memory cached frames (from cached sidecars / rescore)
+    {
+        let cf = state.cached_frames.read().unwrap();
+        if !cf.is_empty() {
+            let ca = state.current_analysis.read().unwrap();
+            if let Some(ref res) = *ca {
+                let mut closest_take: Option<&ShotTake> = None;
+                let mut min_diff = f64::MAX;
+                for t in &res.ranked_takes {
+                    let diff = (t.hero_timestamp_sec - time_sec).abs();
+                    if diff < min_diff {
+                        min_diff = diff;
+                        closest_take = Some(t);
+                    }
+                }
+                if let Some(t) = closest_take {
+                    if let Some(img) = cf.get(&t.take_id) {
+                        return img.clone();
+                    }
+                }
+            }
+            if let Some(img) = cf.values().next() {
+                return img.clone();
+            }
+        }
+    }
+
     let loaded = state.loaded_media.read().unwrap();
     if let Some(ref media) = *loaded {
         let media_path = Path::new(&media.file_path);
+        // Do NOT execute FFmpeg if path is a directory or cached sidecars mode
+        if media_path.is_dir() || media.codec == "cached_sidecars" {
+            return render_cinematic_reference_frame(time_sec);
+        }
         if is_still_image_path(media_path) {
             if let Ok(dyn_img) = image::open(media_path) {
                 return dyn_img.to_rgb8();
@@ -1779,9 +1832,9 @@ fn generate_contact_sheet_png_composite(state: &AppState, takes: &[ShotTake]) ->
 fn open_native_file_dialog() -> Option<String> {
     #[cfg(target_os = "windows")]
     {
-        let ps_script = r#"[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; $f = New-Object System.Windows.Forms.OpenFileDialog; $f.Title = 'Select Finished Video or Reference Image'; $f.Filter = 'Media Files (*.mov;*.mp4;*.mkv;*.png;*.jpg;*.tiff;*.exr)|*.mov;*.mp4;*.mkv;*.png;*.jpg;*.tiff;*.exr|All Files (*.*)|*.*'; if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.FileName }"#;
+        let ps_script = r#"Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.OpenFileDialog; $f.Title = 'Select Finished Video or Reference Image'; $f.Filter = 'Media Files (*.mov;*.mp4;*.mkv;*.png;*.jpg;*.tiff;*.exr)|*.mov;*.mp4;*.mkv;*.png;*.jpg;*.tiff;*.exr|All Files (*.*)|*.*'; $top = New-Object System.Windows.Forms.Form; $top.TopMost = $true; if ($f.ShowDialog($top) -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.FileName }"#;
         let output = Command::new("powershell")
-            .args(["-NoProfile", "-Command", ps_script])
+            .args(["-NoProfile", "-STA", "-Command", ps_script])
             .output()
             .ok()?;
         let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -1827,9 +1880,9 @@ fn open_native_file_dialog() -> Option<String> {
 fn open_native_dir_dialog() -> Option<String> {
     #[cfg(target_os = "windows")]
     {
-        let ps_script = r#"[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description = 'Select Reference Stills Directory'; if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }"#;
+        let ps_script = r#"Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.ShowNewFolderButton = $false; $f.Description = 'Select Reference Stills or Cached Sidecars Directory'; $top = New-Object System.Windows.Forms.Form; $top.TopMost = $true; if ($f.ShowDialog($top) -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }"#;
         let output = Command::new("powershell")
-            .args(["-NoProfile", "-Command", ps_script])
+            .args(["-NoProfile", "-STA", "-Command", ps_script])
             .output()
             .ok()?;
         let path = String::from_utf8_lossy(&output.stdout).trim().to_string();

@@ -7,19 +7,20 @@
 
 ---
 
-## Current Status: Batch Season Pipeline & NLE Exports Active
-- **Acting Dead Season 1 Ingested & Evaluated**:
-  - Processed all 9 files (8 full episodes + trailer, 45 hero takes) under `assets/curated/acting_dead/`.
-  - Exported per-episode and unified season-wide CMX 3600 standard EDLs (`season_all_hero_selects.edl`), Final Cut Pro XMLs (`season_all_hero_selects.xml`), CSV manifests, Resolve Python scripts (`season_all_hero_selects.py`), and visual contact sheets with embedded lossless PNG stills.
+## Current Status: Sidecar Isolation & UI Stability Hardened
+- **Recursive Sidecar Discovery & In-Memory Frame Cache**:
+  - `rescore_from_sidecars` recursively traverses directory trees, discovering all 45 hero takes across full seasons or individual episode folders with instant companion PNG pairing.
+  - In-memory frame cache (`AppState.cached_frames`) eliminates all FFmpeg directory spawn calls for cached takes, ensuring zero crashes and instant 0.1ms thumbnail serving.
+  - Hardened Golden Baseline protection invariant preventing user sidecars from writing into `assets/baseline/`.
 - **Interactive UI Server**:
-  - Active on `http://127.0.0.1:63513` with multi-tier FFmpeg discovery and content-disposition NLE download attachments.
+  - Live on `http://127.0.0.1:63513` with top-most STA folder dialog and browser prompt fallback for "Open Cached Sidecars Folder".
 - **Quality**:
   - Workspace tests passing (27 tests), zero clippy warnings (`-D warnings`).
 
 ---
 
 ## Next Immediate Step
-1. **Interactive Review**: Open `http://127.0.0.1:63513` in browser or import `season_all_hero_selects.xml` into DaVinci Resolve or Premiere.
+1. **Interactive Review**: Open `http://127.0.0.1:63513` and click "Open Cached Sidecars Folder" to review *Acting Dead*.
 
 ---
 

@@ -1087,7 +1087,7 @@ async function loadSelects() {
       item.className = `take-item ${i === activeTakeIndex ? 'active' : ''}`;
       item.innerHTML = `
         <div class="take-thumb-wrap">
-          <img class="take-thumb" src="/api/thumbnail?time=${heroTime.toFixed(2)}" alt="${t.take_id}" loading="lazy" onerror="this.src='/logo_icon.png'">
+          <img class="take-thumb" src="/api/thumbnail?take=${encodeURIComponent(t.take_id)}&time=${heroTime.toFixed(2)}" alt="${t.take_id}" loading="lazy" onerror="this.src='/logo_icon.png'">
         </div>
         <div class="take-title-row">
           <span class="take-name">${t.take_id || `Take ${String(i + 1).padStart(2, '0')}`}</span>
@@ -1145,7 +1145,7 @@ async function loadSelects() {
         sheetCard.className = 'sheet-card';
         sheetCard.innerHTML = `
           <div class="sheet-card-thumb-wrap">
-            <img class="sheet-card-thumb" src="/api/thumbnail?time=${heroTime.toFixed(2)}" alt="${t.take_id}" loading="lazy" onerror="this.src='/logo_icon.png'">
+            <img class="sheet-card-thumb" src="/api/thumbnail?take=${encodeURIComponent(t.take_id)}&time=${heroTime.toFixed(2)}" alt="${t.take_id}" loading="lazy" onerror="this.src='/logo_icon.png'">
           </div>
           <div class="sheet-card-body">
             <div class="sheet-card-header">
@@ -1353,17 +1353,26 @@ const btnOpen = document.getElementById('btn-open-file');
 if (btnOpen) {
   btnOpen.addEventListener('click', async () => {
     try {
-      const browseRes = await fetch('/api/browse_file');
-      const browseData = await browseRes.json();
-      if (!browseData.success || !browseData.path) return;
+      let filePath = null;
+      try {
+        const browseRes = await fetch('/api/browse_file');
+        const browseData = await browseRes.json();
+        if (browseData.success && browseData.path) {
+          filePath = browseData.path;
+        }
+      } catch (e) {}
 
-      const filePath = browseData.path;
+      if (!filePath) {
+        filePath = prompt('Enter media file path to analyze:');
+      }
+      if (!filePath) return;
+
       const takesList = document.getElementById('takes-list');
       if (takesList) {
         takesList.innerHTML = '<div class="empty-state">Analyzing video stream & computing cinematographic matrix...</div>';
       }
 
-      const res = await fetch(`/api/analyze?path=${encodeURIComponent(filePath)}`);
+      const res = await fetch(`/api/analyze?path=${encodeURIComponent(filePath.trim())}`);
       const data = await res.json();
       if (data.success) {
         await loadSelects();
@@ -1409,11 +1418,24 @@ const btnOpenSidecars = document.getElementById('btn-open-sidecars');
 if (btnOpenSidecars) {
   btnOpenSidecars.addEventListener('click', async () => {
     try {
-      const browseRes = await fetch('/api/browse_dir');
-      const browseData = await browseRes.json();
-      if (!browseData.success || !browseData.path) return;
-      const dirPath = browseData.path;
-      const res = await fetch(`/api/rescore_sidecars?path=${encodeURIComponent(dirPath)}`);
+      let dirPath = null;
+      try {
+        const browseRes = await fetch('/api/browse_dir');
+        const browseData = await browseRes.json();
+        if (browseData.success && browseData.path) {
+          dirPath = browseData.path;
+        }
+      } catch (e) {}
+
+      if (!dirPath) {
+        dirPath = prompt(
+          'Enter path to cached sidecars directory:\n(e.g. assets/curated/acting_dead or an individual episode folder)',
+          'assets/curated/acting_dead'
+        );
+      }
+      if (!dirPath) return;
+
+      const res = await fetch(`/api/rescore_sidecars?path=${encodeURIComponent(dirPath.trim())}`);
       const data = await res.json();
       if (data.success) {
         await loadSelects();
@@ -1430,13 +1452,26 @@ const btnBatchFolder = document.getElementById('btn-batch-folder');
 if (btnBatchFolder) {
   btnBatchFolder.addEventListener('click', async () => {
     try {
-      const browseRes = await fetch('/api/browse_dir');
-      const browseData = await browseRes.json();
-      if (!browseData.success || !browseData.path) return;
-      const folderPath = browseData.path;
+      let folderPath = null;
+      try {
+        const browseRes = await fetch('/api/browse_dir');
+        const browseData = await browseRes.json();
+        if (browseData.success && browseData.path) {
+          folderPath = browseData.path;
+        }
+      } catch (e) {}
+
+      if (!folderPath) {
+        folderPath = prompt(
+          'Enter directory path containing videos to batch analyze:',
+          'O:\\ELECTRICHOBO\\FINALS AND MEZZANINES\\02 DIRECTOR OF PHOTOGRAPHY\\Acting Dead'
+        );
+      }
+      if (!folderPath) return;
+
       btnBatchFolder.disabled = true;
       alert(`[AESTHETIC Batch Queue]\nStarting batch analysis on directory:\n${folderPath}\nThis runs sequentially across all video files and saves individual sidecars.`);
-      const res = await fetch(`/api/batch_folder?folder=${encodeURIComponent(folderPath)}&step=2.0`);
+      const res = await fetch(`/api/batch_folder?folder=${encodeURIComponent(folderPath.trim())}&step=2.0`);
       const data = await res.json();
       if (data.folder_path) {
         alert(`[✓] Batch Analysis Finished!\nProcessed ${data.total_files_processed} files in ${data.elapsed_sec.toFixed(1)}s.\nTotal Hero Selects Extracted: ${data.total_takes_extracted}\nOutput saved to: ${data.output_sidecars_dir}`);

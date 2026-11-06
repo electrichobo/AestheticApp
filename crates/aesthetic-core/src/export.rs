@@ -782,7 +782,21 @@ pub fn export_shot_sidecars_with_frames(
     takes: &[ShotTake],
     hero_frames: &std::collections::HashMap<String, image::RgbImage>,
 ) -> Result<usize, String> {
-    let metrics_dir = output_dir.join("metrics");
+    // Invariant: Never allow user video sidecars to overwrite or pollute the Golden Baseline
+    let is_baseline = output_dir
+        .to_str()
+        .map(|s| s.contains("assets\\baseline") || s.contains("assets/baseline"))
+        .unwrap_or(false);
+    let safe_output_dir = if is_baseline {
+        let clip_stem = std::path::Path::new(media_file)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("user_clip");
+        std::path::PathBuf::from("assets").join("sidecars").join(clip_stem)
+    } else {
+        output_dir.to_path_buf()
+    };
+    let metrics_dir = safe_output_dir.join("metrics");
     std::fs::create_dir_all(&metrics_dir)
         .map_err(|e| format!("Failed to create metrics directory: {}", e))?;
 
@@ -853,24 +867,41 @@ pub fn export_shot_sidecars_with_frames(
     Ok(written)
 }
 
-/// Re-scores and re-ranks cached JSON+PNG shot sidecars in `<sidecars_dir>/metrics`
+/// Recursively discovers all JSON shot sidecar files in a directory hierarchy.
+fn collect_sidecar_json_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                files.extend(collect_sidecar_json_files(&p));
+            } else if p.is_file() && p.extension().and_then(|e| e.to_str()) == Some("json") {
+                if let Some(file_name) = p.file_name().and_then(|s| s.to_str()) {
+                    if !file_name.contains("manifest")
+                        && !file_name.contains("shots")
+                        && !file_name.contains("summary")
+                    {
+                        files.push(p);
+                    }
+                }
+            }
+        }
+    }
+    files
+}
+
+/// Re-scores and re-ranks cached JSON+PNG shot sidecars in `<sidecars_dir>` or its subdirectories
 /// against the current Golden Baseline corpus without re-decoding video (M17).
 pub fn rescore_from_sidecars(
     sidecars_dir: &std::path::Path,
 ) -> Result<(Vec<ShotTake>, std::collections::HashMap<String, image::RgbImage>), String> {
-    let metrics_dir = if sidecars_dir.join("metrics").is_dir() {
-        sidecars_dir.join("metrics")
-    } else {
-        sidecars_dir.to_path_buf()
-    };
-
-    let entries = std::fs::read_dir(&metrics_dir).map_err(|e| {
-        format!(
-            "Failed to read sidecars directory {}: {}",
-            metrics_dir.display(),
-            e
-        )
-    })?;
+    let json_files = collect_sidecar_json_files(sidecars_dir);
+    if json_files.is_empty() {
+        return Err(format!(
+            "No valid JSON shot sidecars found in '{}' or its subdirectories.",
+            sidecars_dir.display()
+        ));
+    }
 
     let store = crate::baseline_store::BaselineStore::new();
     let inference = crate::inference::ModelInferenceEngine::new();
@@ -879,16 +910,18 @@ pub fn rescore_from_sidecars(
     let mut takes: Vec<ShotTake> = Vec::new();
     let mut hero_frames: std::collections::HashMap<String, image::RgbImage> =
         std::collections::HashMap::new();
+    let mut file_path_map: std::collections::HashMap<String, std::path::PathBuf> =
+        std::collections::HashMap::new();
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("json") {
-            continue;
-        }
-        let raw = std::fs::read_to_string(&path)
-            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-        let val: serde_json::Value = serde_json::from_str(&raw)
-            .map_err(|e| format!("Invalid JSON in {}: {}", path.display(), e))?;
+    for path in &json_files {
+        let raw = match std::fs::read_to_string(path) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        let val: serde_json::Value = match serde_json::from_str(&raw) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
 
         let take_id = val["take_id"]
             .as_str()
@@ -948,8 +981,11 @@ pub fn rescore_from_sidecars(
                 .to_string(),
         };
 
+        // Record file path for in-place re-writing
+        file_path_map.insert(take_id.clone(), path.clone());
+
         // Load companion PNG still if present
-        let png_path = metrics_dir.join(format!("{}.png", take_id));
+        let png_path = path.with_extension("png");
         if png_path.exists() {
             if let Ok(dyn_img) = image::open(&png_path) {
                 let rgb = dyn_img.to_rgb8();
@@ -1077,8 +1113,12 @@ pub fn rescore_from_sidecars(
 
     // Persist updated sidecar JSONs in-place so cached sidecars reflect latest schema & rationale
     for take in &takes {
+        let target_json_path = file_path_map
+            .get(&take.take_id)
+            .cloned()
+            .unwrap_or_else(|| sidecars_dir.join(format!("{}.json", take.take_id)));
         let png_fname = format!("{}.png", take.take_id);
-        let has_png = metrics_dir.join(&png_fname).exists();
+        let has_png = target_json_path.with_extension("png").exists();
         let sidecar = serde_json::json!({
             "metrics_version": "1.4.0",
             "source_file": sidecars_dir.display().to_string(),
@@ -1124,7 +1164,7 @@ pub fn rescore_from_sidecars(
             "rationale_summary": take.rationale_summary,
         });
         if let Ok(json_str) = serde_json::to_string_pretty(&sidecar) {
-            let _ = std::fs::write(metrics_dir.join(format!("{}.json", take.take_id)), json_str);
+            let _ = std::fs::write(target_json_path, json_str);
         }
     }
 
