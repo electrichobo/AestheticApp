@@ -76,7 +76,7 @@ fn test_scopes_computation() {
     let vec_scope = compute_vectorscope(&img, 64);
     assert_eq!(vec_scope.resolution, 64);
     assert_eq!(vec_scope.density.len(), 64 * 64);
-    assert_eq!(vec_scope.skin_tone_angle_deg, 57.0);
+    assert_eq!(vec_scope.skin_tone_angle_deg, 123.0);
 
     // 4. Channel Histograms
     let hist = compute_histograms(&img);

@@ -7,25 +7,24 @@
 
 ---
 
-## Current Status: Frontend Syntax Fix & Hot Asset Reloading
-- **UI Syntax Fix**:
-  - Eliminated duplicate closing brace at `ui/app.js:655` that threw `SyntaxError` in browser and blocked event listener registration.
-  - Verified brace/parenthesis/bracket balance across all 1,910 lines with Python AST validator.
-- **Dynamic Asset Serving**:
-  - `/app.js`, `/app.css`, and `/index.html` dynamically check disk assets during runtime and fall back to embedded `include_str!` binaries.
-- **Broadcast Vectorscope & Multi-Ethnic Skin Tone Cone**:
-  - Zoomable graticule (click to cycle 1.0×, 2.0×, 2.5×, 4.0×) with 2.5× broadcast gain for natural cinema chroma.
-  - Inclusive 48°–66° Skin Tone Cone covering Fitzpatrick I–VI spectrum with central 57° I-line and graduation markers.
-- **Bulletproof FFmpeg Inclusion**:
-  - Absolute, canonicalized path resolution with quote/whitespace sanitization.
+## Current Status: Vectorscope I-Line Calibrated to 10:30 Position
+- **Broadcast Skin Tone I-Line Positioned at 10:30 (123.0°)**:
+  - Rotated 33° counter-clockwise from the +V (90°) axis into Quadrant II between Red (104°) and Yellow (167°), matching the exact NTSC/Rec.709 I-axis ($I = -0.27(B-Y) + 0.74(R-Y)$).
+  - Aligned with the ~10:30 clock face position with graduation markers at 25%, 50%, and 75% saturation ticks and a ±2.5° broadcast tolerance guide.
+  - Removed wide multi-ethnic cone shading in favor of the uniform human skin tone locus.
+- **Dynamic Asset Serving & Bulletproof FFmpeg**:
+  - Live asset reloading on disk with embedded `include_str!` fallback.
+  - Absolute canonical path resolution with automated quote/whitespace sanitization.
 - **Verification**:
-  - 27/27 workspace tests passing; zero Clippy warnings (`-D warnings`).
+  - All 27 workspace tests passing (`cargo test --workspace`).
+  - Zero Clippy warnings (`-D warnings`).
 
 ---
 
 ## Next Immediate Step
-1. **Interactive Verification**: Refresh `http://127.0.0.1:63513` in browser or launch `aesthetic-ui.exe`:
-   - Verify full interactivity across all buttons, scopes tabs, timeline scrubber, and modals.
+1. **Interactive Verification**: Refresh `http://127.0.0.1:63513` in browser:
+   - Inspect the Vectorscope tab to verify the golden I-Line sits at 10:30 between Red and Yellow.
+   - Click canvas to test zoom cycles (1.0×, 2.0×, 2.5×, 4.0×).
 
 ---
 

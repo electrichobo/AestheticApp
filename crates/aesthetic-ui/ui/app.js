@@ -565,29 +565,29 @@ function drawVectorscope(c, w, h, vs) {
     }
   }
 
-  // 1. Inclusive Multi-Ethnic Skin Tone Cone (48° to 66°, covering Fitzpatrick I–VI melanin & hemoglobin spectrum)
-  const minConeRad = (48.0 * Math.PI) / 180;
-  const maxConeRad = (66.0 * Math.PI) / 180;
+  // 1. Broadcast Standard Skin Tone I-Line (~123° / ~10:30 position on clock face)
+  // Shifted 33° from the +V (90°) axis into Quadrant II, positioned between Red (104°) and Yellow (167°)
+  const skinAngleDeg = 123.0;
+  const skinRad = (skinAngleDeg * Math.PI) / 180;
+
+  // Subtle broadcast tolerance zone (±2.5°)
+  const tolRad = (2.5 * Math.PI) / 180;
   c.beginPath();
   c.moveTo(cx, cy);
-  c.arc(cx, cy, radius, -maxConeRad, -minConeRad);
+  c.arc(cx, cy, radius, -(skinRad + tolRad), -(skinRad - tolRad));
   c.closePath();
-  c.fillStyle = 'rgba(235, 170, 85, 0.15)';
+  c.fillStyle = 'rgba(235, 170, 85, 0.12)';
   c.fill();
-  c.strokeStyle = 'rgba(235, 170, 85, 0.40)';
-  c.lineWidth = 1.0;
-  c.stroke();
 
-  // 2. Central Reference I-Line (~57 degrees)
-  c.strokeStyle = 'rgba(240, 180, 75, 0.92)';
+  // Central Reference I-Line
+  c.strokeStyle = 'rgba(240, 180, 75, 0.95)';
   c.lineWidth = 2.0;
   c.beginPath();
   c.moveTo(cx, cy);
-  const skinRad = (57.0 * Math.PI) / 180;
   c.lineTo(cx + Math.cos(skinRad) * radius, cy - Math.sin(skinRad) * radius);
   c.stroke();
 
-  // Graduation markers along the skin axis
+  // Graduation markers along the skin axis (25%, 50%, 75% saturation)
   [0.25, 0.50, 0.75].forEach(mult => {
     const tx = cx + Math.cos(skinRad) * radius * mult;
     const ty = cy - Math.sin(skinRad) * radius * mult;
@@ -597,12 +597,15 @@ function drawVectorscope(c, w, h, vs) {
     c.fill();
   });
 
+  // I-Line Skin Tone Labeling positioned cleanly in Quadrant II
+  const labelX = cx + Math.cos(skinRad) * (radius * 0.78);
+  const labelY = cy - Math.sin(skinRad) * (radius * 0.78);
   c.fillStyle = '#ffbe5b';
   c.font = 'bold 11px monospace';
-  c.fillText('SKIN TONE CONE (48°–66°)', cx + Math.cos(skinRad) * (radius * 0.76) + 10, cy - Math.sin(skinRad) * (radius * 0.76) - 4);
+  c.fillText('I-LINE (10:30)', labelX - 86, labelY - 4);
   c.font = '9px monospace';
   c.fillStyle = 'rgba(235, 175, 75, 0.85)';
-  c.fillText('Fitzpatrick I–VI Spectrum', cx + Math.cos(skinRad) * (radius * 0.76) + 10, cy - Math.sin(skinRad) * (radius * 0.76) + 8);
+  c.fillText('Skin Tone (123°)', labelX - 86, labelY + 8);
 
   // Concentric Saturation Graticule Rings (25%, 50%, 75%, 100%)
   c.strokeStyle = 'rgba(110, 140, 180, 0.25)';

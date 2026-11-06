@@ -34,19 +34,19 @@ pub struct RgbParade {
 pub struct Vectorscope {
     pub resolution: usize, // e.g. 128 or 256
     pub density: Vec<f32>,
-    pub skin_tone_angle_deg: f32, // standard central I-line (~57.0 degrees)
+    pub skin_tone_angle_deg: f32, // standard broadcast I-line (~123.0 degrees, ~10:30 on clock face)
     #[serde(default = "default_skin_min")]
-    pub skin_tone_cone_min_deg: f32, // inclusive multi-ethnic cone start (~48.0 degrees)
+    pub skin_tone_cone_min_deg: f32, // reference tolerance start (~120.5 degrees)
     #[serde(default = "default_skin_max")]
-    pub skin_tone_cone_max_deg: f32, // inclusive multi-ethnic cone end (~66.0 degrees)
+    pub skin_tone_cone_max_deg: f32, // reference tolerance end (~125.5 degrees)
 }
 
 fn default_skin_min() -> f32 {
-    48.0
+    120.5
 }
 
 fn default_skin_max() -> f32 {
-    66.0
+    125.5
 }
 
 /// 256-bucket Histogram for Luma and individual RGB channels.
@@ -231,9 +231,9 @@ pub fn compute_vectorscope(img: &RgbImage, res: usize) -> Vectorscope {
     Vectorscope {
         resolution: res,
         density,
-        skin_tone_angle_deg: 57.0, // Standard central I-bar angle
-        skin_tone_cone_min_deg: 48.0, // Inclusive melanin/hemoglobin spectrum start
-        skin_tone_cone_max_deg: 66.0, // Inclusive spectrum end
+        skin_tone_angle_deg: 123.0, // Standard broadcast I-bar angle (~10:30 on clock face, +33° from +V)
+        skin_tone_cone_min_deg: 120.5,
+        skin_tone_cone_max_deg: 125.5,
     }
 }
 

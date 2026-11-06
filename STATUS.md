@@ -41,10 +41,10 @@
 ---
 
 ## Completed in M24–M28 + Scopes Overhaul & FFmpeg Hardening
-- **Vectorscope Broadcast Zoom & Inclusive Multi-Ethnic Skin Tone Cone** (`crates/aesthetic-metrics/src/scopes.rs`, `crates/aesthetic-ui/ui/app.js`):
+- **Vectorscope Broadcast Zoom & 10:30 Skin Tone I-Line Calibration** (`crates/aesthetic-metrics/src/scopes.rs`, `crates/aesthetic-ui/ui/app.js`):
   - Added 2.5× broadcast chroma gain so natural cinematic tones extend legibly outward across the graticule.
   - Implemented interactive canvas click-to-cycle vectorscope zoom: `1.0×`, `2.0×`, `2.5×`, and `4.0×`.
-  - Expanded traditional single I-line into an inclusive **Skin Tone Cone** from 48° to 66° covering Fitzpatrick I–VI melanin & hemoglobin spectrums, with graduation markers along the 57° reference line.
+  - Calibrated the standard **Skin Tone I-Line** to the exact ~10:30 clock face position (123.0°, shifted 33° from the +V axis into Quadrant II between Red at 104° and Yellow at 167°), matching the human skin tone hue locus across all skin tones with 25%, 50%, and 75% saturation tick graduations.
 - **Bulletproof FFmpeg Inclusion & Path Resolution** (`crates/aesthetic-core/src/video.rs`, `crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/app.js`):
   - Made `find_binary` return clean, absolute canonicalized paths (Windows `\\?\` UNC prefix stripped).
   - Search order prioritizes executable-adjacent (`target/release/ffmpeg.exe`), running binary ancestor walk, hardcoded workspace root (`E:\Antigravity\aesthetic\tools\ffmpeg.exe`), and system PATH via `where.exe`.
