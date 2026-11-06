@@ -207,3 +207,31 @@ fn test_dynamic_range_and_spatial_snr() {
         credits_phys.exposure.dynamic_range_stops
     );
 }
+
+#[test]
+fn test_focus_peaking_map() {
+    use aesthetic_metrics::compute_focus_peaking_map;
+
+    let mut img = RgbImage::new(40, 40);
+    // Flat gray background
+    for p in img.pixels_mut() {
+        *p = Rgb([50, 50, 50]);
+    }
+    // High-contrast vertical sharp step edge
+    for y in 0..40 {
+        for x in 20..40 {
+            img.put_pixel(x, y, Rgb([230, 230, 230]));
+        }
+    }
+
+    let peaking = compute_focus_peaking_map(&img, 30.0, [0, 255, 128]);
+    assert_eq!(peaking.dimensions(), (40, 40));
+
+    // The boundary at x=20 should be marked with neon green [0, 255, 128]
+    let edge_pixel = peaking.get_pixel(20, 20);
+    assert_eq!(edge_pixel, &Rgb([0, 255, 128]), "Step edge must trigger peaking color");
+
+    // Distant background pixel away from edge should be desaturated dim gray
+    let bg_pixel = peaking.get_pixel(5, 20);
+    assert_ne!(bg_pixel, &Rgb([0, 255, 128]), "Flat area must not trigger peaking color");
+}

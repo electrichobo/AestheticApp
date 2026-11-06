@@ -1,9 +1,9 @@
 # AESTHETIC — Development Status
 
-## Current Milestone: M24–M28 — Live Resolve IPC Bridge, Batch Queue, Smart Showreel Composer & UI Modal, Personal Taste Tuning
+## Current Milestone: M31 Viewport Shaders & M32 Unified Deliverables Packaging (Pre-Release Alpha v0.1.0)
 - **Phase**: Ground-Up Rebuild in Rust
 - **Target**: Windows x64 (primary), Linux, macOS
-- **Active Focus**: Live DaVinci Resolve Studio IPC bridge (`send_to_live_resolve`), multi-video directory queue (`analyze_folder_queue`), smart showreel duration & pacing optimizer (`compose_smart_showreel`), interactive desktop Smart Reel modal (`#composer-modal`), and personalized aesthetic profile tuning (`compute_personal_taste_profile`).
+- **Active Focus**: Ed Lachman ASC EL Zone false color, focus peaking, 3D volumetric light vector spheres, gaze corridors, zero-dependency PKZIP unified deliverables packaging (`/api/export_package`, `--package`), and broadcast-calibrated scopes.
 
 ---
 
@@ -39,6 +39,8 @@
 | **M28: Interactive Smart Showreel Composer Modal & Pacing Grid** | Desktop UI Smart Reel modal (`#composer-modal`), target duration optimizer (30s/60s/90s/120s), objective filtering, and alternating cut list readout (`/api/compose_showreel`) | ✅ Done | Instant visual showreel sequence generation directly in desktop shell |
 | **M29: Multi-Camera Setup & Cross-Angle Continuity Matching Engine** | `compute_cross_angle_setup_matching` cross-angle EV stops, Kelvin drift, and ΔE evaluation against Hero Master, synthesizing mathematical ASC CDL XML and 3D LUT (.cube) files with interactive UI modal (`#multicam-modal`) | ✅ Done | Zero-guesswork multi-cam grading match and automated CDL/3D LUT export for NLEs |
 | **M30: Automated Look & Style Transfer CDL Calibration** | `compute_master_baseline_cdl_grade` calibrating mathematical ASC CDL and 3D LUT transforms pulling candidate footage into the exact exposure and tone curve of matched award-winning cinema films (1,112-shot Golden Baseline) | ✅ Done | One-click `.cdl` and `.cube` Master Look grading emulation directly in Visual Æesthetic deck |
+| **M31: Viewport Forensic Diagnostic & False Color Shaders** | `compute_focus_peaking_map` (Laplacian+Sobel in-focus edge detection), `compute_el_zone_map` (Ed Lachman, ASC 10-stop calibrated false color), 3D volumetric key-fill light vectors, and Eyeline Rule-of-Thirds gaze corridor | ✅ Done | Real-time viewport diagnostic shaders and interactive camera staging overlays |
+| **M32: Unified Deliverables ZIP Export Packaging** | `build_unified_deliverables_package` & `create_pkzip_archive` zero-dependency PKZIP 2.0 generator bundling EDL, XML, Resolve script, CSV, HTML contact sheet, CDL/CUBE grades, and hero stills | ✅ Done | Single-click unified deliverables package export in UI and CLI (`--package`) |
 
 ---
 

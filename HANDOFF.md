@@ -7,26 +7,28 @@
 
 ---
 
-## Current Status: M29 Multi-Cam & M30 Master Look CDL / 3D LUT Engine
-- **M29: Multi-Camera Setup & Cross-Angle Continuity**:
-  - `compute_cross_angle_setup_matching`: Computes pairwise exposure EV deltas, Kelvin white balance drift, ΔE color distance, and acutance ratios against the Hero Master.
-  - Interactive UI modal (`#multicam-modal`, `#btn-open-multicam` in Selects bar) with consistency badge and one-click `.cdl` and `.cube` downloads.
-- **M30: Automated Look & Style Transfer CDL Calibration**:
-  - `compute_master_baseline_cdl_grade`: Calibrates ASC CDL (Slope, Offset, Power, Saturation) pulling footage towards the exact exposure and tone curve of matched award-winning films (1,112-shot Golden Baseline).
-  - One-click `Emulate Look (.CDL)` and `Emulate Look (.CUBE)` in the Visual Æesthetic panel (`/api/export_master_cdl`, `/api/export_master_cube`).
-- **Vectorscope I-Line Calibrated at 10:30 (123.0°)**:
-  - Exact NTSC/Rec.709 I-axis ($I = -0.27(B-Y) + 0.74(R-Y)$) positioned between Red (104°) and Yellow (167°) with 25%, 50%, 75% saturation ticks.
-- **Verification & Safety**:
-  - 28/28 workspace tests passing (`cargo test --workspace`).
+## Current Status: M31 Viewport Shaders & M32 Unified Deliverables Package (v0.1.0-alpha)
+- **M31: Viewport Forensic Diagnostic & False Color Shaders**:
+  - `compute_focus_peaking_map`: Multi-threaded Rayon Laplacian & Sobel edge detector highlighting in-focus planes with neon green (`#00ff80`) on desaturated bases (`/api/frame_peaking`).
+  - `compute_el_zone_map`: Calibrated Ed Lachman, ASC 10-stop false-color exposure raster (`/api/frame_el_zone`).
+  - Interactive Viewport Overlays: 3D volumetric light vector sphere (key/fill azimuth & contrast ratio) and eyeline Rule-of-Thirds grid with directional gaze corridor.
+- **M32: Unified Deliverables ZIP Export Packaging**:
+  - `build_unified_deliverables_package`: Pure Rust zero-dependency PKZIP 2.0 generator packaging `EDL/`, `XML/`, `Scripts/`, `Reports/`, `ContactSheet/`, `Grades/` (ASC CDL & 3D LUT .cube), and `Stills/` into a single-click archive (`/api/export_package`).
+  - UI integration: Primary `[Export Deliverables Package (.ZIP)]` in Export dropdown.
+  - CLI integration: `--package [dir]` flag in `aesthetic-cli analyze`.
+- **Quality & Invariants**:
+  - 31/31 workspace tests passing (`cargo test --workspace`).
   - Zero Clippy warnings (`cargo clippy --workspace -- -D warnings`).
-  - Offline local computation only; zero external internet access; production invariant preserved.
+  - Standalone release binaries built (`aesthetic-ui.exe`, `aesthetic-cli.exe`).
+  - Offline local execution; zero external internet access; production invariant preserved.
 
 ---
 
 ## Next Immediate Step
-1. **Interactive Verification**: Refresh `http://127.0.0.1:63513` in browser:
-   - Click "Multi-Cam" in Candidate Selects to view cross-angle matching matrix.
-   - Click "Emulate Look (.CDL)" or "Emulate Look (.CUBE)" in Visual Æesthetic panel to download calibrated Master DP grade files.
+1. **Interactive Verification**: Refresh `http://127.0.0.1:63513`:
+   - Toggle "EL Zone", "Peaking", "3D Light", and "Eyeline & Gaze" buttons in Viewport toolbar.
+   - Click "Export" -> "Export Deliverables Package (.ZIP)" to download complete deliverables archive.
+2. Tag release `v0.1.0-alpha`.
 
 ---
 

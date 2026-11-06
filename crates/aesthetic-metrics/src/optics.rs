@@ -7,6 +7,7 @@
 use crate::exposure::rgb_to_luma;
 use aesthetic_models::physics::OpticalPhysics;
 use image::RgbImage;
+use rayon::prelude::*;
 
 /// Analyze optical physics on an RGB image.
 pub fn analyze_optics(img: &RgbImage) -> OpticalPhysics {
@@ -187,4 +188,68 @@ fn compute_chromatic_aberration(img: &RgbImage, w: usize, h: usize) -> f32 {
     } else {
         0.0
     }
+}
+
+/// Computes an edge-peaking diagnostic map with Rayon multi-threading.
+/// Highlights high-frequency focus edges with `peaking_color` (e.g. Neon Green [0, 255, 128])
+/// over a desaturated background.
+pub fn compute_focus_peaking_map(img: &RgbImage, threshold: f32, peaking_color: [u8; 3]) -> RgbImage {
+    let (w, h) = img.dimensions();
+    if w < 3 || h < 3 {
+        return img.clone();
+    }
+
+    let mut out = vec![0u8; (w * h * 3) as usize];
+    let raw_in = img.as_raw();
+    let width = w as usize;
+    let height = h as usize;
+    let row_stride = width * 3;
+
+    out.par_chunks_exact_mut(row_stride)
+        .enumerate()
+        .for_each(|(y, row_out)| {
+            let is_border = y == 0 || y == height - 1;
+            for x in 0..width {
+                let out_idx = x * 3;
+                if is_border || x == 0 || x == width - 1 {
+                    let in_idx = (y * width + x) * 3;
+                    let luma = rgb_to_luma(raw_in[in_idx], raw_in[in_idx + 1], raw_in[in_idx + 2]);
+                    let dim = (luma * 0.35) as u8;
+                    row_out[out_idx] = dim;
+                    row_out[out_idx + 1] = dim;
+                    row_out[out_idx + 2] = dim;
+                    continue;
+                }
+
+                let c_idx = (y * width + x) * 3;
+                let r_idx = (y * width + (x + 1)) * 3;
+                let l_idx = (y * width + (x - 1)) * 3;
+                let d_idx = ((y + 1) * width + x) * 3;
+                let u_idx = ((y - 1) * width + x) * 3;
+
+                let c_luma = rgb_to_luma(raw_in[c_idx], raw_in[c_idx + 1], raw_in[c_idx + 2]);
+                let r_luma = rgb_to_luma(raw_in[r_idx], raw_in[r_idx + 1], raw_in[r_idx + 2]);
+                let l_luma = rgb_to_luma(raw_in[l_idx], raw_in[l_idx + 1], raw_in[l_idx + 2]);
+                let d_luma = rgb_to_luma(raw_in[d_idx], raw_in[d_idx + 1], raw_in[d_idx + 2]);
+                let u_luma = rgb_to_luma(raw_in[u_idx], raw_in[u_idx + 1], raw_in[u_idx + 2]);
+
+                let lap = (u_luma + d_luma + l_luma + r_luma - 4.0 * c_luma).abs();
+                let grad_x = (r_luma - l_luma).abs();
+                let grad_y = (d_luma - u_luma).abs();
+                let edge = lap * 0.5 + (grad_x + grad_y) * 0.5;
+
+                if edge >= threshold {
+                    row_out[out_idx] = peaking_color[0];
+                    row_out[out_idx + 1] = peaking_color[1];
+                    row_out[out_idx + 2] = peaking_color[2];
+                } else {
+                    let dim = (c_luma * 0.35) as u8;
+                    row_out[out_idx] = dim;
+                    row_out[out_idx + 1] = dim;
+                    row_out[out_idx + 2] = dim;
+                }
+            }
+        });
+
+    RgbImage::from_raw(w, h, out).unwrap_or_else(|| img.clone())
 }

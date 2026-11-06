@@ -4,6 +4,7 @@
 //! end-to-end evaluation pipeline.
 
 pub mod baseline_store;
+pub mod deliverables;
 pub mod export;
 pub mod inference;
 pub mod multicam;
@@ -16,6 +17,9 @@ pub mod window;
 pub use baseline_store::{
     cosine_similarity, find_primary_video_file, parse_movie_folder_name,
     scan_and_ingest_media_server, BaselineStore, IngestSummary, ServerIngestReport,
+};
+pub use deliverables::{
+    build_unified_deliverables_package, create_pkzip_archive, export_deliverables_directory,
 };
 pub use export::{
     export_shot_sidecars, export_shot_sidecars_with_frames, generate_cmx3600_edl,

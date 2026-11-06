@@ -14,6 +14,7 @@ pub use exposure::{
     luma_to_el_zone_stops,
 };
 pub use matte::{detect_active_picture, ActiveCropBounds};
+pub use optics::compute_focus_peaking_map;
 pub use scopes::{
     compute_cie_chromaticity_map, compute_histograms, compute_parade, compute_vectorscope,
     compute_waveform, ChannelHistogram, CieChromaticityMap, LumaWaveform, RgbParade, Vectorscope,

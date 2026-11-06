@@ -101,6 +101,7 @@ fn print_usage() {
     println!("      --contact-sheet <file> Export visual HTML contact sheet");
     println!("      --sidecars <dir>       Export JSON shot sidecars to <dir>/metrics/*.json");
     println!("      --clips <dir>          Export trimmed select clips with handles");
+    println!("      --package [dir]        Export complete Unified Deliverables Package (.zip + folder)");
     println!("      --step <seconds>       Sampling interval in seconds (default: 1.0)");
     println!("  ingest-baseline <file_or_dir> --title <title> --dp <cinematographer>");
     println!("                         Ingest reference film, still image, or directory into Golden Baseline");
@@ -331,10 +332,20 @@ fn run_video_analysis(video_path: &Path, flags: &[String]) {
     );
 
     let mut options = BatchOptions::default();
+    let mut package_dir: Option<PathBuf> = None;
 
     let mut i = 0;
     while i < flags.len() {
         match flags[i].as_str() {
+            "--package" => {
+                if i + 1 < flags.len() && !flags[i + 1].starts_with("--") {
+                    package_dir = Some(PathBuf::from(&flags[i + 1]));
+                    i += 1;
+                } else {
+                    let stem = video_path.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
+                    package_dir = Some(PathBuf::from("outputs").join(format!("deliverables_{}", stem)));
+                }
+            }
             "--top" | "--top-n" if i + 1 < flags.len() => {
                 if let Ok(n) = flags[i + 1].parse::<usize>() {
                     options.top_n = Some(n);
@@ -470,6 +481,26 @@ fn run_video_analysis(video_path: &Path, flags: &[String]) {
                     "[✓] Extracted {} trimmed sub-clips with handles.",
                     result.extracted_clips_count
                 );
+            }
+            if let Some(ref dir) = package_dir {
+                let title = video_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("AESTHETIC");
+                match aesthetic_core::export_deliverables_directory(
+                    dir,
+                    title,
+                    &result.video_info.file_path,
+                    &result.ranked_takes,
+                    result.video_info.frame_rate,
+                    None,
+                ) {
+                    Ok(zip_path) => {
+                        println!("\n[✓] Unified Deliverables Package created at: {}", dir.display());
+                        println!("    -> Companion Deliverables Archive: {}", zip_path.display());
+                    }
+                    Err(err) => eprintln!("\n[!] Failed to export deliverables package: {}", err),
+                }
             }
         }
         Err(err) => {

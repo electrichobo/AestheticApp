@@ -887,55 +887,88 @@ function drawVolumetricLight(lighting) {
   const ratio = lighting && lighting.key_to_fill_ratio != null ? lighting.key_to_fill_ratio : 3.8;
   const catchlight = lighting && lighting.catchlight_intensity != null ? lighting.catchlight_intensity : 75;
 
-  const cx = Math.max(120, w - 120);
-  const cy = 110;
+  const cx = Math.max(130, w - 130);
+  const cy = 115;
   const radius = 55;
 
+  // 3D Sphere base
   vectorCtx.beginPath();
   vectorCtx.arc(cx, cy, radius, 0, Math.PI * 2);
-  vectorCtx.fillStyle = 'rgba(10, 12, 16, 0.88)';
+  vectorCtx.fillStyle = 'rgba(10, 12, 16, 0.90)';
   vectorCtx.fill();
   vectorCtx.lineWidth = 1.5;
   vectorCtx.strokeStyle = '#252d3d';
   vectorCtx.stroke();
 
-  // Ray Vector
+  // Subtle 3D sphere grid
+  vectorCtx.strokeStyle = 'rgba(74, 85, 104, 0.25)';
+  vectorCtx.lineWidth = 1;
+  vectorCtx.beginPath();
+  vectorCtx.ellipse(cx, cy, radius, radius * 0.35, 0, 0, Math.PI * 2);
+  vectorCtx.stroke();
+  vectorCtx.beginPath();
+  vectorCtx.ellipse(cx, cy, radius * 0.35, radius, 0, 0, Math.PI * 2);
+  vectorCtx.stroke();
+
+  // Key Ray Vector
   const angleRad = ((azimuth - 90) * Math.PI) / 180;
   const lightX = cx + Math.cos(angleRad) * (radius - 8);
   const lightY = cy + Math.sin(angleRad) * (radius - 8);
 
   const grad = vectorCtx.createRadialGradient(lightX, lightY, 4, cx, cy, radius);
-  grad.addColorStop(0, 'rgba(229, 169, 59, 0.85)');
-  grad.addColorStop(1, 'rgba(229, 169, 59, 0.08)');
+  grad.addColorStop(0, 'rgba(229, 169, 59, 0.90)');
+  grad.addColorStop(1, 'rgba(229, 169, 59, 0.05)');
 
   vectorCtx.beginPath();
   vectorCtx.moveTo(lightX, lightY);
-  vectorCtx.lineTo(cx - 10, cy);
-  vectorCtx.lineTo(cx + 10, cy);
+  vectorCtx.lineTo(cx - 12, cy);
+  vectorCtx.lineTo(cx + 12, cy);
   vectorCtx.closePath();
   vectorCtx.fillStyle = grad;
   vectorCtx.fill();
 
+  // Key light head
   vectorCtx.beginPath();
-  vectorCtx.arc(lightX, lightY, 5, 0, Math.PI * 2);
+  vectorCtx.arc(lightX, lightY, 6, 0, Math.PI * 2);
   vectorCtx.fillStyle = '#e5a93b';
   vectorCtx.fill();
   vectorCtx.strokeStyle = '#ffffff';
   vectorCtx.lineWidth = 1.5;
   vectorCtx.stroke();
 
-  // Readouts
-  vectorCtx.fillStyle = 'rgba(10, 12, 16, 0.92)';
-  vectorCtx.fillRect(cx - 85, cy + radius + 10, 170, 48);
+  // Fill Light indicator (opposite key)
+  const fillAngleRad = angleRad + Math.PI;
+  const fillX = cx + Math.cos(fillAngleRad) * (radius - 12);
+  const fillY = cy + Math.sin(fillAngleRad) * (radius - 12);
+  vectorCtx.beginPath();
+  vectorCtx.arc(fillX, fillY, 4, 0, Math.PI * 2);
+  vectorCtx.fillStyle = '#00d2ff';
+  vectorCtx.fill();
+
+  // Center Head Anchor
+  vectorCtx.beginPath();
+  vectorCtx.arc(cx, cy, 14, 0, Math.PI * 2);
+  vectorCtx.fillStyle = 'rgba(40, 48, 64, 0.85)';
+  vectorCtx.fill();
+  vectorCtx.strokeStyle = '#64748b';
+  vectorCtx.lineWidth = 1;
+  vectorCtx.stroke();
+
+  // Readouts Panel
+  vectorCtx.fillStyle = 'rgba(10, 12, 16, 0.94)';
+  vectorCtx.fillRect(cx - 95, cy + radius + 12, 190, 52);
   vectorCtx.strokeStyle = '#252d3d';
-  vectorCtx.strokeRect(cx - 85, cy + radius + 10, 170, 48);
+  vectorCtx.strokeRect(cx - 95, cy + radius + 12, 190, 52);
 
   vectorCtx.font = 'bold 11px sans-serif';
   vectorCtx.fillStyle = '#e5a93b';
   vectorCtx.textAlign = 'center';
-  vectorCtx.fillText(`KEY: ${azimuth > 0 ? '+' : ''}${azimuth.toFixed(0)}° Az | ${elevation.toFixed(0)}° El`, cx, cy + radius + 26);
+  vectorCtx.fillText(`KEY: ${azimuth > 0 ? '+' : ''}${azimuth.toFixed(0)}° Az | ${elevation.toFixed(0)}° El`, cx, cy + radius + 28);
   vectorCtx.fillStyle = '#00d2ff';
-  vectorCtx.fillText(`Key:Fill: ${ratio.toFixed(1)}:1  •  Catch: ${catchlight.toFixed(0)}%`, cx, cy + radius + 42);
+  vectorCtx.fillText(`Key:Fill Ratio: ${ratio.toFixed(1)}:1`, cx, cy + radius + 42);
+  vectorCtx.fillStyle = '#94a3b8';
+  vectorCtx.font = '10px monospace';
+  vectorCtx.fillText(`Catchlight: ${catchlight.toFixed(0)}% • Specular`, cx, cy + radius + 56);
 }
 
 function drawEyelineAndGaze(staging) {
@@ -949,9 +982,12 @@ function drawEyelineAndGaze(staging) {
   vectorCtx.clearRect(0, 0, w, h);
 
   const gazeX = staging && staging.gaze_vector_x != null ? staging.gaze_vector_x : 0.65;
+  const gazeY = staging && staging.gaze_vector_y != null ? staging.gaze_vector_y : -0.15;
   const lookingRoom = staging && staging.looking_room_score != null ? staging.looking_room_score : 85;
+  const eyelinePoise = staging && staging.eyeline_poise_score != null ? staging.eyeline_poise_score : 90;
+  const headroom = staging && staging.headroom_score != null ? staging.headroom_score : 88;
 
-  // Rule-of-Thirds Grid
+  // 1. Rule-of-Thirds Golden Grid
   vectorCtx.strokeStyle = 'rgba(229, 169, 59, 0.35)';
   vectorCtx.lineWidth = 1;
   vectorCtx.setLineDash([6, 6]);
@@ -973,11 +1009,96 @@ function drawEyelineAndGaze(staging) {
   vectorCtx.stroke();
   vectorCtx.setLineDash([]);
 
-  // Eyeline label
-  vectorCtx.font = '10px monospace';
+  // 2. Eyeline Horizon Line & Label
+  vectorCtx.strokeStyle = 'rgba(229, 169, 59, 0.75)';
+  vectorCtx.lineWidth = 1.5;
+  vectorCtx.beginPath();
+  vectorCtx.moveTo(0, yThird1);
+  vectorCtx.lineTo(w, yThird1);
+  vectorCtx.stroke();
+
+  vectorCtx.font = 'bold 10px monospace';
   vectorCtx.fillStyle = '#e5a93b';
   vectorCtx.textAlign = 'left';
-  vectorCtx.fillText('EYELINE (RULE OF THIRDS)', 14, yThird1 - 6);
+  vectorCtx.fillText('EYELINE (UPPER THIRD)', 14, yThird1 - 8);
+
+  // 3. Subject Anchor Node
+  const subjectX = gazeX >= 0 ? w * 0.35 : w * 0.65;
+  const subjectY = yThird1;
+
+  // Subject Head Circle
+  vectorCtx.beginPath();
+  vectorCtx.arc(subjectX, subjectY, 20, 0, Math.PI * 2);
+  vectorCtx.fillStyle = 'rgba(229, 169, 59, 0.15)';
+  vectorCtx.fill();
+  vectorCtx.strokeStyle = '#e5a93b';
+  vectorCtx.lineWidth = 1.5;
+  vectorCtx.stroke();
+
+  // 4. Directional Gaze Vector Arrow
+  const arrowLength = Math.min(w * 0.28, 180);
+  const targetX = subjectX + (gazeX >= 0 ? arrowLength : -arrowLength);
+  const targetY = subjectY + gazeY * 60;
+
+  // Looking room highlight corridor
+  const corridorGrad = vectorCtx.createLinearGradient(subjectX, subjectY, targetX, targetY);
+  corridorGrad.addColorStop(0, 'rgba(0, 210, 255, 0.25)');
+  corridorGrad.addColorStop(1, 'rgba(0, 210, 255, 0.02)');
+  vectorCtx.beginPath();
+  vectorCtx.moveTo(subjectX, subjectY - 25);
+  vectorCtx.lineTo(targetX, targetY - 45);
+  vectorCtx.lineTo(targetX, targetY + 45);
+  vectorCtx.lineTo(subjectX, subjectY + 25);
+  vectorCtx.closePath();
+  vectorCtx.fillStyle = corridorGrad;
+  vectorCtx.fill();
+
+  // Vector Line
+  vectorCtx.beginPath();
+  vectorCtx.moveTo(subjectX, subjectY);
+  vectorCtx.lineTo(targetX, targetY);
+  vectorCtx.strokeStyle = '#00d2ff';
+  vectorCtx.lineWidth = 2.5;
+  vectorCtx.stroke();
+
+  // Arrow Head
+  const arrowAngle = Math.atan2(targetY - subjectY, targetX - subjectX);
+  const headLen = 12;
+  vectorCtx.beginPath();
+  vectorCtx.moveTo(targetX, targetY);
+  vectorCtx.lineTo(
+    targetX - headLen * Math.cos(arrowAngle - Math.PI / 6),
+    targetY - headLen * Math.sin(arrowAngle - Math.PI / 6)
+  );
+  vectorCtx.lineTo(
+    targetX - headLen * Math.cos(arrowAngle + Math.PI / 6),
+    targetY - headLen * Math.sin(arrowAngle + Math.PI / 6)
+  );
+  vectorCtx.closePath();
+  vectorCtx.fillStyle = '#00d2ff';
+  vectorCtx.fill();
+
+  // 5. Readout Badges in Top Right
+  const badgeW = 200;
+  const badgeX = w - badgeW - 14;
+  const badgeY = 14;
+  vectorCtx.fillStyle = 'rgba(10, 12, 16, 0.92)';
+  vectorCtx.fillRect(badgeX, badgeY, badgeW, 64);
+  vectorCtx.strokeStyle = '#252d3d';
+  vectorCtx.lineWidth = 1;
+  vectorCtx.strokeRect(badgeX, badgeY, badgeW, 64);
+
+  vectorCtx.font = 'bold 11px sans-serif';
+  vectorCtx.fillStyle = '#00d2ff';
+  vectorCtx.textAlign = 'left';
+  vectorCtx.fillText(`GAZE VECTOR: ${gazeX >= 0 ? '+' : ''}${gazeX.toFixed(2)} (${gazeX >= 0 ? 'Right' : 'Left'})`, badgeX + 10, badgeY + 18);
+
+  vectorCtx.fillStyle = '#e5a93b';
+  vectorCtx.fillText(`Looking Room: ${lookingRoom}/100`, badgeX + 10, badgeY + 34);
+
+  vectorCtx.fillStyle = '#94a3b8';
+  vectorCtx.font = '10px monospace';
+  vectorCtx.fillText(`Headroom: ${headroom}/100 • Poise: ${eyelinePoise}/100`, badgeX + 10, badgeY + 50);
 }
 
 // ============================================================================
@@ -1567,6 +1688,18 @@ if (btnLiveResolve) {
       btnLiveResolve.disabled = false;
       btnLiveResolve.innerHTML = origText;
     }
+  });
+}
+
+const btnExportPackage = document.getElementById('btn-export-package');
+if (btnExportPackage) {
+  btnExportPackage.addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.href = '/api/export_package';
+    a.download = 'AESTHETIC_Deliverables.zip';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   });
 }
 

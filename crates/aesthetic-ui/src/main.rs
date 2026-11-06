@@ -5,6 +5,7 @@
 //! and interactive UI via embedded native WebView (Edge App Mode / Chromium).
 
 use aesthetic_core::baseline_store::{scan_and_ingest_media_server, BaselineStore};
+use aesthetic_core::deliverables::build_unified_deliverables_package;
 use aesthetic_core::export::{
     generate_cmx3600_edl, generate_contact_sheet_html, generate_contact_sheet_html_with_frames,
     generate_csv_selects, generate_fcpxml,
@@ -15,7 +16,7 @@ use aesthetic_core::pipeline::{
 };
 use aesthetic_core::video::{extract_frame_rgb, probe_video_metadata};
 use aesthetic_core::web_ingest::probe_web_url;
-use aesthetic_metrics::compute_el_zone_map;
+use aesthetic_metrics::{compute_el_zone_map, compute_focus_peaking_map};
 use aesthetic_metrics::scopes::{
     compute_cie_chromaticity_map, compute_histograms, compute_parade, compute_vectorscope,
     compute_waveform,
@@ -319,31 +320,12 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 .get("time")
                 .and_then(|t| t.parse().ok())
                 .unwrap_or(0.0);
+            let threshold: f32 = query_map
+                .get("threshold")
+                .and_then(|t| t.parse().ok())
+                .unwrap_or(32.0);
             let img = get_frame_for_time(state, time_sec);
-            let (w, h) = img.dimensions();
-            let mut peaking = RgbImage::new(w, h);
-            for y in 1..h.saturating_sub(1) {
-                for x in 1..w.saturating_sub(1) {
-                    let p = img.get_pixel(x, y);
-                    let p_right = img.get_pixel(x + 1, y);
-                    let p_down = img.get_pixel(x, y + 1);
-                    let l =
-                        (0.2126 * p[0] as f32 + 0.7152 * p[1] as f32 + 0.0722 * p[2] as f32) as i32;
-                    let lr = (0.2126 * p_right[0] as f32
-                        + 0.7152 * p_right[1] as f32
-                        + 0.0722 * p_right[2] as f32) as i32;
-                    let ld = (0.2126 * p_down[0] as f32
-                        + 0.7152 * p_down[1] as f32
-                        + 0.0722 * p_down[2] as f32) as i32;
-                    let grad = (l - lr).abs() + (l - ld).abs();
-                    if grad > 35 {
-                        peaking.put_pixel(x, y, Rgb([0, 255, 128]));
-                    } else {
-                        let dim = (l / 3) as u8;
-                        peaking.put_pixel(x, y, Rgb([dim, dim, dim]));
-                    }
-                }
-            }
+            let peaking = compute_focus_peaking_map(&img, threshold, [0, 255, 128]);
             let mut bytes = Vec::new();
             let _ = peaking.write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png);
             send_response(stream, "200 OK", "image/png", &bytes);
@@ -1060,6 +1042,61 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 "AESTHETIC_Resolve_Import.py",
                 py.as_bytes(),
             );
+        }
+        "/api/export_package" => {
+            let ca = state.current_analysis.read().unwrap();
+            let (takes, media_path, fps) = if let Some(ref res) = *ca {
+                (
+                    res.ranked_takes.clone(),
+                    res.video_info.file_path.clone(),
+                    res.video_info.frame_rate,
+                )
+            } else {
+                (get_demo_takes(), "FEATURE_MASTER.MOV".to_string(), 24.0)
+            };
+            let clip_stem = Path::new(&media_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("AESTHETIC");
+
+            // Extract hero stills for top 5 takes if possible
+            let mut stills_holder: Vec<(String, RgbImage)> = Vec::new();
+            for (idx, take) in takes.iter().take(5).enumerate() {
+                let img = get_frame_for_time(state, take.hero_timestamp_sec);
+                stills_holder.push((format!("hero_select_{:02}", idx + 1), img));
+            }
+            let stills_ref: Vec<(String, &RgbImage)> = stills_holder
+                .iter()
+                .map(|(name, img)| (name.clone(), img))
+                .collect();
+
+            match build_unified_deliverables_package(
+                &format!("AESTHETIC_{}", clip_stem),
+                &media_path,
+                &takes,
+                fps,
+                Some(&stills_ref),
+            ) {
+                Ok(zip_bytes) => {
+                    let zip_filename = format!("AESTHETIC_Deliverables_{}.zip", clip_stem);
+                    send_attachment_response(
+                        stream,
+                        "200 OK",
+                        "application/zip",
+                        &zip_filename,
+                        &zip_bytes,
+                    );
+                }
+                Err(err) => {
+                    let json = serde_json::json!({ "success": false, "error": err });
+                    send_response(
+                        stream,
+                        "500 Internal Server Error",
+                        "application/json",
+                        json.to_string().as_bytes(),
+                    );
+                }
+            }
         }
         "/api/send_to_resolve" => {
             let ca = state.current_analysis.read().unwrap();
