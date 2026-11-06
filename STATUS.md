@@ -40,7 +40,11 @@
 
 ---
 
-## Completed in M24–M28
+## Completed in M24–M28 + FFmpeg Inclusion Hardened
+- **FFmpeg Inclusion & Multi-Tier Discovery** (`crates/aesthetic-core/src/video.rs`, `crates/aesthetic-ui/build.rs`, `crates/aesthetic-cli/build.rs`):
+  - Upgraded `find_ffmpeg()` and `find_ffprobe()` in `video.rs` to execute exhaustive multi-tier discovery: env variables (`AESTHETIC_FFMPEG_PATH`, `FFMPEG_PATH`), CWD + ancestor hierarchy checks, adjacent executable checks (`target/release/ffmpeg.exe`, `target/debug/ffmpeg.exe`), and canonical workspace fallbacks.
+  - Added zero-dependency `build.rs` to both `aesthetic-ui` and `aesthetic-cli` to automatically ensure `tools/ffmpeg.exe` is copied adjacent to output binaries.
+  - Verified with new unit test `video::tests::test_find_ffmpeg_resolves_and_runs` (27/27 workspace tests passing).
 - **M28: Interactive Smart Showreel Composer Modal & Pacing Grid** (`crates/aesthetic-ui/ui/index.html`, `crates/aesthetic-ui/ui/app.js`, `crates/aesthetic-ui/src/main.rs`):
   - Added dedicated **"Smart Reel"** button to the Candidate Selects panel header.
   - Implemented the `#composer-modal` and `/api/compose_showreel` endpoint displaying target vs assembled duration, shot scale pacing, and tabular cut list order.
@@ -54,15 +58,6 @@
   - Implemented `compose_smart_showreel` optimization engine assembling curated reels to target durations (60s, 90s, 120s) balancing objective focus (Commercial Lighting, Dramatic Narrative, Action Kinetic, Balanced Hero), shot scale alternation rhythm, and color temperature continuity.
 - **M27: Personal Taste Profile & Feedback Reranker Tuning** (`crates/aesthetic-core/src/pipeline.rs`, `crates/aesthetic-ui/src/main.rs`):
   - Implemented `compute_personal_taste_profile` dynamically calibrating personal style affinities and adapting the 6 narrative reranker weights based on user curation actions (`/api/taste_profile`).
-- **M24: Direct Live DaVinci Resolve Studio IPC Bridge** (`crates/aesthetic-core/src/export.rs`, `crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/app.js`, `crates/aesthetic-cli/src/main.rs`):
-  - Implemented `send_to_live_resolve` executing the Python Resolve bridge against the running DaVinci Resolve Studio scripting IPC socket.
-  - Added **"Send to Live Resolve (Direct)"** in the UI Export menu and `--live-resolve` flag to `aesthetic-cli rescore`.
-- **M25: Batch Folder Video Queue & Progressive Sidecars** (`crates/aesthetic-core/src/pipeline.rs`, `crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/app.js`, `crates/aesthetic-cli/src/main.rs`):
-  - Implemented `analyze_folder_queue` automatically discovering all supported video media files in a folder and sequentially analyzing, scoring, and outputting organized sidecars and contact sheets.
-  - Added **"Batch Analyze Folder"** in UI Import menu and `aesthetic-cli batch <folder> [--out <dir>]`.
-- **M26: Smart Showreel Composer & Target Duration Assembly** (`crates/aesthetic-core/src/pipeline.rs`):
-  - Implemented `compose_smart_showreel` optimization engine assembling curated reels to target durations (60s, 90s, 120s) balancing objective focus (Commercial Lighting, Dramatic Narrative, Action Kinetic, Balanced Hero), shot scale alternation rhythm, and color temperature continuity.
-- **M27: Personal Taste Profile & Feedback Reranker Tuning** (`crates/aesthetic-core/src/pipeline.rs`, `crates/aesthetic-ui/src/main.rs`):
   - Implemented `compute_personal_taste_profile` dynamically calibrating personal style affinities and adapting the 6 narrative reranker weights based on user curation actions (`/api/taste_profile`).
 
 ---
