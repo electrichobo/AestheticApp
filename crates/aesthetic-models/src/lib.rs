@@ -13,6 +13,7 @@ pub mod baseline;
 pub mod forensics;
 pub mod inferred;
 pub mod manifest;
+pub mod multicam;
 pub mod physics;
 pub mod subjective;
 pub mod temporal;
@@ -28,6 +29,7 @@ pub use inferred::{
     FocusOptics, LightingGeometry, ModelInferredCraft, MotionDynamics, StagingEyeline,
 };
 pub use manifest::{AnalysisRunMetadata, VideoSourceInfo};
+pub use multicam::{AscCdlCorrection, CrossAngleMatchReport, PairwiseSetupDelta};
 pub use physics::{ColorPhysics, ExposurePhysics, ObjectivePhysics, OpticalPhysics};
 pub use subjective::{CreativeAesthetic, StyleFamilyCluster};
 pub use temporal::{TakeEditorial, UsableWindow};

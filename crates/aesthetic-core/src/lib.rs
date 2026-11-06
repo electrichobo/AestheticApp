@@ -6,6 +6,7 @@
 pub mod baseline_store;
 pub mod export;
 pub mod inference;
+pub mod multicam;
 pub mod pipeline;
 pub mod scene;
 pub mod video;
@@ -23,6 +24,9 @@ pub use export::{
     seconds_to_smpte_timecode, send_to_live_resolve, LiveResolveResult,
 };
 pub use inference::{DepthMap, ModelInferenceEngine};
+pub use multicam::{
+    compute_cross_angle_setup_matching, generate_3d_lut_cube, generate_asc_cdl_xml,
+};
 pub use video::{extract_frame_rgb, extract_trimmed_clip, probe_video_metadata};
 
 pub use pipeline::{

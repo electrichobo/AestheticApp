@@ -1832,6 +1832,103 @@ if (btnComposerAssemble) {
   });
 }
 
+// ============================================================================
+// Multi-Cam Cross-Angle Continuity & ASC CDL Match Controller (M29)
+// ============================================================================
+const btnOpenMulticam = document.getElementById('btn-open-multicam');
+const multicamModal = document.getElementById('multicam-modal');
+const modalMulticamClose = document.getElementById('modal-multicam-close');
+const btnMulticamClose = document.getElementById('btn-multicam-close');
+const multicamScoreBadge = document.getElementById('multicam-score-badge');
+const multicamSummaryBar = document.getElementById('multicam-summary-bar');
+const multicamGrid = document.getElementById('multicam-grid');
+
+function closeMulticamModal() {
+  if (multicamModal) multicamModal.style.display = 'none';
+}
+
+if (modalMulticamClose) modalMulticamClose.addEventListener('click', closeMulticamModal);
+if (btnMulticamClose) btnMulticamClose.addEventListener('click', closeMulticamModal);
+
+if (btnOpenMulticam && multicamModal) {
+  btnOpenMulticam.addEventListener('click', async () => {
+    multicamModal.style.display = 'flex';
+    if (multicamGrid) multicamGrid.innerHTML = '<div style="padding: 24px; text-align: center; color: #888;">Evaluating cross-angle color temperature, exposure EV deltas, and synthesizing ASC CDLs...</div>';
+
+    try {
+      const res = await fetch('/api/multicam_matching');
+      const data = await res.json();
+      if (data && data.pairwise_matches) {
+        if (multicamScoreBadge) {
+          multicamScoreBadge.textContent = `Consistency: ${data.overall_consistency_score.toFixed(0)}%`;
+        }
+
+        if (multicamSummaryBar) {
+          multicamSummaryBar.innerHTML = `
+            <div style="flex: 1;"><span style="color: #64748b; font-size: 11px;">HERO MASTER</span><br><strong style="color: #ffbe5b; font-size: 14px;">${data.hero_master_take_id}</strong></div>
+            <div style="flex: 1;"><span style="color: #64748b; font-size: 11px;">SETUPS COMPARED</span><br><strong style="font-size: 14px;">${data.total_takes} Angles</strong></div>
+            <div style="flex: 1;"><span style="color: #64748b; font-size: 11px;">AVG SCENE ΔE</span><br><strong style="color: ${data.average_scene_delta_e < 2.0 ? '#4ade80' : '#f59e0b'}; font-size: 14px;">${data.average_scene_delta_e.toFixed(1)} ΔE</strong></div>
+            <div style="flex: 1;"><span style="color: #64748b; font-size: 11px;">MAX EXPOSURE Δ</span><br><strong style="font-size: 14px;">${data.max_exposure_stops_delta.toFixed(2)} EV</strong></div>
+            <div style="flex: 1;"><span style="color: #64748b; font-size: 11px;">MAX KELVIN DRIFT</span><br><strong style="font-size: 14px;">${data.max_kelvin_delta.toFixed(0)}K</strong></div>
+          `;
+        }
+
+        if (multicamGrid) {
+          multicamGrid.innerHTML = '';
+          data.pairwise_matches.forEach((m, idx) => {
+            const isMaster = idx === 0;
+            const statusColor = isMaster ? '#38bdf8' : (m.color_delta_e < 2.0 ? '#4ade80' : (m.color_delta_e < 3.5 ? '#f59e0b' : '#ef4444'));
+            const cdl = m.recommended_cdl || {};
+            const slopeStr = cdl.slope ? `${cdl.slope[0].toFixed(3)}, ${cdl.slope[1].toFixed(3)}, ${cdl.slope[2].toFixed(3)}` : '1.0, 1.0, 1.0';
+            const offsetStr = cdl.offset ? `${cdl.offset[0].toFixed(3)}, ${cdl.offset[1].toFixed(3)}, ${cdl.offset[2].toFixed(3)}` : '0.0, 0.0, 0.0';
+            const powerStr = cdl.power ? `${cdl.power[0].toFixed(3)}, ${cdl.power[1].toFixed(3)}, ${cdl.power[2].toFixed(3)}` : '1.0, 1.0, 1.0';
+
+            const card = document.createElement('div');
+            card.style.cssText = 'background: #111827; border: 1px solid rgba(148, 163, 184, 0.15); border-radius: 6px; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px;';
+            card.innerHTML = `
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(148, 163, 184, 0.1); padding-bottom: 8px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                  <strong style="color: #fff; font-size: 14px;">${m.source_take_id}</strong>
+                  <span style="color: #64748b; font-size: 12px;">vs. Hero Master (${m.target_take_id})</span>
+                  <span style="background: rgba(15, 23, 42, 0.8); color: ${statusColor}; border: 1px solid ${statusColor}; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600;">${m.match_status}</span>
+                </div>
+                ${!isMaster ? `
+                <div style="display: flex; gap: 8px;">
+                  <a href="/api/export_cdl?source=${encodeURIComponent(m.source_take_id)}&target=${encodeURIComponent(m.target_take_id)}" class="btn btn-secondary btn-sm" download style="text-decoration: none; font-size: 11px; padding: 3px 10px;">Export .CDL</a>
+                  <a href="/api/export_lut_cube?source=${encodeURIComponent(m.source_take_id)}&target=${encodeURIComponent(m.target_take_id)}" class="btn btn-secondary btn-sm" download style="text-decoration: none; font-size: 11px; padding: 3px 10px;">Export .CUBE</a>
+                </div>` : '<span style="color: #38bdf8; font-size: 12px; font-weight: 600;">Hero Anchor</span>'}
+              </div>
+
+              <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; font-size: 12px; background: rgba(15, 23, 42, 0.5); padding: 8px 12px; border-radius: 4px;">
+                <div><span style="color: #64748b;">Exposure Δ:</span> <strong style="color: ${m.exposure_stops_delta < 0 ? '#38bdf8' : '#f59e0b'};">${m.exposure_stops_delta > 0 ? '+' : ''}${m.exposure_stops_delta} EV</strong></div>
+                <div><span style="color: #64748b;">Kelvin Shift:</span> <strong>${m.kelvin_delta > 0 ? '+' : ''}${m.kelvin_delta}K</strong></div>
+                <div><span style="color: #64748b;">Color ΔE:</span> <strong style="color: ${statusColor};">${m.color_delta_e} ΔE</strong></div>
+                <div><span style="color: #64748b;">Key:Fill Δ:</span> <strong>${m.key_to_fill_ratio_delta > 0 ? '+' : ''}${m.key_to_fill_ratio_delta}</strong></div>
+                <div><span style="color: #64748b;">Sharpness Ratio:</span> <strong>${m.sharpness_ratio}×</strong></div>
+              </div>
+
+              <div style="font-size: 12px; color: #94a3b8; display: flex; align-items: center; gap: 8px;">
+                <span style="color: #ffbe5b; font-weight: 600;">Grading Directive:</span>
+                <span>${cdl.summary_guidance || 'None'}</span>
+              </div>
+
+              ${!isMaster ? `
+              <div style="font-family: monospace; font-size: 11px; color: #64748b; background: rgba(0, 0, 0, 0.3); padding: 6px 10px; border-radius: 4px;">
+                ASC CDL &bull; Slope [${slopeStr}] &bull; Offset [${offsetStr}] &bull; Power [${powerStr}] &bull; Sat [${cdl.saturation || 1.0}]
+              </div>` : ''}
+            `;
+            multicamGrid.appendChild(card);
+          });
+        }
+      } else {
+        if (multicamGrid) multicamGrid.innerHTML = `<div style="color: #ef4444; padding: 20px;">Failed to evaluate multi-camera setups: ${data.error || 'No active takes'}</div>`;
+      }
+    } catch (err) {
+      if (multicamGrid) multicamGrid.innerHTML = `<div style="color: #ef4444; padding: 20px;">Error communicating with server: ${err}</div>`;
+    }
+  });
+}
+
 // Media Server Baseline Ingest Modal & Deduplication Controller
 // ============================================================================
 const btnServerIngest = document.getElementById('btn-server-ingest');

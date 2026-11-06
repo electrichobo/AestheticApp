@@ -1384,6 +1384,78 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
             });
             send_response(stream, "200 OK", "application/json", json.to_string().as_bytes());
         }
+        "/api/multicam_matching" => {
+            let ca = state.current_analysis.read().unwrap();
+            let takes = if let Some(ref res) = *ca {
+                res.ranked_takes.clone()
+            } else {
+                get_demo_takes()
+            };
+            drop(ca);
+
+            let group_name = query_map
+                .get("group")
+                .map(|s| s.as_str())
+                .unwrap_or("Active_Scene_Setup");
+
+            let report = aesthetic_core::compute_cross_angle_setup_matching(group_name, &takes);
+            let json = serde_json::to_value(&report).unwrap_or_default();
+            send_response(stream, "200 OK", "application/json", json.to_string().as_bytes());
+        }
+        "/api/export_cdl" => {
+            let ca = state.current_analysis.read().unwrap();
+            let takes = if let Some(ref res) = *ca {
+                res.ranked_takes.clone()
+            } else {
+                get_demo_takes()
+            };
+            drop(ca);
+
+            let source_id = query_map.get("source").map(|s| s.as_str()).unwrap_or("take_002");
+            let target_id = query_map.get("target").map(|s| s.as_str()).unwrap_or_else(|| {
+                takes.first().map(|t| t.take_id.as_str()).unwrap_or("take_001")
+            });
+
+            let report = aesthetic_core::compute_cross_angle_setup_matching("Scene", &takes);
+            let cdl = report
+                .pairwise_matches
+                .iter()
+                .find(|m| m.source_take_id == source_id)
+                .map(|m| m.recommended_cdl.clone())
+                .unwrap_or_default();
+
+            let xml = aesthetic_core::generate_asc_cdl_xml(&cdl, source_id, target_id);
+            let filename = format!("{}_to_{}_match.cdl", source_id, target_id);
+            send_attachment_response(stream, "200 OK", "application/xml", &filename, xml.as_bytes());
+        }
+        "/api/export_lut_cube" => {
+            let ca = state.current_analysis.read().unwrap();
+            let takes = if let Some(ref res) = *ca {
+                res.ranked_takes.clone()
+            } else {
+                get_demo_takes()
+            };
+            drop(ca);
+
+            let source_id = query_map.get("source").map(|s| s.as_str()).unwrap_or("take_002");
+            let target_id = query_map.get("target").map(|s| s.as_str()).unwrap_or_else(|| {
+                takes.first().map(|t| t.take_id.as_str()).unwrap_or("take_001")
+            });
+            let size = query_map.get("size").and_then(|s| s.parse().ok()).unwrap_or(17);
+
+            let report = aesthetic_core::compute_cross_angle_setup_matching("Scene", &takes);
+            let cdl = report
+                .pairwise_matches
+                .iter()
+                .find(|m| m.source_take_id == source_id)
+                .map(|m| m.recommended_cdl.clone())
+                .unwrap_or_default();
+
+            let title = format!("AESTHETIC_{}_to_{}", source_id, target_id);
+            let cube = aesthetic_core::generate_3d_lut_cube(&cdl, &title, size);
+            let filename = format!("{}_to_{}_match.cube", source_id, target_id);
+            send_attachment_response(stream, "200 OK", "text/plain", &filename, cube.as_bytes());
+        }
         _ => {
             send_response(stream, "404 NOT FOUND", "text/plain", b"Not Found");
         }

@@ -59,6 +59,7 @@ AESTHETIC is built from the ground up as a **Rust Core Engine** prioritizing:
 | **M26: Smart Showreel Composer & Target Duration Assembly** | `compose_smart_showreel` optimization engine assembling curated reels to target durations (60s, 90s, 120s) with shot-scale alternating rhythm & CCT continuity | ✅ Done | Objective-driven showreel assembly (Commercial, Dramatic, Kinetic, Balanced) |
 | **M27: Personal Taste Profile & Feedback Reranker Tuning** | `compute_personal_taste_profile` dynamically calibrating personal DP style affinities and reranker head weights from user curation feedback events (`/api/taste_profile`) | ✅ Done | Self-tuning aesthetic layer learning directly from cinematographer curation actions |
 | **M28: Interactive Smart Showreel Composer Modal & Pacing Grid** | Desktop UI Smart Reel modal (`#composer-modal`), target duration optimizer (30s/60s/90s/120s), objective filtering, and alternating cut list readout (`/api/compose_showreel`) | ✅ Done | Instant visual showreel sequence generation directly in desktop shell |
+| **M29: Multi-Camera Setup & Cross-Angle Continuity Matching Engine** | `compute_cross_angle_setup_matching` cross-angle EV stops, Kelvin drift, and ΔE evaluation against Hero Master, synthesizing mathematical ASC CDL XML and 3D LUT (.cube) files with interactive UI modal (`#multicam-modal`) | ✅ Done | Zero-guesswork multi-cam grading match and automated CDL/3D LUT export for NLEs |
 
 ---
 

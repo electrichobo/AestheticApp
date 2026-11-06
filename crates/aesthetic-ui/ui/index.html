@@ -146,6 +146,9 @@
           <button class="btn-contact-sheet-bar" id="btn-open-composer" title="Configure and assemble pacing-optimized showreels to target durations">
             <span class="cs-icon">🎬</span> Smart Reel
           </button>
+          <button class="btn-contact-sheet-bar" id="btn-open-multicam" title="Cross-angle multi-camera setup matching & ASC CDL grading corrections">
+            <span class="cs-icon">🎥</span> Multi-Cam
+          </button>
         </div>
         <div class="takes-list" id="takes-list">
           <!-- Populated dynamically with thumbnails, scores, and claimed tags -->
@@ -410,6 +413,33 @@
         <div class="sheet-grid" id="modal-sheet-grid">
           <!-- Populated dynamically with shot thumbnails, scores, collapsible metrics trees and claimed tags -->
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Multi-Cam Cross-Angle Matching & ASC CDL Modal -->
+  <div id="multicam-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card modal-multicam" style="max-width: 980px; width: 92vw;">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3>Multi-Camera Setup Continuity &amp; Color Match</h3>
+          <span class="badge badge-accent" id="multicam-score-badge">Consistency: --%</span>
+        </div>
+        <button class="modal-close" id="modal-multicam-close">&times;</button>
+      </div>
+      <div class="modal-body" style="max-height: 75vh; overflow-y: auto;">
+        <p class="modal-desc" style="color: #94a3b8; font-size: 13px; margin-bottom: 14px;">
+          Evaluates cross-angle coverage continuity (exposure EV stops, Kelvin white balance drift, ΔE color distance) against the Hero Master setup and synthesizes American Society of Cinematographers Color Decision Lists (ASC CDL) and 3D LUTs (.cube) to match coverage seamlessly.
+        </p>
+        <div class="multicam-summary-bar" id="multicam-summary-bar" style="display: flex; gap: 16px; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.2); padding: 12px 16px; border-radius: 6px; margin-bottom: 16px;">
+          <!-- Dynamically populated summary stats -->
+        </div>
+        <div class="multicam-grid" id="multicam-grid" style="display: flex; flex-direction: column; gap: 12px;">
+          <!-- Dynamically populated pairwise cards -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btn-multicam-close">Close</button>
       </div>
     </div>
   </div>

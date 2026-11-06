@@ -37,10 +37,16 @@
 | **M26: Smart Showreel Composer & Target Duration Assembly** | `compose_smart_showreel` optimization engine assembling curated reels to target durations (60s, 90s, 120s) with shot-scale alternating rhythm & CCT continuity | ✅ Done | Objective-driven showreel assembly (Commercial, Dramatic, Kinetic, Balanced) |
 | **M27: Personal Taste Profile & Feedback Reranker Tuning** | `compute_personal_taste_profile` dynamically calibrating personal DP style affinities and reranker head weights from user curation feedback events (`/api/taste_profile`) | ✅ Done | Self-tuning aesthetic layer learning directly from cinematographer curation actions |
 | **M28: Interactive Smart Showreel Composer Modal & Pacing Grid** | Desktop UI Smart Reel modal (`#composer-modal`), target duration optimizer (30s/60s/90s/120s), objective filtering, and alternating cut list readout (`/api/compose_showreel`) | ✅ Done | Instant visual showreel sequence generation directly in desktop shell |
+| **M29: Multi-Camera Setup & Cross-Angle Continuity Matching Engine** | `compute_cross_angle_setup_matching` cross-angle EV stops, Kelvin drift, and ΔE evaluation against Hero Master, synthesizing mathematical ASC CDL XML and 3D LUT (.cube) files with interactive UI modal (`#multicam-modal`) | ✅ Done | Zero-guesswork multi-cam grading match and automated CDL/3D LUT export for NLEs |
 
 ---
 
-## Completed in M24–M28 + Scopes Overhaul & FFmpeg Hardening
+## Completed in M24–M29 + Scopes Overhaul & FFmpeg Hardening
+- **M29: Multi-Camera Setup & Cross-Angle Continuity Matching Engine** (`crates/aesthetic-models/src/multicam.rs`, `crates/aesthetic-core/src/multicam.rs`, `crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/index.html`, `crates/aesthetic-ui/ui/app.js`):
+  - Implemented `compute_cross_angle_setup_matching` evaluating pairwise exposure EV stop discrepancies, Kelvin white balance shift, CIE Delta E color distances, and sharpness ratios against the Hero Master setup.
+  - Implemented mathematical ASC CDL synthesis (`synthesize_asc_cdl`) calculating exact RGB Slope (highlight gain), Offset (shadow lift), Power (midtone contrast), and Saturation.
+  - Implemented industry-standard export deliverables: `generate_asc_cdl_xml` (.cdl) and `generate_3d_lut_cube` (.cube) compatible with DaVinci Resolve, Premiere Pro, and Baselight.
+  - Added dedicated **"Multi-Cam"** modal (`#multicam-modal`, `#btn-open-multicam`) with dynamic setup comparison cards, match status classification badges, and one-click `.cdl` and `.cube` downloads.
 - **Vectorscope Broadcast Zoom & 10:30 Skin Tone I-Line Calibration** (`crates/aesthetic-metrics/src/scopes.rs`, `crates/aesthetic-ui/ui/app.js`):
   - Added 2.5× broadcast chroma gain so natural cinematic tones extend legibly outward across the graticule.
   - Implemented interactive canvas click-to-cycle vectorscope zoom: `1.0×`, `2.0×`, `2.5×`, and `4.0×`.
