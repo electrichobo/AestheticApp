@@ -653,7 +653,6 @@ function drawVectorscope(c, w, h, vs) {
   c.font = 'bold 10px monospace';
   c.fillText(`ZOOM: ${zoom.toFixed(1)}× (Click to cycle)`, 18, 27);
 }
-}
 
 // 4. Smooth Anti-Aliased Spline Histograms
 function drawHistograms(c, w, h, hist) {

@@ -192,27 +192,36 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
 
     match endpoint {
         "/" | "/index.html" => {
+            let content = std::fs::read_to_string("crates/aesthetic-ui/ui/index.html")
+                .or_else(|_| std::fs::read_to_string("ui/index.html"))
+                .unwrap_or_else(|_| HTML_CONTENT.to_string());
             send_response(
                 stream,
                 "200 OK",
                 "text/html; charset=UTF-8",
-                HTML_CONTENT.as_bytes(),
+                content.as_bytes(),
             );
         }
-        "/app.css" => {
+        "/app.css" | "/style.css" => {
+            let content = std::fs::read_to_string("crates/aesthetic-ui/ui/app.css")
+                .or_else(|_| std::fs::read_to_string("ui/app.css"))
+                .unwrap_or_else(|_| CSS_CONTENT.to_string());
             send_response(
                 stream,
                 "200 OK",
                 "text/css; charset=UTF-8",
-                CSS_CONTENT.as_bytes(),
+                content.as_bytes(),
             );
         }
         "/app.js" => {
+            let content = std::fs::read_to_string("crates/aesthetic-ui/ui/app.js")
+                .or_else(|_| std::fs::read_to_string("ui/app.js"))
+                .unwrap_or_else(|_| JS_CONTENT.to_string());
             send_response(
                 stream,
                 "200 OK",
                 "application/javascript; charset=UTF-8",
-                JS_CONTENT.as_bytes(),
+                content.as_bytes(),
             );
         }
         "/logo_wide.png" => {
