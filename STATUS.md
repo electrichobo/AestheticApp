@@ -1,9 +1,9 @@
 # AESTHETIC — Development Status
 
-## Current Milestone: M14–M18 — Sequence Continuity, Style-Cluster Quantiles, Forensics, Cached Rescore & Reranker Heads
+## Current Milestone: M14–M19 — Sequence Continuity, Style Quantiles, Forensics, Cached Rescore, 6 Reranker Heads & Feedback Learning
 - **Phase**: Ground-Up Rebuild in Rust
 - **Target**: Windows x64 (primary), Linux, macOS
-- **Active Focus**: Cross-shot sequence continuity (`ReelSequenceMetrics`), MMR reel diversity ranking, camera log/HDR detection, within-style-cluster Golden Baseline percentiles, non-punitive forensic flags (subtitles, flicker, rolling shutter), instant cached sidecar re-scoring (`rescore_from_sidecars`), and Narrative & Aesthetic reranker heads (`hero_potency_score`, `three_second_impact_score`, `authorship_distinctiveness_score`).
+- **Active Focus**: Cross-shot sequence continuity (`ReelSequenceMetrics`), MMR reel diversity ranking, camera log/HDR detection, within-style-cluster Golden Baseline percentiles, non-punitive forensic flags, instant cached sidecar re-scoring (`rescore_from_sidecars`), all 6 Narrative & Aesthetic reranker heads (`hero_potency_score`, `three_second_impact_score`, `authorship_distinctiveness_score`, `storytelling_score`, `cinematic_technique_score`, `memorability_score`), and user select preference learning (`SelectFeedbackEvent`).
 
 ---
 
@@ -27,10 +27,17 @@
 | **M13: 760-Shot Measured Golden Baseline & Cut-Aware Segmentation** | Full 55-film media server ingest + 92 multi-shot web still galleries (`film-grab.com`, `shot.cafe`, `frameset.app`) = 760 real measured shots across 135 award films, cut-aware 3-frame burst & same-setup deduplication, mean-centered spatial+craft reference matching, lossless PNG sidecars | ✅ Done | 100% pixel-measured Golden Baseline (`n=760`, 0 synthetic seeds) verified against real test footage |
 | **M14–M17: Continuity, Style-Cluster Quantiles, Forensics & Cached Rescore** | `ReelSequenceMetrics` (cross-scene WB/Kelvin/Luma continuity, visual fatigue, MMR reel diversity), Log/HDR transfer detection, within-style-cluster & motion baseline percentiles, subtitle/flicker/rolling-shutter forensics, and instant cached sidecar re-scoring (`aesthetic-cli rescore`) | ✅ Done | 26/26 workspace tests passing; cached 12-take rescore completes in ~240ms |
 | **M18: Narrative & Aesthetic Reranker Heads, Log-Aware Gamut & Sequence Banner** | `hero_potency_score`, `three_second_impact_score`, `authorship_distinctiveness_score` in `PillarScores`, log-aware CIE 1931 gamut integration (`gamut_coverage_srgb`/`p3`) into `color_harmony`, and Sequence & Reel Continuity Intelligence banner in HTML contact sheets | ✅ Done | Full 61-metric contact sheet + sequence banner + JSON sidecar export verified |
+| **M19: Complete 6-Head Rerankers, Motion Coherence, Palette Family & Feedback Learning** | `storytelling_score`, `cinematic_technique_score`, `memorability_score`, `palette_family`, `scene_type`, `shot_intent`, `motion_blur_angle_deg`, `motion_coherence_score`, Desktop UI Contact Sheet integration, and `SelectFeedbackEvent` preference learning (`assets/feedback/events.jsonl`) | ✅ Done | Complete metric taxonomy active across CLI, sidecars, HTML & Desktop UI |
 
 ---
 
-## Completed in M14–M18
+## Completed in M14–M19
+- **M19: Complete 6-Head Narrative Rerankers, Motion Coherence, Palette Family & Select Feedback Learning** (`crates/aesthetic-models/src/window.rs`, `crates/aesthetic-models/src/inferred.rs`, `crates/aesthetic-core/src/pipeline.rs`, `crates/aesthetic-core/src/export.rs`, `crates/aesthetic-ui/src/main.rs`, `crates/aesthetic-ui/ui/app.js`, `crates/aesthetic-cli/src/main.rs`):
+  - Added `storytelling_score`, `cinematic_technique_score`, and `memorability_score` to `PillarScores`, completing all 6 narrative and aesthetic reranker heads.
+  - Added `motion_blur_angle_deg` and `motion_coherence_score` to `MotionDynamics` and integrated directional motion trajectory coherence into `scores.temporal`.
+  - Added `palette_family`, `scene_type`, and `shot_intent` classification to `DiscoveredStyle` and integrated `palette_family` intentionality into `color_harmony`.
+  - Added `SelectFeedbackEvent`, `log_select_feedback_event`, and `compute_feedback_preference_boost` (`assets/feedback/events.jsonl`), exposed via `/api/feedback` and `aesthetic-cli feedback <take_id> <action>`.
+  - Wired the Sequence & Reel Continuity Intelligence banner and all 6 Narrative & Aesthetic Reranker Heads into the live Desktop UI (`aesthetic-ui`) Contact Sheet modal.
 - **M18: Narrative & Aesthetic Reranker Heads, Log-Aware Gamut Pillar & Sequence Continuity Banner** (`crates/aesthetic-models/src/window.rs`, `crates/aesthetic-core/src/pipeline.rs`, `crates/aesthetic-core/src/export.rs`, `crates/aesthetic-ui/src/main.rs`):
   - Added `hero_potency_score`, `three_second_impact_score`, and `authorship_distinctiveness_score` to `PillarScores` and JSON sidecars.
   - Integrated CIE 1931 `gamut_coverage_srgb` and `gamut_coverage_p3` into `color_harmony` with `detect_flat_log_encoding` protection so ungraded camera log plates are never penalized prior to LUT transformation.

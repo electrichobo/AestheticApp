@@ -116,6 +116,9 @@ pub fn evaluate_candidate_frame(
         cinematographer_match: None,
         match_confidence: 0.0,
         style_family: String::new(),
+        palette_family: String::new(),
+        scene_type: String::new(),
+        shot_intent: String::new(),
     };
 
     // 4. Calculate tangible 0-100 scores using baseline calibration
@@ -183,6 +186,9 @@ pub fn evaluate_candidate_frame(
             hero_potency_score: technical_score,
             three_second_impact_score: technical_score,
             authorship_distinctiveness_score: 50.0,
+            storytelling_score: technical_score,
+            cinematic_technique_score: technical_score,
+            memorability_score: technical_score,
         },
         style: discovered_style,
         measured: physics,
@@ -230,9 +236,11 @@ pub fn enrich_take(
             Some(&depth),
         );
         let m = &craft.motion;
-        // Temporal stability: penalise micro-jitter and judder risk (0-100 scales).
-        take.scores.temporal =
+        // Temporal stability: penalise micro-jitter and judder risk + reward directional motion blur coherence (M19).
+        let raw_stability =
             (100.0 - m.micro_jitter_score * 2.0 - m.judder_risk_score * 0.5).clamp(0.0, 100.0);
+        take.scores.temporal =
+            (raw_stability * 0.80 + m.motion_coherence_score * 0.20).clamp(0.0, 100.0);
         take.scores.temporal_measured = true;
         take.style.motion_type = if m.optical_flow_mean < 2.0 {
             "Static".to_string()
@@ -253,7 +261,26 @@ pub fn enrich_take(
         + craft.staging.silhouette_clarity * 0.5)
         .clamp(0.0, 100.0);
 
-    // Log-aware CIE 1931 gamut coverage integration into color harmony score
+    // Automatic Palette Family classification & intentionality scoring (M19)
+    let cct = take.measured.color.estimated_kelvin;
+    let sat = take.measured.color.saturation_mean;
+    let split_deg = take.measured.color.split_toning_separation_deg;
+    let (palette_family, palette_intent_score) = if sat < 10.0 {
+        ("Desaturated Silver / Monochrome", 86.0f32)
+    } else if split_deg >= 125.0 && sat >= 16.0 {
+        ("Complementary Teal-Orange", 92.0f32)
+    } else if cct < 4100.0 {
+        ("Warm Tungsten / Amber", 88.0f32)
+    } else if cct > 5900.0 {
+        ("Cool Cyan / Moonlight", 87.0f32)
+    } else if take.measured.exposure.histogram_mean > 0.55 {
+        ("High-Key Naturalist", 82.0f32)
+    } else {
+        ("Natural Daylight", 80.0f32)
+    };
+    take.style.palette_family = palette_family.to_string();
+
+    // Log-aware CIE 1931 gamut coverage + palette family intentionality integration into color harmony score
     let is_flat_log = detect_flat_log_encoding(&take.measured);
     let gamut_score = if is_flat_log {
         // On ungraded log plates, do not penalize compressed Rec.709 gamut volume before LUT transform
@@ -263,8 +290,10 @@ pub fn enrich_take(
             + take.measured.color.gamut_coverage_p3 * 0.6)
             .clamp(35.0, 100.0)
     };
-    let color_harmony =
-        (take.measured.color.harmonic_palette_score * 0.80 + gamut_score * 0.20).clamp(0.0, 100.0);
+    let color_harmony = (take.measured.color.harmonic_palette_score * 0.65
+        + gamut_score * 0.20
+        + palette_intent_score * 0.15)
+        .clamp(0.0, 100.0);
 
     let staging_poise = craft.staging.gaze_poise_score;
     let lighting_quality = ((craft.lighting.catchlight_intensity * 0.20)
@@ -334,14 +363,46 @@ pub fn enrich_take(
         + split_norm * 0.15)
         .clamp(0.0, 100.0);
 
+    // 4. Visual Storytelling Effectiveness (M19): multi-plane staging, lead room, and lighting motivation
+    let plane_bonus = ((craft.staging.depth_plane_count as f32).min(4.0) / 4.0) * 100.0;
+    let storytelling = (craft.staging.looking_room_score * 0.30
+        + craft.staging.depth_separation_score * 0.25
+        + plane_bonus * 0.15
+        + lighting_quality * 0.30)
+        .clamp(0.0, 100.0);
+
+    // 5. Cinematic Technique Quality (M19): camera control, motion coherence, bokeh isolation, and roll-off
+    let motion_tech = if take.scores.temporal_measured {
+        (take.scores.temporal * 0.60 + craft.motion.motion_coherence_score * 0.40).clamp(0.0, 100.0)
+    } else {
+        take.scores.technical
+    };
+    let cinematic_technique = (craft.focus.subject_focus_accuracy * 0.30
+        + take.measured.exposure.highlight_rolloff * 0.25
+        + motion_tech * 0.25
+        + craft.lighting.rim_light_separation * 0.20)
+        .clamp(0.0, 100.0);
+
+    // 6. Visual Memorability (M19): focal saliency concentration, chromatic/tonal contrast, and signature poise
+    let memorability = (hero_potency * 0.35
+        + three_sec_impact * 0.35
+        + authorship * 0.30)
+        .clamp(0.0, 100.0);
+
     if is_non_photographic {
         take.scores.hero_potency_score = (hero_potency * 0.20).min(15.0);
         take.scores.three_second_impact_score = (three_sec_impact * 0.20).min(15.0);
         take.scores.authorship_distinctiveness_score = (authorship * 0.20).min(15.0);
+        take.scores.storytelling_score = (storytelling * 0.20).min(15.0);
+        take.scores.cinematic_technique_score = (cinematic_technique * 0.20).min(15.0);
+        take.scores.memorability_score = (memorability * 0.20).min(15.0);
     } else {
         take.scores.hero_potency_score = hero_potency;
         take.scores.three_second_impact_score = three_sec_impact;
         take.scores.authorship_distinctiveness_score = authorship;
+        take.scores.storytelling_score = storytelling;
+        take.scores.cinematic_technique_score = cinematic_technique;
+        take.scores.memorability_score = memorability;
     }
 
     // Ancillary tag only: nearest measured award reference or closest master DP signature.
@@ -400,6 +461,48 @@ pub fn enrich_take(
             "Wide".to_string()
         } else {
             "Medium".to_string()
+        };
+    }
+
+    // Multi-signal Scene Type & Shot Intent classification (M19)
+    if take.style.scene_type.is_empty() {
+        let mut ext_votes = 0i32;
+        let mut int_votes = 0i32;
+        if cct > 5600.0 {
+            ext_votes += 2;
+        } else if cct < 4100.0 {
+            int_votes += 2;
+        }
+        if take.measured.exposure.dynamic_range_stops > 10.6 {
+            ext_votes += 2;
+        } else if take.measured.exposure.dynamic_range_stops < 8.5 {
+            int_votes += 1;
+        }
+        if sat > 22.0 && take.measured.exposure.histogram_mean > 0.42 {
+            ext_votes += 1;
+        }
+        take.style.scene_type = if take.measured.exposure.histogram_mean < 0.22 {
+            "Night / Low-Key".to_string()
+        } else if ext_votes > int_votes {
+            "Exterior Daylight".to_string()
+        } else if int_votes > ext_votes {
+            "Interior Warm / Practical".to_string()
+        } else {
+            "Controlled Studio / Stage".to_string()
+        };
+    }
+
+    if take.style.shot_intent.is_empty() {
+        take.style.shot_intent = if take.style.shot_scale.contains("Close-Up") {
+            "Intimate Character".to_string()
+        } else if take.style.shot_scale == "Wide" {
+            "Establishing / Architectural".to_string()
+        } else if craft.motion.optical_flow_mean > 14.0 {
+            "Kinetic Action".to_string()
+        } else if craft.staging.face_count > 0 {
+            "Dialogue / Staging".to_string()
+        } else {
+            "Atmospheric / Transitional".to_string()
         };
     }
 
@@ -910,8 +1013,9 @@ pub fn apply_reel_diversity_ranking(takes: &mut Vec<ShotTake>) {
                 max_redundancy = max_redundancy.max(sim.clamp(0.0, 1.0));
             }
 
-            // Up to 7.5-point MMR penalty for redundant recurring setups
-            let mmr_score = cand.scores.overall - 7.5 * max_redundancy;
+            // Up to 7.5-point MMR penalty for redundant recurring setups + learned feedback preference boost (M19)
+            let pref_boost = compute_feedback_preference_boost(cand);
+            let mmr_score = cand.scores.overall + pref_boost - 7.5 * max_redundancy;
             if mmr_score > best_mmr {
                 best_mmr = mmr_score;
                 best_idx = idx;
@@ -1122,4 +1226,66 @@ pub fn detect_burst_light_flicker(f0: &RgbImage, f1: &RgbImage, f2: &RgbImage) -
 
     // Opposite-sign luminance swing of > 3.5 luma units in both steps
     delta01.abs() > 3.5 && delta12.abs() > 3.5 && (delta01 * delta12) < -12.0
+}
+
+/// Appends a user select curation feedback event (`promote_hero`, `pin_select`, `reject_take`, `trim_handles`)
+/// to `assets/feedback/events.jsonl` so subsequent reranking adapts to the creator's preferences (M19).
+pub fn log_select_feedback_event(
+    event: &aesthetic_models::window::SelectFeedbackEvent,
+) -> Result<usize, String> {
+    use std::io::Write;
+    let feedback_dir = Path::new("assets/feedback");
+    std::fs::create_dir_all(feedback_dir)
+        .map_err(|e| format!("Failed to create feedback directory: {}", e))?;
+    let file_path = feedback_dir.join("events.jsonl");
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file_path)
+        .map_err(|e| format!("Failed to open feedback log: {}", e))?;
+    let line = serde_json::to_string(event)
+        .map_err(|e| format!("Failed to serialize feedback event: {}", e))?;
+    writeln!(file, "{}", line).map_err(|e| format!("Failed to write feedback event: {}", e))?;
+
+    let content = std::fs::read_to_string(&file_path).unwrap_or_default();
+    Ok(content.lines().filter(|l| !l.trim().is_empty()).count())
+}
+
+/// Reads accumulated `SelectFeedbackEvent` records from `assets/feedback/events.jsonl` and computes
+/// a bounded preference boost (`[-3.5, +3.5]` points) matching preferred style families and shot scales.
+pub fn compute_feedback_preference_boost(take: &ShotTake) -> f32 {
+    let file_path = Path::new("assets/feedback/events.jsonl");
+    let Ok(content) = std::fs::read_to_string(file_path) else {
+        return 0.0;
+    };
+    let mut boost = 0.0f32;
+    let mut count = 0usize;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Ok(ev) =
+            serde_json::from_str::<aesthetic_models::window::SelectFeedbackEvent>(trimmed)
+        {
+            count += 1;
+            let sign = match ev.action.as_str() {
+                "promote_hero" => 1.2,
+                "pin_select" => 0.8,
+                "reject_take" => -1.2,
+                _ => 0.3,
+            };
+            if !ev.style_family.is_empty() && ev.style_family == take.style.style_family {
+                boost += sign * 0.8;
+            }
+            if !ev.shot_scale.is_empty() && ev.shot_scale == take.style.shot_scale {
+                boost += sign * 0.5;
+            }
+        }
+    }
+    if count == 0 {
+        0.0
+    } else {
+        (boost / (count as f32).sqrt()).clamp(-3.5, 3.5)
+    }
 }

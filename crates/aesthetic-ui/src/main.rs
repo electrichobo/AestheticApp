@@ -1025,6 +1025,61 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
             let payload = serde_json::to_string(&store.manifest).unwrap_or_default();
             send_response(stream, "200 OK", "application/json", payload.as_bytes());
         }
+        "/api/feedback" => {
+            let take_id = query_map
+                .get("take_id")
+                .cloned()
+                .unwrap_or_else(|| "take_001".to_string());
+            let action = query_map
+                .get("action")
+                .cloned()
+                .unwrap_or_else(|| "pin_select".to_string());
+            let style_family = query_map
+                .get("style_family")
+                .cloned()
+                .unwrap_or_else(|| "Prestige Naturalism".to_string());
+            let shot_scale = query_map
+                .get("shot_scale")
+                .cloned()
+                .unwrap_or_else(|| "Medium".to_string());
+            let overall_score = query_map
+                .get("overall")
+                .and_then(|s| s.parse::<f32>().ok())
+                .unwrap_or(80.0);
+
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let ev = aesthetic_models::window::SelectFeedbackEvent {
+                timestamp_unix: ts,
+                take_id,
+                action,
+                style_family,
+                shot_scale,
+                overall_score,
+                hero_potency_score: overall_score,
+                storytelling_score: overall_score,
+                memorability_score: overall_score,
+            };
+            let json = match aesthetic_core::log_select_feedback_event(&ev) {
+                Ok(total) => serde_json::json!({
+                    "success": true,
+                    "total_events": total,
+                    "event": ev
+                }),
+                Err(err) => serde_json::json!({
+                    "success": false,
+                    "error": err
+                }),
+            };
+            send_response(
+                stream,
+                "200 OK",
+                "application/json",
+                json.to_string().as_bytes(),
+            );
+        }
         _ => {
             send_response(stream, "404 NOT FOUND", "text/plain", b"Not Found");
         }

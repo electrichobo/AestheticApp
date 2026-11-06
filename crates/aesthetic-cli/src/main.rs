@@ -66,6 +66,14 @@ fn main() {
             let sidecars_dir = PathBuf::from(&args[2]);
             run_sidecars_rescore(&sidecars_dir, &args[3..]);
         }
+        "feedback" => {
+            if args.len() < 4 {
+                println!("Error: Missing take_id or action.");
+                println!("Usage: aesthetic-cli feedback <take_id> <promote_hero|pin_select|reject_take> [--style <family>] [--scale <scale>]");
+                return;
+            }
+            run_feedback_log(&args[2], &args[3], &args[4..]);
+        }
         _ => {
             println!("Unknown command: {}", args[1]);
             print_usage();
@@ -96,10 +104,54 @@ fn print_usage() {
     println!("      --force                Re-ingest films even if already present in baseline");
     println!("      --dry-run              Catalog matched award titles without extracting shots");
     println!("  rescore <sidecars_dir> Instantaneously re-score cached JSON+PNG sidecars against current baseline");
+    println!("  feedback <id> <action> Log user select preference event (promote_hero | pin_select | reject_take)");
     println!("  awards-list            Display all 80+ Oscar, ASC, and BSC titles in the registry");
     println!("  baseline-info          Display current Golden Baseline statistics and films");
     println!("  benchmark              Run multi-threaded SIMD physics & vector search benchmarks");
     println!("  demo                   Run synthetic benchmark on high-resolution frame raster");
+}
+
+fn run_feedback_log(take_id: &str, action: &str, flags: &[String]) {
+    let mut style_family = "Prestige Naturalism".to_string();
+    let mut shot_scale = "Medium Close-Up".to_string();
+    let mut i = 0;
+    while i < flags.len() {
+        match flags[i].as_str() {
+            "--style" if i + 1 < flags.len() => {
+                style_family = flags[i + 1].clone();
+                i += 1;
+            }
+            "--scale" if i + 1 < flags.len() => {
+                shot_scale = flags[i + 1].clone();
+                i += 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let ev = aesthetic_models::window::SelectFeedbackEvent {
+        timestamp_unix: ts,
+        take_id: take_id.to_string(),
+        action: action.to_string(),
+        style_family: style_family.clone(),
+        shot_scale: shot_scale.clone(),
+        overall_score: 85.0,
+        hero_potency_score: 85.0,
+        storytelling_score: 85.0,
+        memorability_score: 85.0,
+    };
+    match aesthetic_core::log_select_feedback_event(&ev) {
+        Ok(total) => println!(
+            "[✓] Logged feedback event '{}' for {} (Style: {}, Scale: {}). Total stored events: {}",
+            action, take_id, style_family, shot_scale, total
+        ),
+        Err(e) => eprintln!("Failed to log feedback event: {}", e),
+    }
 }
 
 fn run_sidecars_rescore(sidecars_dir: &Path, flags: &[String]) {

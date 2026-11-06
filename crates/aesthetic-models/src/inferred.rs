@@ -45,6 +45,12 @@ pub struct MotionDynamics {
     pub parallax_strength: f32,
     /// Risk of strobe or judder from excessive pan/tilt angular velocity at frame rate
     pub judder_risk_score: f32,
+    /// Dominant motion/blur trajectory angle in degrees (-180 to 180)
+    #[serde(default)]
+    pub motion_blur_angle_deg: f32,
+    /// Directional coherence between optical flow vector and spatial blur trajectory (0.0 - 100.0)
+    #[serde(default)]
+    pub motion_coherence_score: f32,
 }
 
 /// Staging, gaze vectors, and spatial composition.

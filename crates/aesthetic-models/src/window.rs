@@ -30,6 +30,15 @@ pub struct PillarScores {
     /// Authorship & distinctiveness (0.0 - 100.0): intentional visual signature strength.
     #[serde(default)]
     pub authorship_distinctiveness_score: f32,
+    /// Visual storytelling effectiveness (0.0 - 100.0): multi-plane staging, lead room, and lighting motivation.
+    #[serde(default)]
+    pub storytelling_score: f32,
+    /// Cinematic technique quality (0.0 - 100.0): camera control, motion coherence, bokeh falloff, and roll-off.
+    #[serde(default)]
+    pub cinematic_technique_score: f32,
+    /// Visual memorability (0.0 - 100.0): focal saliency concentration, chromatic/tonal contrast, and baseline alignment.
+    #[serde(default)]
+    pub memorability_score: f32,
 }
 
 /// Automatically discovered style and visual classification.
@@ -47,6 +56,30 @@ pub struct DiscoveredStyle {
     pub match_confidence: f32,
     /// Style Family Cluster: "Chiaroscuro Noir", "Prestige Naturalism", "Expressive Color", "High-Key Pastel", "Documentary Vérité", "Atmospheric Silver"
     pub style_family: String,
+    /// Chromatic palette family: "Warm Tungsten / Amber", "Cool Cyan / Moonlight", "Complementary Teal-Orange", "Desaturated Silver", "Natural Daylight"
+    #[serde(default)]
+    pub palette_family: String,
+    /// Multi-signal scene environment classification: "Exterior Daylight", "Interior Warm / Practical", "Night / Low-Key", "Controlled Studio"
+    #[serde(default)]
+    pub scene_type: String,
+    /// Narrative shot intent: "Intimate Character", "Establishing / Architectural", "Kinetic Action", "Dialogue / Two-Shot", "Atmospheric / Transitional"
+    #[serde(default)]
+    pub shot_intent: String,
+}
+
+/// User select feedback event logged to `assets/feedback/events.jsonl` to personalize reranker heads.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SelectFeedbackEvent {
+    pub timestamp_unix: u64,
+    pub take_id: String,
+    /// Action: "promote_hero", "pin_select", "reject_take", "trim_handles"
+    pub action: String,
+    pub style_family: String,
+    pub shot_scale: String,
+    pub overall_score: f32,
+    pub hero_potency_score: f32,
+    pub storytelling_score: f32,
+    pub memorability_score: f32,
 }
 
 /// The 4-Output structured evaluation of a candidate shot / take.

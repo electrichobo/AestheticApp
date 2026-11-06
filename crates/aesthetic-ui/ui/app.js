@@ -1041,7 +1041,23 @@ async function loadSelects() {
     if (countBadge) countBadge.textContent = `${currentTakes.length} Takes`;
     if (modalSheetCount) modalSheetCount.textContent = `${currentTakes.length} Hero Selects`;
     takesList.innerHTML = '';
-    if (modalSheetGrid) modalSheetGrid.innerHTML = '';
+    if (modalSheetGrid) {
+      modalSheetGrid.innerHTML = '';
+      if (data.sequence_metrics) {
+        const sm = data.sequence_metrics;
+        const seqBanner = document.createElement('div');
+        seqBanner.style.cssText = 'grid-column: 1 / -1; background: #14161a; border: 1px solid #282c35; border-radius: 8px; padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 18px; align-items: center; justify-content: space-between; font-size: 12px; margin-bottom: 6px;';
+        seqBanner.innerHTML = `
+          <div><span style="color:#8a919e;text-transform:uppercase;font-size:10px;font-weight:700;">Sequence &amp; Reel Continuity</span><div style="color:#fff;font-weight:600;">${sm.transfer_curve_label || 'Display-Referred (Rec.709)'}</div></div>
+          <div><span style="color:#8a919e;font-size:10px;">Grading Uniformity</span><div style="color:#4ade80;font-weight:700;font-family:var(--font-mono);">${Number(sm.grading_uniformity_score ?? 85).toFixed(1)} / 100</div></div>
+          <div><span style="color:#8a919e;font-size:10px;">Coverage Consistency</span><div style="color:#38bdf8;font-weight:700;font-family:var(--font-mono);">${Number(sm.coverage_consistency_score ?? 85).toFixed(1)} / 100</div></div>
+          <div><span style="color:#8a919e;font-size:10px;">Reel Diversity</span><div style="color:#e5a93c;font-weight:700;font-family:var(--font-mono);">${Number(sm.reel_diversity_score ?? 80).toFixed(1)} / 100</div></div>
+          <div><span style="color:#8a919e;font-size:10px;">Visual Fatigue Index</span><div style="color:#e8eaed;font-weight:700;font-family:var(--font-mono);">${Number(sm.visual_fatigue_index ?? 18).toFixed(1)} / 100</div></div>
+          <div><span style="color:#8a919e;font-size:10px;">Cross-Scene Spread</span><div style="color:#8a919e;font-family:var(--font-mono);font-size:11px;">WB &sigma;=${Number(sm.wb_cross_scene_std ?? 0).toFixed(2)} | CCT &sigma;=${Number(sm.color_temp_cross_scene_std ?? 0).toFixed(0)}K</div></div>
+        `;
+        modalSheetGrid.appendChild(seqBanner);
+      }
+    }
 
     if (currentTakes.length === 0) {
       takesList.innerHTML = '<div class="empty-state">No takes found. Open a media file to evaluate.</div>';
@@ -1222,6 +1238,9 @@ async function loadSelects() {
                 <div class="sheet-tree-row"><span>3D Depth Plane Separation</span><span>${fmt(stg.depth_separation_score, 1)} / 100 (${stg.depth_plane_count ?? 3} planes)</span></div>
                 <div class="sheet-tree-row"><span>Subject Silhouette Readability</span><span>${fmt(stg.silhouette_clarity, 1)} / 100</span></div>
                 <div class="sheet-tree-row"><span>Framing Shot Scale</span><span>${t.style?.shot_scale || 'Medium'}</span></div>
+                <div class="sheet-tree-row"><span>Chromatic Palette Family</span><span>${t.style?.palette_family || 'Natural Daylight'}</span></div>
+                <div class="sheet-tree-row"><span>Scene Environment Type</span><span>${t.style?.scene_type || 'Controlled Studio / Stage'}</span></div>
+                <div class="sheet-tree-row"><span>Narrative Shot Intent</span><span>${t.style?.shot_intent || 'Dialogue / Staging'}</span></div>
                 <div class="sheet-tree-row"><span>Style Family Manifold Cluster</span><span>${t.style?.style_family || 'Prestige Naturalism'}</span></div>
 
                 <div class="sheet-tree-pillar" style="margin-top: 6px;">Pillar 5: Temporal &amp; Editorial Dynamics (Temporal Score: ${fmt(t.scores?.temporal, 1, 90)} / 100)</div>
@@ -1236,6 +1255,16 @@ async function loadSelects() {
                 <div class="sheet-tree-row"><span>High-Frequency Micro-Jitter</span><span>${fmt(mot.micro_jitter_score, 2)} / 100</span></div>
                 <div class="sheet-tree-row"><span>Multi-Plane Parallax Strength</span><span>${fmt(mot.parallax_strength, 1)} / 100</span></div>
                 <div class="sheet-tree-row"><span>24fps Pan Judder Risk Score</span><span>${fmt(mot.judder_risk_score, 1)} / 100</span></div>
+                <div class="sheet-tree-row"><span>Motion Blur Trajectory Angle</span><span>${fmt(mot.motion_blur_angle_deg, 1)}&deg;</span></div>
+                <div class="sheet-tree-row"><span>Motion Trajectory Coherence</span><span>${fmt(mot.motion_coherence_score, 1, 85)} / 100</span></div>
+
+                <div class="sheet-tree-pillar" style="margin-top: 6px;">Narrative &amp; Aesthetic Reranker Heads</div>
+                <div class="sheet-tree-row"><span>Hero-Frame Potency (Thumbnail Suitability)</span><span>${fmt(t.scores?.hero_potency_score, 1, score)} / 100</span></div>
+                <div class="sheet-tree-row"><span>Three-Second Impact (Opening Authority)</span><span>${fmt(t.scores?.three_second_impact_score, 1, score)} / 100</span></div>
+                <div class="sheet-tree-row"><span>Authorship &amp; Distinctiveness</span><span>${fmt(t.scores?.authorship_distinctiveness_score, 1, score)} / 100</span></div>
+                <div class="sheet-tree-row"><span>Visual Storytelling Effectiveness</span><span>${fmt(t.scores?.storytelling_score, 1, score)} / 100</span></div>
+                <div class="sheet-tree-row"><span>Cinematic Technique Quality</span><span>${fmt(t.scores?.cinematic_technique_score, 1, score)} / 100</span></div>
+                <div class="sheet-tree-row"><span>Visual Memorability</span><span>${fmt(t.scores?.memorability_score, 1, score)} / 100</span></div>
 
                 ${gbHtml}
 

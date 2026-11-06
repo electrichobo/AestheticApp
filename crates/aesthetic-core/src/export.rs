@@ -650,6 +650,9 @@ pub fn generate_contact_sheet_html_with_frames(
         let _ = writeln!(html, "              <span class=\"branch-title\">Pillar 4: Model-Inferred Craft &amp; Staging ({:.1} / 100)</span>", take.scores.creative);
         let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Lighting Key Classification</span><span>{}</span></div>", take.style.lighting_key);
         let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Framing Shot Scale</span><span>{}</span></div>", take.style.shot_scale);
+        let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Chromatic Palette Family</span><span>{}</span></div>", take.style.palette_family);
+        let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Scene Environment Type</span><span>{}</span></div>", take.style.scene_type);
+        let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Narrative Shot Intent</span><span>{}</span></div>", take.style.shot_intent);
         let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Style Family Cluster</span><span>{}</span></div>", take.style.style_family);
         let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Cinema Corpus Match Affinity</span><span>{:.1}%</span></div>", take.style.match_confidence);
         if let Some(ref c) = take.craft {
@@ -692,15 +695,20 @@ pub fn generate_contact_sheet_html_with_frames(
             let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Micro-Jitter Shake Score</span><span>{:.1} / 100</span></div>", c.motion.micro_jitter_score);
             let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Depth Parallax Strength</span><span>{:.1} / 100</span></div>", c.motion.parallax_strength);
             let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Strobe / Judder Risk</span><span>{:.1} / 100</span></div>", c.motion.judder_risk_score);
+            let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Motion Blur Trajectory Angle</span><span>{:.1}&deg;</span></div>", c.motion.motion_blur_angle_deg);
+            let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Motion Trajectory Coherence</span><span>{:.1} / 100</span></div>", c.motion.motion_coherence_score);
         }
         let _ = writeln!(html, "            </div>");
 
-        // 6. Narrative & Aesthetic Reranker Heads (M18)
+        // 6. Narrative & Aesthetic Reranker Heads (M18 & M19)
         let _ = writeln!(html, "            <div class=\"metric-branch\">");
         let _ = writeln!(html, "              <span class=\"branch-title\">Narrative &amp; Aesthetic Reranker Heads</span>");
         let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Hero-Frame Potency (Thumbnail Suitability)</span><span>{:.1} / 100</span></div>", take.scores.hero_potency_score);
         let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Three-Second Impact (Opening Authority)</span><span>{:.1} / 100</span></div>", take.scores.three_second_impact_score);
         let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Authorship &amp; Distinctiveness</span><span>{:.1} / 100</span></div>", take.scores.authorship_distinctiveness_score);
+        let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Visual Storytelling Effectiveness</span><span>{:.1} / 100</span></div>", take.scores.storytelling_score);
+        let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Cinematic Technique Quality</span><span>{:.1} / 100</span></div>", take.scores.cinematic_technique_score);
+        let _ = writeln!(html, "              <div class=\"leaf-row\"><span>Visual Memorability</span><span>{:.1} / 100</span></div>", take.scores.memorability_score);
         let _ = writeln!(html, "            </div>");
 
         // 7. Golden Baseline Comparison
@@ -797,12 +805,18 @@ pub fn export_shot_sidecars_with_frames(
                 "hero_potency_score": take.scores.hero_potency_score,
                 "three_second_impact_score": take.scores.three_second_impact_score,
                 "authorship_distinctiveness_score": take.scores.authorship_distinctiveness_score,
+                "storytelling_score": take.scores.storytelling_score,
+                "cinematic_technique_score": take.scores.cinematic_technique_score,
+                "memorability_score": take.scores.memorability_score,
             },
             "style": {
                 "lighting_key": take.style.lighting_key,
                 "motion_type": take.style.motion_type,
                 "shot_scale": take.style.shot_scale,
                 "style_family": take.style.style_family,
+                "palette_family": take.style.palette_family,
+                "scene_type": take.style.scene_type,
+                "shot_intent": take.style.shot_intent,
                 "cinematographer_match": take.style.cinematographer_match,
                 "match_confidence": take.style.match_confidence,
             },
@@ -903,6 +917,18 @@ pub fn rescore_from_sidecars(
                 .as_str()
                 .unwrap_or("Prestige Naturalism")
                 .to_string(),
+            palette_family: val["style"]["palette_family"]
+                .as_str()
+                .unwrap_or("Natural Daylight")
+                .to_string(),
+            scene_type: val["style"]["scene_type"]
+                .as_str()
+                .unwrap_or("Controlled Studio / Stage")
+                .to_string(),
+            shot_intent: val["style"]["shot_intent"]
+                .as_str()
+                .unwrap_or("Dialogue / Staging")
+                .to_string(),
         };
 
         // Load companion PNG still if present
@@ -985,6 +1011,19 @@ pub fn rescore_from_sidecars(
             .map(|v| v as f32)
             .unwrap_or(style.match_confidence);
 
+        let storytelling_score = val["scores"]["storytelling_score"]
+            .as_f64()
+            .map(|v| v as f32)
+            .unwrap_or(creative);
+        let cinematic_technique_score = val["scores"]["cinematic_technique_score"]
+            .as_f64()
+            .map(|v| v as f32)
+            .unwrap_or(technical);
+        let memorability_score = val["scores"]["memorability_score"]
+            .as_f64()
+            .map(|v| v as f32)
+            .unwrap_or(overall);
+
         takes.push(ShotTake {
             take_id,
             scene_index,
@@ -1002,6 +1041,9 @@ pub fn rescore_from_sidecars(
                 hero_potency_score,
                 three_second_impact_score,
                 authorship_distinctiveness_score,
+                storytelling_score,
+                cinematic_technique_score,
+                memorability_score,
             },
             style,
             measured,
@@ -1104,6 +1146,7 @@ mod tests {
                 cinematographer_match: Some("Roger Deakins (Skyfall)".to_string()),
                 match_confidence: 94.2,
                 style_family: "Prestige Naturalism".to_string(),
+                ..Default::default()
             },
             measured: Default::default(),
             concerns: vec![],

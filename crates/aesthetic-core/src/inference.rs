@@ -312,6 +312,8 @@ impl ModelInferenceEngine {
                 micro_jitter_score: 1.2,
                 parallax_strength: depth_sep * 0.9,
                 judder_risk_score: 0.0,
+                motion_blur_angle_deg: 0.0,
+                motion_coherence_score: 90.0,
             },
             staging,
         }
@@ -653,6 +655,15 @@ pub fn compute_motion_dynamics(
         .map(|d| d.depth_separation_score() * 0.8)
         .unwrap_or(30.0);
 
+    let motion_blur_angle_deg = if dominant_mag > 0.05 {
+        avg_dy.atan2(avg_dx).to_degrees()
+    } else {
+        0.0
+    };
+    let motion_coherence_score = (camera_motion_ratio * 70.0
+        + (100.0 - micro_jitter_score) * 0.30)
+        .clamp(0.0, 100.0);
+
     MotionDynamics {
         optical_flow_mean: (flow_mean / dt).clamp(0.0, 1000.0),
         optical_flow_std: (flow_std / dt).clamp(0.0, 500.0),
@@ -660,6 +671,8 @@ pub fn compute_motion_dynamics(
         micro_jitter_score,
         parallax_strength: parallax,
         judder_risk_score,
+        motion_blur_angle_deg,
+        motion_coherence_score,
     }
 }
 

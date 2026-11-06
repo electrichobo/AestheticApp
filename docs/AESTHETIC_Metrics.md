@@ -115,7 +115,7 @@ All weights are configurable in `config.yaml`.
 | Stabilisation / Micro-Jitter | ✅ | ✅ | Residual micro-jitter after global motion removal |
 | Judder risk score | ✅ | ✅ | Risk of strobe or judder from excessive pan/tilt angular velocity at frame rate |
 | Motion blur amount | ✅ | ✅ | High-frequency energy ratio — rewards 10–40 range (180° shutter) |
-| Motion blur direction | ✅ | 🟨 | Dominant gradient orientation — available, not yet in pillar score |
+| Motion blur direction | ✅ | ✅ | `motion_blur_angle_deg` & `motion_coherence_score` integrated into `scores.temporal` |
 | Movement type | ✅ | ✅ | Priority: metrics-engine result → smoothness/stabilisation → flow consistency ratio |
 | Shot duration | ✅ | ✅ | Consolidated usable window duration (`1.5s–4.0s`) via cut-aware setup deduplication |
 | Focus during movement | ✅ | ✅ | Subject-region sharpness relative to motion magnitude |
@@ -139,7 +139,7 @@ All weights are configurable in `config.yaml`.
 | Saturation mean (Lab chroma) | ✅ | ✅ | Mean √(a²+b²) — rewards 20–60 range |
 | Saturation uniformity | ✅ | ✅ | 100 minus std of chroma |
 | Palette entropy | ✅ | ✅ | Hue histogram entropy — rewards intentional colour complexity |
-| Palette family | ✅ | 🟨 | warm / cool / desaturated / dark / bright / neutral — used for display, not yet in pillar score |
+| Palette family | ✅ | ✅ | `palette_family` (Warm Tungsten, Cool Cyan, Complementary Teal-Orange, Desaturated Silver, High-Key Naturalist) integrated into `color_harmony` |
 | Colour accuracy ΔE2000 vs D65 | ✅ | ✅ | Full Sharma 2005 ΔE2000 formula. Compares mean scene Lab against D65 neutral at same luminance. <2 imperceptible, 2–5 subtle cast, >10 strong |
 | Colour accuracy ΔE2000 vs Baseline | ✅ | ✅ | Reconstructed from corpus colour_temp_kelvin and wb_deviation statistics |
 | Skin tone ΔE2000 | ✅ | ✅ | When YOLO detects a person: samples Lab values from upper 25% of bounding box (head region), finds closest Macbeth-derived reference (fair → deep), computes ΔE2000. Reports cross-shoot WB inconsistency |
@@ -184,9 +184,9 @@ All weights are configurable in `config.yaml`.
 |---|---|---|---|
 | Saliency consistency | ✅ | ✅ | OpenCV spectral residual concentration — measures strength of focal point |
 | Compelling MOS | ✅ | ✅ | Rule-based composite: sharpness × exposure balance × contrast |
-| Visual storytelling effectiveness | 🔮 | 🔮 | Needs learned classifier — field defined in model |
-| Cinematic technique quality | 🔮 | 🔮 | Needs learned classifier — field defined in model |
-| Memorability | 🔮 | 🔮 | CLIP + aesthetic regressor — field defined in model |
+| Visual storytelling effectiveness | ✅ | ✅ | `storytelling_score` combining looking room, depth separation, depth plane count & lighting motivation |
+| Cinematic technique quality | ✅ | ✅ | `cinematic_technique_score` combining subject focus accuracy, highlight roll-off, motion coherence & rim light |
+| Memorability | ✅ | ✅ | `memorability_score` combining hero potency, three-second impact & authorship distinctiveness |
 | Hero-frame potency | ✅ | ✅ | `hero_potency_score` combining subject focus accuracy, catchlight, gaze poise, DR & highlight roll-off |
 | Three-second impact | ✅ | ✅ | `three_second_impact_score` combining depth separation, harmonic palette, Chiaroscuro contrast & settle stability |
 | Authorship / distinctiveness | ✅ | ✅ | `authorship_distinctiveness_score` combining style-cluster alignment, palette entropy, split-toning & volumetric haze |
