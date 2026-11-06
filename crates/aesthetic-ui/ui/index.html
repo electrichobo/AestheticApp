@@ -466,8 +466,9 @@
   <div id="floating-popout-modal" class="floating-popout" style="display: none;">
     <div class="floating-header" id="floating-header">
       <span class="floating-title" id="floating-title">Panel View</span>
-      <div class="floating-tools">
-        <button class="floating-close-btn" id="btn-floating-close" title="Dock back into main window">&times;</button>
+      <div class="floating-tools" style="display: flex; align-items: center; gap: 8px;">
+        <button class="btn btn-secondary btn-sm" id="btn-floating-detach" title="Detach into dedicated external window across multiple monitors" style="font-size: 11px; padding: 2px 8px; border-color: rgba(229, 169, 59, 0.4); color: #e5a93b;">&#8599; External Window</button>
+        <button class="floating-close-btn" id="btn-floating-close" title="Dock back into main layout">&times;</button>
       </div>
     </div>
     <div class="floating-content" id="floating-content">

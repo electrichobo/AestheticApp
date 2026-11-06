@@ -1253,3 +1253,36 @@ html, body {
   display: flex;
   flex-direction: column;
 }
+
+.floating-content .matrix-section,
+.floating-content .panel-viewport {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  margin: 0;
+  border: none;
+  background: transparent;
+}
+
+.floating-content .scope-display-container {
+  flex: 1;
+  height: auto;
+  min-height: 200px;
+  aspect-ratio: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.floating-content .scope-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.floating-content .viewport-canvas-container {
+  flex: 1;
+  height: auto;
+  min-height: 240px;
+  aspect-ratio: auto;
+}

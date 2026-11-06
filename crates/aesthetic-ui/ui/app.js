@@ -247,33 +247,55 @@ if (viewportImgForScopes) {
   });
 }
 
-function renderCurrentScope() {
-  if (!canvas || !ctx) return;
-  const w = canvas.width;
-  const h = canvas.height;
+function renderScopeToCanvas(targetCanvas, scopeType = currentScope, scopesData = currentScopesData) {
+  if (!targetCanvas) return;
+  const c = targetCanvas.getContext('2d');
+  if (!c) return;
+
+  const rect = targetCanvas.getBoundingClientRect();
+  if (rect.width > 50 && rect.height > 50) {
+    const targetW = Math.round(rect.width);
+    const targetH = Math.round(rect.height);
+    if (Math.abs(targetCanvas.width - targetW) > 10 || Math.abs(targetCanvas.height - targetH) > 10) {
+      targetCanvas.width = targetW;
+      targetCanvas.height = targetH;
+    }
+  }
+
+  const w = targetCanvas.width;
+  const h = targetCanvas.height;
 
   // Deep CRT/OLED black background
-  ctx.fillStyle = '#05070b';
-  ctx.fillRect(0, 0, w, h);
+  c.fillStyle = '#05070b';
+  c.fillRect(0, 0, w, h);
 
   sampleLiveViewportPixels();
 
-  switch (currentScope) {
+  switch (scopeType) {
     case 'waveform':
-      drawLumaWaveform(ctx, w, h, currentScopesData?.waveform);
+      drawLumaWaveform(c, w, h, scopesData?.waveform);
       break;
     case 'parade':
-      drawRgbParade(ctx, w, h, currentScopesData?.parade);
+      drawRgbParade(c, w, h, scopesData?.parade);
       break;
     case 'vectorscope':
-      drawVectorscope(ctx, w, h, currentScopesData?.vectorscope);
+      drawVectorscope(c, w, h, scopesData?.vectorscope);
       break;
     case 'histogram':
-      drawHistograms(ctx, w, h, currentScopesData?.histogram);
+      drawHistograms(c, w, h, scopesData?.histogram);
       break;
     case 'cie':
-      drawCieChromaticity(ctx, w, h, currentScopesData?.cie);
+      drawCieChromaticity(c, w, h, scopesData?.cie);
       break;
+  }
+}
+
+function renderCurrentScope() {
+  if (canvas) {
+    renderScopeToCanvas(canvas, currentScope, currentScopesData);
+  }
+  if (scopesPopoutWindow && !scopesPopoutWindow.closed) {
+    updatePopoutWindowScopes();
   }
 }
 
@@ -1817,49 +1839,350 @@ if (modalContactSheetClose && contactSheetModal) {
 }
 
 // ============================================================================
-// Floating Resizable Popout Panels (Viewport, Scopes, Visual Æesthetic)
+// Multi-Monitor External Popout & In-Page Floating Panels
 // ============================================================================
 const floatingModal = document.getElementById('floating-popout-modal');
 const floatingTitle = document.getElementById('floating-title');
 const floatingContent = document.getElementById('floating-content');
 const btnFloatingClose = document.getElementById('btn-floating-close');
+const btnFloatingDetach = document.getElementById('btn-floating-detach');
 const floatingHeader = document.getElementById('floating-header');
 
 let activePoppedPanelId = null;
+let activePoppedElement = null;
+let activePlaceholder = null;
+let scopesPopoutWindow = null;
+
+// Multi-Monitor Native External Scopes Window
+function openScopesPopoutWindow() {
+  if (scopesPopoutWindow && !scopesPopoutWindow.closed) {
+    scopesPopoutWindow.focus();
+    updatePopoutWindowScopes();
+    return;
+  }
+
+  const w = 960;
+  const h = 600;
+  const left = Math.max(20, window.screenX + 60);
+  const top = Math.max(20, window.screenY + 40);
+
+  scopesPopoutWindow = window.open(
+    '',
+    'AestheticScopesWindow',
+    `width=${w},height=${h},left=${left},top=${top},menubar=no,toolbar=no,location=no,status=no,resizable=yes`
+  );
+
+  if (!scopesPopoutWindow) {
+    // If popup blocked, fallback to in-page float
+    popOutPanelInPage('section-scopes');
+    return;
+  }
+
+  // If panel was popped out in-page, dock it back first
+  if (activePoppedPanelId === 'section-scopes') {
+    dockPoppedPanel();
+  }
+
+  const doc = scopesPopoutWindow.document;
+  doc.open();
+  doc.write(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AESTHETIC — Broadcast Scopes (External Display)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      background: #090c10;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+    }
+    .popout-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #0d1117;
+      border-bottom: 1px solid #21262d;
+      padding: 0 16px;
+      height: 46px;
+      flex-shrink: 0;
+    }
+    .popout-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .popout-title {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: #e5a93b;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .scope-tabs {
+      display: flex;
+      gap: 4px;
+      background: #161b22;
+      padding: 3px;
+      border-radius: 5px;
+      border: 1px solid #30363d;
+    }
+    .scope-tab {
+      background: transparent;
+      border: none;
+      color: #8b949e;
+      padding: 5px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: all 0.15s ease;
+    }
+    .scope-tab:hover {
+      color: #f0f6fc;
+      background: rgba(255, 255, 255, 0.05);
+    }
+    .scope-tab.active {
+      background: #238636;
+      color: #ffffff;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    }
+    .popout-badge {
+      font-size: 11px;
+      color: #00d2ff;
+      background: rgba(0, 210, 255, 0.12);
+      border: 1px solid rgba(0, 210, 255, 0.3);
+      padding: 3px 8px;
+      border-radius: 3px;
+      font-family: monospace;
+      cursor: pointer;
+    }
+    .popout-badge:hover {
+      background: rgba(0, 210, 255, 0.22);
+    }
+    .popout-canvas-container {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #05070b;
+      position: relative;
+      overflow: hidden;
+      width: 100%;
+      height: calc(100vh - 46px);
+    }
+    #popout-scope-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      cursor: crosshair;
+    }
+  </style>
+</head>
+<body>
+  <div class="popout-toolbar">
+    <div class="popout-left">
+      <div class="popout-title">
+        <span>📡</span>
+        <span>AESTHETIC BROADCAST SCOPES</span>
+      </div>
+      <span class="popout-badge" id="zoom-badge" title="Click to cycle vectorscope zoom">2.5× Zoom</span>
+    </div>
+    <div class="scope-tabs" id="popout-tabs">
+      <button class="scope-tab active" data-scope="waveform">Waveform</button>
+      <button class="scope-tab" data-scope="parade">Parade</button>
+      <button class="scope-tab" data-scope="vectorscope">Vectorscope</button>
+      <button class="scope-tab" data-scope="histogram">Histogram</button>
+      <button class="scope-tab" data-scope="cie">CIE 1931</button>
+    </div>
+  </div>
+  <div class="popout-canvas-container" id="canvas-container">
+    <canvas id="popout-scope-canvas"></canvas>
+  </div>
+</body>
+</html>`);
+  doc.close();
+
+  setTimeout(initPopoutWindowEvents, 50);
+}
+
+function initPopoutWindowEvents() {
+  if (!scopesPopoutWindow || scopesPopoutWindow.closed) return;
+  const pDoc = scopesPopoutWindow.document;
+  const pTabs = pDoc.querySelectorAll('.scope-tab');
+  const pCanvas = pDoc.getElementById('popout-scope-canvas');
+  const pBadge = pDoc.getElementById('zoom-badge');
+
+  pTabs.forEach(t => {
+    t.classList.toggle('active', t.dataset.scope === currentScope);
+    t.onclick = () => {
+      pTabs.forEach(tb => tb.classList.remove('active'));
+      t.classList.add('active');
+      currentScope = t.dataset.scope;
+      document.querySelectorAll('.scope-tab').forEach(mainTab => {
+        mainTab.classList.toggle('active', mainTab.dataset.scope === currentScope);
+      });
+      renderCurrentScope();
+    };
+  });
+
+  if (pCanvas) {
+    pCanvas.onclick = () => {
+      if (currentScope === 'vectorscope') {
+        const levels = [1.0, 2.0, 2.5, 4.0];
+        const curIdx = levels.indexOf(vectorscopeZoom);
+        vectorscopeZoom = levels[(curIdx + 1) % levels.length];
+        if (pBadge) pBadge.textContent = `${vectorscopeZoom.toFixed(1)}× Zoom`;
+        renderCurrentScope();
+      }
+    };
+  }
+
+  if (pBadge) {
+    pBadge.textContent = `${vectorscopeZoom.toFixed(1)}× Zoom`;
+    pBadge.onclick = () => {
+      const levels = [1.0, 2.0, 2.5, 4.0];
+      const curIdx = levels.indexOf(vectorscopeZoom);
+      vectorscopeZoom = levels[(curIdx + 1) % levels.length];
+      pBadge.textContent = `${vectorscopeZoom.toFixed(1)}× Zoom`;
+      renderCurrentScope();
+    };
+  }
+
+  scopesPopoutWindow.addEventListener('resize', () => {
+    updatePopoutWindowScopes();
+  });
+
+  updatePopoutWindowScopes();
+}
+
+function updatePopoutWindowScopes() {
+  if (!scopesPopoutWindow || scopesPopoutWindow.closed) return;
+  const pDoc = scopesPopoutWindow.document;
+  const pCanvas = pDoc.getElementById('popout-scope-canvas');
+  const pContainer = pDoc.getElementById('canvas-container');
+  if (!pCanvas || !pContainer) return;
+
+  const rect = pContainer.getBoundingClientRect();
+  const targetW = Math.max(300, Math.floor(rect.width));
+  const targetH = Math.max(200, Math.floor(rect.height));
+
+  if (pCanvas.width !== targetW || pCanvas.height !== targetH) {
+    pCanvas.width = targetW;
+    pCanvas.height = targetH;
+  }
+
+  renderScopeToCanvas(pCanvas, currentScope, currentScopesData);
+
+  const pBadge = pDoc.getElementById('zoom-badge');
+  if (pBadge) {
+    pBadge.textContent = currentScope === 'vectorscope' ? `${vectorscopeZoom.toFixed(1)}× Zoom` : '1:1 Pixel Trace';
+  }
+}
+
+// In-Page Floating Panels with DOM-Preservation (Prevents blank canvas)
+function dockPoppedPanel() {
+  if (activePoppedElement && activePlaceholder && activePlaceholder.parentNode) {
+    activePlaceholder.parentNode.insertBefore(activePoppedElement, activePlaceholder);
+    activePlaceholder.remove();
+  }
+  activePlaceholder = null;
+  activePoppedElement = null;
+  activePoppedPanelId = null;
+  if (floatingModal) floatingModal.style.display = 'none';
+  if (floatingContent) floatingContent.innerHTML = '';
+}
+
+function popOutPanelInPage(panelId) {
+  const targetEl = document.getElementById(panelId);
+  if (!targetEl || !floatingModal || !floatingContent) return;
+
+  dockPoppedPanel();
+
+  activePoppedPanelId = panelId;
+  activePoppedElement = targetEl;
+
+  // Insert placeholder so we can dock back to exact DOM spot
+  activePlaceholder = document.createElement('div');
+  activePlaceholder.className = 'panel-placeholder-docked';
+  activePlaceholder.style.display = 'none';
+  targetEl.parentNode.insertBefore(activePlaceholder, targetEl);
+
+  const titleText = targetEl.querySelector('h2, h3')?.textContent || 'Popped Panel';
+  if (floatingTitle) floatingTitle.textContent = `${titleText} — Floating View`;
+
+  floatingContent.innerHTML = '';
+  floatingContent.appendChild(targetEl);
+  floatingModal.style.display = 'flex';
+
+  // Sizing
+  const modalW = Math.min(840, window.innerWidth - 60);
+  const modalH = Math.min(540, window.innerHeight - 80);
+  floatingModal.style.width = `${modalW}px`;
+  floatingModal.style.height = `${modalH}px`;
+  floatingModal.style.left = `${Math.max(20, Math.round((window.innerWidth - modalW) / 2))}px`;
+  floatingModal.style.top = `${Math.max(20, Math.round((window.innerHeight - modalH) / 2))}px`;
+
+  // Render immediately if scopes
+  if (panelId === 'section-scopes') {
+    renderCurrentScope();
+  }
+}
 
 document.querySelectorAll('.panel-popout-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
     const panelId = btn.dataset.panel;
     if (!panelId) return;
 
     if (panelId === 'panel-takes') {
-      // Pop out contact sheet gallery
       if (contactSheetModal) contactSheetModal.style.display = 'flex';
       return;
     }
 
-    const targetEl = document.getElementById(panelId);
-    if (!targetEl || !floatingModal || !floatingContent) return;
+    if (panelId === 'section-scopes') {
+      // Direct native multi-monitor window
+      openScopesPopoutWindow();
+      return;
+    }
 
-    activePoppedPanelId = panelId;
-    const titleText = targetEl.querySelector('h2, h3')?.textContent || 'Popped Panel';
-    if (floatingTitle) floatingTitle.textContent = `${titleText} — Floating View`;
-
-    floatingContent.innerHTML = '';
-    const clone = targetEl.cloneNode(true);
-    // Remove the popout button inside the clone
-    clone.querySelectorAll('.panel-popout-btn').forEach(b => b.remove());
-    floatingContent.appendChild(clone);
-
-    floatingModal.style.display = 'flex';
+    popOutPanelInPage(panelId);
   });
 });
 
 if (btnFloatingClose && floatingModal) {
   btnFloatingClose.addEventListener('click', () => {
-    floatingModal.style.display = 'none';
-    if (floatingContent) floatingContent.innerHTML = '';
-    activePoppedPanelId = null;
+    dockPoppedPanel();
+  });
+}
+
+if (btnFloatingDetach) {
+  btnFloatingDetach.addEventListener('click', () => {
+    if (activePoppedPanelId === 'section-scopes') {
+      openScopesPopoutWindow();
+    } else {
+      const targetEl = activePoppedElement || document.getElementById(activePoppedPanelId);
+      if (targetEl) {
+        const w = 900;
+        const h = 600;
+        const pop = window.open('', 'AestheticPanelPopout', `width=${w},height=${h},resizable=yes`);
+        if (pop) {
+          const doc = pop.document;
+          doc.open();
+          doc.write(`<!DOCTYPE html><html><head><title>${floatingTitle ? floatingTitle.textContent : 'AESTHETIC Panel'}</title><link rel="stylesheet" href="/app.css"><style>body{padding:16px;background:#090c10;color:#e2e8f0;overflow:auto;}</style></head><body>${targetEl.outerHTML}</body></html>`);
+          doc.close();
+          dockPoppedPanel();
+        }
+      }
+    }
   });
 }
 
@@ -1869,7 +2192,7 @@ if (floatingHeader && floatingModal) {
   let startX = 0, startY = 0, initialLeft = 0, initialTop = 0;
 
   floatingHeader.addEventListener('mousedown', (e) => {
-    if (e.target === btnFloatingClose) return;
+    if (e.target === btnFloatingClose || e.target === btnFloatingDetach) return;
     isDragging = true;
     startX = e.clientX;
     startY = e.clientY;
@@ -1884,6 +2207,9 @@ if (floatingHeader && floatingModal) {
     const dy = e.clientY - startY;
     floatingModal.style.left = `${Math.max(10, initialLeft + dx)}px`;
     floatingModal.style.top = `${Math.max(10, initialTop + dy)}px`;
+    if (activePoppedPanelId === 'section-scopes') {
+      renderCurrentScope();
+    }
   });
 
   window.addEventListener('mouseup', () => {
