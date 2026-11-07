@@ -18,7 +18,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Compute cosine similarity between two float vectors, returning a normalized score (0.0 - 100.0).
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
@@ -79,10 +79,20 @@ pub struct FilmIngestMeta<'a> {
 impl BaselineStore {
     /// Create a new baseline store pre-populated with cinema master signatures and pre-trained corpus.
     pub fn new() -> Self {
-        let baseline_dir = Path::new("assets").join("baseline");
-        if baseline_dir.join("manifest.json").exists() {
-            if let Ok(store) = Self::load_from_dir(&baseline_dir) {
-                return store;
+        let mut candidates = vec![PathBuf::from("assets").join("baseline")];
+        if let Ok(current_exe) = std::env::current_exe() {
+            if let Some(parent) = current_exe.parent() {
+                candidates.push(parent.join("assets").join("baseline"));
+                if let Some(ancestor) = parent.parent().and_then(|p| p.parent()) {
+                    candidates.push(ancestor.join("assets").join("baseline"));
+                }
+            }
+        }
+        for baseline_dir in candidates {
+            if baseline_dir.join("manifest.json").exists() {
+                if let Ok(store) = Self::load_from_dir(&baseline_dir) {
+                    return store;
+                }
             }
         }
         let mut store = Self::default();
