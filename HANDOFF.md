@@ -8,6 +8,7 @@
 ---
 
 ## Current Status: M31 Viewport Shaders & M32 Unified Deliverables Package (v0.1.0-alpha)
+- **Standalone Distribution ZIP**: `dist/Aesthetic-v0.1.0-windows-x64.zip` packaged and ready to run with adjacent `ffmpeg.exe` and Golden Baseline corpus.
 - **M31: Viewport Forensic Diagnostic & False Color Shaders**:
   - `compute_focus_peaking_map`: Multi-threaded Rayon Laplacian & Sobel edge detector highlighting in-focus planes with neon green (`#00ff80`) on desaturated bases (`/api/frame_peaking`).
   - `compute_el_zone_map`: Calibrated Ed Lachman, ASC 10-stop false-color exposure raster (`/api/frame_el_zone`).
