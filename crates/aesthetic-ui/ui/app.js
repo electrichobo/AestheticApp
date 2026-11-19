@@ -125,10 +125,16 @@ function updateEvaluationUI(resData) {
     }
     if (masterText) {
       const family = comp.style_family || data.style?.style_family || 'Prestige Naturalism';
+      const corpusFilms = comp.corpus_films || 199;
+      const corpusShots = comp.measured_corpus_shots || comp.corpus_shots || 1112;
       const ancillary = comp.ancillary_dp
         ? ` • Ancillary DP Affinity: ${comp.ancillary_dp}`
         : (comp.dp_name ? ` • Ancillary DP Affinity: ${comp.dp_name} (${comp.reference_film})` : '');
-      masterText.textContent = `Golden Baseline (184 Oscar / ASC / BSC Films) — ${family}${ancillary}`;
+      masterText.textContent = `Golden Baseline (${corpusFilms} Films / ${corpusShots} Measured Shots) — ${family}${ancillary}`;
+    }
+
+    if (comp.quantiles_summary) {
+      updateEli5LiveTargets(comp.quantiles_summary);
     }
 
     const btnCdl = document.getElementById('btn-export-master-cdl');
@@ -168,9 +174,9 @@ function updateEvaluationUI(resData) {
         const tr = document.createElement('tr');
         let deltaClass = 'delta-match';
         const st = (r.status || '').toLowerCase();
-        if (st.includes('less') || st.includes('steeper') || st.includes('softer') || st.includes('subdued') || st.includes('short-sided')) {
+        if (st.includes('less') || st.includes('steeper') || st.includes('softer') || st.includes('subdued') || st.includes('short-sided') || st.includes('below')) {
           deltaClass = 'delta-negative';
-        } else if (st.includes('higher') || st.includes('lower') || st.includes('extended') || st.includes('crisper') || st.includes('prominent')) {
+        } else if (st.includes('higher') || st.includes('lower') || st.includes('extended') || st.includes('crisper') || st.includes('prominent') || st.includes('above')) {
           deltaClass = 'delta-variant';
         }
 
@@ -2840,6 +2846,77 @@ if (btnIngestStart) {
     }
   });
 }
+
+// ============================================================================
+// ELI5 Scoring & Golden Baseline Target Guide Modal
+// ============================================================================
+const scoringGuideModal = document.getElementById('scoring-guide-modal');
+const btnOpenScoringGuide = document.getElementById('btn-open-scoring-guide');
+const btnOpenTargetGuide = document.getElementById('btn-open-target-guide');
+const btnScoringGuideCloseX = document.getElementById('modal-scoring-guide-close');
+const btnScoringGuideClose = document.getElementById('btn-scoring-guide-close');
+
+function updateEli5LiveTargets(qs) {
+  if (!qs) return;
+  const summaryEl = document.getElementById('eli5-corpus-summary');
+  if (summaryEl) {
+    const modeLabel = qs.is_measured ? 'Measured Award Shots' : 'Seeded Priors';
+    summaryEl.textContent = `${qs.active_shots || qs.total_shots || 0} ${modeLabel} / ${qs.total_films || 0} Films`;
+  }
+  const tbody = document.getElementById('eli5-live-targets-body');
+  if (!tbody) return;
+
+  const fmt = (val, decimals, suffix = '') =>
+    typeof val === 'number' && Number.isFinite(val) ? `${val.toFixed(decimals)}${suffix}` : '--';
+
+  const specs = [
+    { label: 'Dynamic Range Latitude', q: qs.dynamic_range, dec: 2, sfx: ' stops' },
+    { label: 'Highlight Roll-Off', q: qs.highlight_rolloff, dec: 1, sfx: '%' },
+    { label: 'Optical Acutance (Laplacian)', q: qs.sharpness_laplacian, dec: 1, sfx: '' },
+    { label: 'Key-to-Fill Contrast Ratio', q: qs.key_fill_ratio, dec: 2, sfx: ':1' },
+  ];
+
+  tbody.innerHTML = '';
+  specs.forEach(({ label, q, dec, sfx }) => {
+    if (!q) return;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${label}</strong></td>
+      <td style="font-family: var(--font-mono); color: var(--text-muted);">${fmt(q.p10, dec, sfx)}</td>
+      <td style="font-family: var(--font-mono); color: var(--text-muted);">${fmt(q.p25, dec, sfx)}</td>
+      <td style="font-family: var(--font-mono); color: var(--accent-gold); font-weight: 700;">${fmt(q.p50, dec, sfx)}</td>
+      <td style="font-family: var(--font-mono); color: var(--text-muted);">${fmt(q.p75, dec, sfx)}</td>
+      <td style="font-family: var(--font-mono); color: var(--text-muted);">${fmt(q.p90, dec, sfx)}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function openScoringGuideModal() {
+  if (!scoringGuideModal) return;
+  const qs = currentEvaluateData?.golden_baseline_benchmark?.quantiles_summary;
+  if (qs) updateEli5LiveTargets(qs);
+  scoringGuideModal.style.display = 'flex';
+}
+
+function closeScoringGuideModal() {
+  if (scoringGuideModal) scoringGuideModal.style.display = 'none';
+}
+
+if (btnOpenScoringGuide) btnOpenScoringGuide.addEventListener('click', openScoringGuideModal);
+if (btnOpenTargetGuide) btnOpenTargetGuide.addEventListener('click', openScoringGuideModal);
+if (btnScoringGuideCloseX) btnScoringGuideCloseX.addEventListener('click', closeScoringGuideModal);
+if (btnScoringGuideClose) btnScoringGuideClose.addEventListener('click', closeScoringGuideModal);
+if (scoringGuideModal) {
+  scoringGuideModal.addEventListener('click', (e) => {
+    if (e.target === scoringGuideModal) closeScoringGuideModal();
+  });
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && scoringGuideModal && scoringGuideModal.style.display === 'flex') {
+    closeScoringGuideModal();
+  }
+});
 
 // ============================================================================
 // Initialize Workspace

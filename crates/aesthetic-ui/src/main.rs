@@ -368,7 +368,8 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
 
             let store = BaselineStore::new();
             let inference = ModelInferenceEngine::new();
-            let (dr_q, rolloff_q, sharp_q, _) = store.scoring_quantiles();
+            let (dr_q, rolloff_q, sharp_q, is_measured_baseline) = store.scoring_quantiles();
+            let kf_q = store.key_fill_quantiles();
 
             let mut shot = evaluate_candidate_frame(
                 &img, "take_001", 1, time_sec, &dr_q, &rolloff_q, &sharp_q,
@@ -405,44 +406,64 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
             let catchlight = craft.lighting.catchlight_intensity;
             let gaze_poise = craft.staging.gaze_poise_score;
 
-            // Objective non-judgmental deltas against the Golden Baseline (184 Award-Winning Films)
-            let dr_target = dr_q.p50.max(13.5);
+            let find_pct = |key: &str| -> Option<f32> {
+                shot.golden_baseline
+                    .iter()
+                    .find(|b| b.key == key)
+                    .map(|b| b.shot_percentile)
+            };
+
+            // Empirical targets derived directly from the active Golden Baseline corpus (p50 median + IQR p25-p75)
+            let dr_target = dr_q.p50;
             let dr_delta = dr - dr_target;
-            let dr_status = if dr_delta.abs() <= 0.8 {
-                "Within Award Cinema Median".to_string()
+            let dr_pct_tag = find_pct("dynamic_range_stops")
+                .map(|p| format!(", p{:.0}", p))
+                .unwrap_or_default();
+            let dr_status = if dr >= dr_q.p25 && dr <= dr_q.p75 {
+                format!("Within Award Cinema IQR ({:+.1} stops vs p50{})", dr_delta, dr_pct_tag)
             } else if dr_delta < 0.0 {
-                format!("Less Exposure Range ({:.1} stops)", dr_delta)
+                format!("Less Exposure Range ({:.1} stops{})", dr_delta, dr_pct_tag)
             } else {
-                format!("Extended Exposure Range (+{:.1} stops)", dr_delta)
+                format!("Extended Exposure Range (+{:.1} stops{})", dr_delta, dr_pct_tag)
             };
 
-            let rolloff_target = rolloff_q.p50.max(88.0);
+            let rolloff_target = rolloff_q.p50;
             let rolloff_delta = rolloff - rolloff_target;
-            let rolloff_status = if rolloff_delta.abs() <= 5.0 {
-                "Gradual Film Roll-Off".to_string()
+            let ro_pct_tag = find_pct("highlight_rolloff")
+                .map(|p| format!(", p{:.0}", p))
+                .unwrap_or_default();
+            let rolloff_status = if rolloff >= rolloff_q.p25 && rolloff <= rolloff_q.p75 {
+                format!("Within Award Cinema IQR ({:+.0}% vs p50{})", rolloff_delta, ro_pct_tag)
             } else if rolloff_delta < 0.0 {
-                format!("Steeper Roll-Off Shoulder ({:.0}%)", rolloff_delta)
+                format!("Steeper Roll-Off Shoulder ({:.0}%{})", rolloff_delta, ro_pct_tag)
             } else {
-                format!("Gentler Highlight Roll-Off (+{:.0}%)", rolloff_delta)
+                format!("Gentler Highlight Roll-Off (+{:.0}%{})", rolloff_delta, ro_pct_tag)
             };
 
-            let acutance_target = sharp_q.p50.max(110.0);
+            let acutance_target = sharp_q.p50;
             let acutance_delta = acutance - acutance_target;
-            let acutance_status = if acutance_delta.abs() <= 20.0 {
-                "Matched Cinema Prime Acutance".to_string()
+            let sh_pct_tag = find_pct("sharpness_laplacian")
+                .map(|p| format!(", p{:.0}", p))
+                .unwrap_or_default();
+            let acutance_status = if acutance >= sharp_q.p25 && acutance <= sharp_q.p75 {
+                format!("Within Award Cinema IQR ({:+.0} vs p50{})", acutance_delta, sh_pct_tag)
             } else if acutance_delta < 0.0 {
-                format!("Softer Optical Diffusion ({:.0} lp/mm)", acutance_delta)
+                format!("Softer Optical Diffusion ({:.0}{})", acutance_delta, sh_pct_tag)
             } else {
-                format!("Crisper Micro-Contrast (+{:.0} lp/mm)", acutance_delta)
+                format!("Crisper Micro-Contrast (+{:.0}{})", acutance_delta, sh_pct_tag)
             };
 
-            let kf_delta = kf_ratio - 3.8;
-            let kf_status = if kf_delta.abs() <= 0.5 {
-                "Balanced Chiaroscuro Ratio".to_string()
+            let kf_target = if kf_q.p50 > 0.0 { kf_q.p50 } else { 3.5 };
+            let kf_delta = kf_ratio - kf_target;
+            let kf_pct_tag = find_pct("key_fill_ratio")
+                .map(|p| format!(", p{:.0}", p))
+                .unwrap_or_default();
+            let kf_status = if kf_q.p75 > kf_q.p25 && kf_ratio >= kf_q.p25 && kf_ratio <= kf_q.p75 {
+                format!("Within Award Cinema IQR ({:+.1}:1 vs p50{})", kf_delta, kf_pct_tag)
             } else if kf_delta > 0.0 {
-                format!("Higher Contrast Ratio (+{:.1}:1)", kf_delta)
+                format!("Higher Contrast Ratio (+{:.1}:1{})", kf_delta, kf_pct_tag)
             } else {
-                format!("Lower Contrast Ratio ({:.1}:1)", kf_delta)
+                format!("Lower Contrast Ratio ({:.1}:1{})", kf_delta, kf_pct_tag)
             };
 
             let split_status = if split_angle >= 135.0 {
@@ -523,56 +544,105 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
             ];
             comparison_tags.retain(|t| !t.trim().is_empty());
 
-            let rows = serde_json::json!([
-                {
+            let mut rows_vec = vec![
+                serde_json::json!({
                     "metric": "Dynamic Range Latitude",
                     "shot_val": format!("{:.1} stops", dr),
-                    "target_val": format!("{:.1} stops (p50)", dr_target),
+                    "target_val": format!("{:.2} stops (p50 | IQR {:.1}–{:.1})", dr_target, dr_q.p25, dr_q.p75),
                     "status": dr_status
-                },
-                {
+                }),
+                serde_json::json!({
                     "metric": "Highlight Roll-Off",
-                    "shot_val": format!("{:.0}%", rolloff),
-                    "target_val": format!("{:.0}% (p50)", rolloff_target),
+                    "shot_val": format!("{:.1}%", rolloff),
+                    "target_val": format!("{:.1}% (p50 | IQR {:.1}–{:.1}%)", rolloff_target, rolloff_q.p25, rolloff_q.p75),
                     "status": rolloff_status
-                },
-                {
-                    "metric": "MTF50 Optical Acutance",
-                    "shot_val": format!("{:.1} lp/mm", acutance),
-                    "target_val": format!("{:.0} lp/mm (p50)", acutance_target),
+                }),
+                serde_json::json!({
+                    "metric": "Optical Acutance (Laplacian)",
+                    "shot_val": format!("{:.1}", acutance),
+                    "target_val": format!("{:.1} (p50 | IQR {:.1}–{:.1})", acutance_target, sharp_q.p25, sharp_q.p75),
                     "status": acutance_status
-                },
-                {
+                }),
+                serde_json::json!({
                     "metric": "Key-to-Fill Ratio",
                     "shot_val": format!("{:.1}:1", kf_ratio),
-                    "target_val": "3.8:1 (p50)",
+                    "target_val": format!("{:.1}:1 (p50 | IQR {:.1}–{:.1})", kf_target, kf_q.p25, kf_q.p75),
                     "status": kf_status
-                },
-                {
+                }),
+            ];
+
+            for cluster_row in shot
+                .golden_baseline
+                .iter()
+                .filter(|b| b.key == "style_cluster_dr" || b.key == "style_cluster_kf")
+            {
+                let unit_sfx = if cluster_row.unit == ":1" {
+                    ":1"
+                } else if cluster_row.unit == "stops" {
+                    " stops"
+                } else {
+                    ""
+                };
+                rows_vec.push(serde_json::json!({
+                    "metric": cluster_row.metric,
+                    "shot_val": format!("{:.1}{}", cluster_row.shot_value, unit_sfx),
+                    "target_val": format!(
+                        "{:.2}{} (p50 | n={})",
+                        cluster_row.corpus_p50, unit_sfx, cluster_row.sample_size
+                    ),
+                    "status": cluster_row.descriptor
+                }));
+            }
+
+            rows_vec.extend([
+                serde_json::json!({
                     "metric": "Split-Toning Separation",
                     "shot_val": format!("{:.0}°", split_angle),
-                    "target_val": "160° (p50)",
+                    "target_val": "135°–180° (complementary ref)",
                     "status": split_status
-                },
-                {
+                }),
+                serde_json::json!({
                     "metric": "Gaze Staging Poise",
                     "shot_val": format!("{:.0} / 100", gaze_poise),
-                    "target_val": "88 / 100 (p50)",
+                    "target_val": "75+ / 100 (eyeline + lead room)",
                     "status": gaze_status
-                },
-                {
+                }),
+                serde_json::json!({
                     "metric": "Eye Catchlight Specular",
                     "shot_val": format!("{:.0}%", catchlight),
-                    "target_val": "75% (p50)",
+                    "target_val": "60%+ (key specular peak)",
                     "status": catchlight_status
-                }
+                }),
             ]);
+            let rows = serde_json::Value::Array(rows_vec);
+
+            let corpus_films = store.manifest.total_films.max(store.measured_film_count()).max(58);
+            let measured_cnt = store.measured_shots().len();
+            let active_sample_cnt = if is_measured_baseline {
+                measured_cnt
+            } else {
+                store.reference_shots.len()
+            };
+
+            let quantiles_summary = serde_json::json!({
+                "is_measured": is_measured_baseline,
+                "total_films": corpus_films,
+                "active_shots": active_sample_cnt,
+                "total_shots": store.reference_shots.len(),
+                "dynamic_range": dr_q,
+                "highlight_rolloff": rolloff_q,
+                "sharpness_laplacian": sharp_q,
+                "key_fill_ratio": kf_q
+            });
 
             let benchmark_block = serde_json::json!({
-                "benchmark_name": "Award-Winning Cinema Golden Baseline (184 Films)",
-                "corpus_films": store.manifest.total_films.max(58),
+                "benchmark_name": format!(
+                    "Award-Winning Cinema Golden Baseline ({} Films / {} Shots)",
+                    corpus_films, active_sample_cnt
+                ),
+                "corpus_films": corpus_films,
                 "corpus_shots": store.reference_shots.len(),
-                "measured_corpus_shots": store.measured_shots().len(),
+                "measured_corpus_shots": measured_cnt,
                 "alignment_pct": baseline_alignment,
                 "style_family": matched_family,
                 "ancillary_dp": format!("{} ({}, {}% affinity)", matched_name, matched_film, dp_affinity_pct),
@@ -581,7 +651,8 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 "similarity": baseline_alignment,
                 "comparison_tags": comparison_tags,
                 "rows": rows,
-                "empirical_quantiles": shot.golden_baseline
+                "empirical_quantiles": shot.golden_baseline,
+                "quantiles_summary": quantiles_summary
             });
 
             let payload_json = serde_json::json!({

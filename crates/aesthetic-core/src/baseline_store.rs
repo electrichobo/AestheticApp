@@ -2304,6 +2304,23 @@ impl BaselineStore {
         }
     }
 
+    /// Empirical quantiles for key-to-fill lighting contrast ratio across the calibrated
+    /// Golden Baseline corpus (`measured_shots` once >= [`MIN_MEASURED_SHOTS_FOR_CALIBRATION`]).
+    pub fn key_fill_quantiles(&self) -> MetricQuantiles {
+        let measured = self.measured_shots();
+        let corpus: Vec<&ReferenceShot> = if measured.len() >= MIN_MEASURED_SHOTS_FOR_CALIBRATION {
+            measured
+        } else {
+            self.reference_shots.iter().collect()
+        };
+        let mut kf: Vec<f32> = corpus
+            .into_iter()
+            .map(|s| s.key_fill_ratio)
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .collect();
+        compute_quantiles(&mut kf)
+    }
+
     /// Places a candidate shot's measured metrics inside the award-cinema
     /// Golden Baseline distribution. Uses measured shots once at least
     /// [`MIN_MEASURED_SHOTS_FOR_CALIBRATION`] exist, otherwise the full

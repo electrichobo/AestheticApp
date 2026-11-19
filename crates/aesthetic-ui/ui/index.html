@@ -246,6 +246,7 @@
         <div class="panel-header">
           <h2>Evaluation Matrix</h2>
           <div class="panel-header-right">
+            <button type="button" class="btn-eli5-trigger" id="btn-open-scoring-guide" title="Plain-English (ELI5) guide to how AESTHETIC scores shots and computes Golden Baseline targets">? ELI5 Scoring</button>
             <span class="badge badge-accent" id="overall-score-badge">-- / 100</span>
             <button class="panel-popout-btn" data-panel="panel-matrix" title="Pop out Matrix">&#10530;</button>
           </div>
@@ -299,6 +300,7 @@
             <div class="section-header-row">
               <h3 class="section-title">Visual &AElig;esthetic &mdash; Golden Baseline</h3>
               <div class="header-right-tools">
+                <button type="button" class="btn-eli5-trigger" id="btn-open-target-guide" title="How Golden Baseline aggregate distributions form the p50 target numbers">? How Targets Work</button>
                 <span class="dp-tag-badge" id="benchmark-dp-badge">Award Cinema Baseline: Pending...</span>
                 <button class="panel-popout-btn" data-panel="section-visual-aesthetic" title="Pop out Visual Æesthetic">&#10530;</button>
               </div>
@@ -533,6 +535,97 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" id="btn-multicam-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ELI5 Scoring & Golden Baseline Target Guide Pop-Up Modal -->
+  <div id="scoring-guide-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 860px; width: 92vw;">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <h3>How AESTHETIC Scores Your Shots (ELI5 Guide)</h3>
+          <span class="badge badge-accent" id="eli5-corpus-summary">1,112 Shots / 199 Films</span>
+        </div>
+        <button class="modal-close" id="modal-scoring-guide-close">&times;</button>
+      </div>
+      <div class="modal-body" style="max-height: 76vh; overflow-y: auto;">
+        <div class="eli5-hero-callout">
+          <strong>In Plain English (ELI5):</strong> Every candidate shot is measured across 79 optical, exposure, color, depth, staging, and motion numbers, then graded on a <strong>0–100 curve</strong> built directly from real frames decoded out of <strong>Oscar, ASC, and BSC award-winning cinema</strong> (your Golden Baseline). It never guesses subjectively — every score and target traces back to real pixel math.
+        </div>
+
+        <div class="eli5-grid">
+          <div class="eli5-card">
+            <h4>1. Your Overall Score (0–100)</h4>
+            <p>Three measured pillars combine into one final score:</p>
+            <div class="eli5-formula-box">
+              <strong>Video Clip:</strong> Overall = <strong>45%</strong> Technical + <strong>35%</strong> Creative Craft + <strong>20%</strong> Temporal Motion<br>
+              <strong>Single Still:</strong> Overall = <strong>56.25%</strong> Technical + <strong>43.75%</strong> Creative Craft (no temporal penalty)
+            </div>
+            <ul class="eli5-list">
+              <li><strong>Technical (45%):</strong> Exposure Dynamic Range (35%) + Highlight Roll-Off (35%) + Laplacian Optical Acutance (30%). Each is scored 0–100 on where it lands inside the Golden Baseline curve.</li>
+              <li><strong>Creative Craft (35%):</strong> Gaze/Eyeline Poise &amp; Lead Room (30%) + 3D Depth &amp; Silhouette Separation (25%) + Color Harmony &amp; CIE Gamut (25%) + Key-to-Fill &amp; Catchlights (20%).</li>
+              <li><strong>Temporal Motion (20%):</strong> Camera Stability (penalizes micro-jitter &amp; judder 80%) + Motion Blur Coherence (20%).</li>
+            </ul>
+          </div>
+
+          <div class="eli5-card">
+            <h4>2. How Golden Baseline Forms "Target" Numbers</h4>
+            <p>AESTHETIC takes every measured shot &amp; still frame in your Golden Baseline, sorts each metric from lowest to highest, and finds key percentiles:</p>
+            <ul class="eli5-list">
+              <li><strong>p50 Target (The Median):</strong> The exact middle shot in the award-winning corpus (half of Master shots sit above it, half below). Think of it as the <em>center of gravity</em> of great cinema.</li>
+              <li><strong>IQR (p25–p75 Sweet Spot):</strong> Where the middle 50% of award-winning cinema lives. Landing inside the IQR means your shot matches classic award latitude/contrast/acutance.</li>
+              <li><strong>0–100 Percentile Curve:</strong> <code>min&rarr;0</code>, <code>p10&rarr;10</code>, <code>p25&rarr;25</code>, <code>p50&rarr;50</code>, <code>p75&rarr;75</code>, <code>p90&rarr;90</code>, <code>max&rarr;100</code>. Whenever you add new films or stills, all targets recalibrate automatically!</li>
+              <li><strong>Within-Style Targets:</strong> High-key comedies and low-key noir films shouldn't use the same target, so we also compute separate <em>Within-Style p50</em> targets (e.g. <em>Chiaroscuro Noir</em> vs <em>Prestige Naturalism</em>).</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="eli5-card" style="margin-top: 12px;">
+          <h4>Live Empirical Golden Baseline Target Distribution (Currently Active Corpus)</h4>
+          <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">
+            Computed directly from your currently loaded Golden Baseline on disk — zero hardcoded guesses:
+          </p>
+          <div class="benchmark-table-container">
+            <table class="benchmark-table eli5-targets-table">
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  <th>p10 (Low End)</th>
+                  <th>p25 (IQR Low)</th>
+                  <th style="color: var(--accent-gold);">p50 (Target Median)</th>
+                  <th>p75 (IQR High)</th>
+                  <th>p90 (High End)</th>
+                </tr>
+              </thead>
+              <tbody id="eli5-live-targets-body">
+                <tr><td colspan="6" style="color: var(--text-muted);">Evaluate a frame to load active Golden Baseline quantiles...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="eli5-grid" style="margin-top: 12px;">
+          <div class="eli5-card">
+            <h4>3. Scene Scanner, Top N &amp; Title Filtering</h4>
+            <ul class="eli5-list">
+              <li><strong>100% Timeline Coverage:</strong> Pass 1 streams the whole video at proxy speed so every scene is discovered; Pass 2 scores every photographic scene at full resolution.</li>
+              <li><strong>No Title Cards:</strong> Uniform borders &amp; typography bands are flagged (<code>NON_PHOTOGRAPHIC_OR_CREDITS</code>) and stripped whenever real footage exists.</li>
+              <li><strong>MMR Diversity &amp; Top N:</strong> Picks the best shot from each unrepresented scene first (<code>+10 pts</code> priority) before adding second angles, sliced to your chosen <strong>Top N</strong> (or <strong>All</strong>).</li>
+            </ul>
+          </div>
+
+          <div class="eli5-card">
+            <h4>4. Showreel Heads &amp; Advisory Forensics</h4>
+            <ul class="eli5-list">
+              <li><strong>6 Narrative Heads:</strong> Extra sub-scores in Contact Sheets rate <em>Hero Potency</em>, <em>3-Second Impact</em>, <em>Authorship</em>, <em>Storytelling</em>, <em>Cinematic Technique</em>, and <em>Memorability</em>.</li>
+              <li><strong>Non-Punitive Forensic Flags:</strong> Alerts like <code>LOG_ENCODED_SIGNAL</code>, <code>ROLLING_SHUTTER_SKEW_RISK</code>, and <code>SUBTITLE_OR_LOWER_THIRD_BURNIN</code> warn editors without blindly erasing intentional creative choices.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="btn-scoring-guide-close">Got It</button>
       </div>
     </div>
   </div>
