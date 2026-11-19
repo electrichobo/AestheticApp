@@ -943,7 +943,7 @@ pub fn rescore_from_sidecars(
         }
         let craft: Option<aesthetic_models::inferred::ModelInferredCraft> =
             serde_json::from_value(val["inferred_craft"].clone()).ok();
-        let concerns: Vec<aesthetic_models::forensics::DiagnosticFlag> =
+        let mut concerns: Vec<aesthetic_models::forensics::DiagnosticFlag> =
             serde_json::from_value(val["concerns"].clone()).unwrap_or_default();
 
         let mut style = aesthetic_models::window::DiscoveredStyle {
@@ -984,11 +984,23 @@ pub fn rescore_from_sidecars(
         // Record file path for in-place re-writing
         file_path_map.insert(take_id.clone(), path.clone());
 
-        // Load companion PNG still if present
+        // Load companion PNG still if present and re-run multi-signal title card detector
         let png_path = path.with_extension("png");
+        let mut detected_card_reason: Option<String> = None;
         if png_path.exists() {
             if let Ok(dyn_img) = image::open(&png_path) {
                 let rgb = dyn_img.to_rgb8();
+                if let Some(det) = crate::pipeline::detect_title_card_or_graphic(&rgb, &measured) {
+                    detected_card_reason = Some(format!(
+                        "{} (border match {:.0}%, bg match {:.0}%, flat {:.0}%, mid-grad {:.1}%, text bands {})",
+                        det.reason,
+                        det.border_bg_pct * 100.0,
+                        det.bg_match_pct * 100.0,
+                        det.flat_pixel_pct * 100.0,
+                        det.mid_grad_pct * 100.0,
+                        det.text_band_rows
+                    ));
+                }
                 if style.cinematographer_match.is_none() {
                     let emb = inference.infer_embedding(&rgb);
                     let kf = craft
@@ -1009,6 +1021,37 @@ pub fn rescore_from_sidecars(
                 }
                 hero_frames.insert(take_id.clone(), rgb);
             }
+        } else if measured.exposure.histogram_mean < 14.0
+            || measured.exposure.histogram_mean > 242.0
+            || measured.exposure.shadow_clip_pct > 78.0
+            || measured.exposure.highlight_clip_pct > 75.0
+            || measured.exposure.el_zones.zone_0_black_pct > 82.0
+            || measured.exposure.histogram_std < 6.0
+            || measured.color.palette_entropy < 1.0
+        {
+            detected_card_reason = Some(format!(
+                "Blank leader or near-uniform frame (mean luma {:.1}, std {:.1}, entropy {:.2} bits)",
+                measured.exposure.histogram_mean,
+                measured.exposure.histogram_std,
+                measured.color.palette_entropy
+            ));
+        }
+
+        if let Some(reason) = detected_card_reason {
+            style.lighting_key = "Title Card / Non-Photographic".to_string();
+            if !concerns
+                .iter()
+                .any(|c| c.code == "NON_PHOTOGRAPHIC_OR_CREDITS")
+            {
+                concerns.push(aesthetic_models::forensics::DiagnosticFlag {
+                    code: "NON_PHOTOGRAPHIC_OR_CREDITS".to_string(),
+                    title: "Title Card, Credits, or Non-Photographic Graphic".to_string(),
+                    description: format!("{} — filtered from hero selects", reason),
+                    severity: aesthetic_models::forensics::DiagnosticSeverity::Warning,
+                    timestamp_sec: start_sec,
+                    affected_region: None,
+                });
+            }
         }
 
         let is_non_photographic = concerns
@@ -1021,7 +1064,7 @@ pub fn rescore_from_sidecars(
         let mut technical =
             (dr_score * 0.35 + rolloff_score * 0.35 + sharp_score * 0.30).clamp(0.0, 100.0);
         if is_non_photographic {
-            technical = (technical * 0.20).min(18.0);
+            technical = (technical * 0.15).min(12.0);
         }
 
         let creative = val["scores"]["creative"].as_f64().unwrap_or(50.0) as f32;

@@ -751,10 +751,7 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
             if let Some(path_str) = query_map.get("path") {
                 let clean = clean_user_path_str(path_str);
                 let path = Path::new(clean);
-                let top_n = query_map
-                    .get("top")
-                    .and_then(|n| n.parse::<usize>().ok())
-                    .or(Some(20));
+                let top_n = parse_top_n_query(&query_map, Some(20));
                 let step = query_map
                     .get("step")
                     .and_then(|s| s.parse::<f64>().ok())
@@ -795,6 +792,9 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                         let res = BatchAnalysisResult {
                             video_info: info.clone(),
                             ranked_takes: takes.clone(),
+                            all_ranked_takes: takes.clone(),
+                            total_scenes_detected: 1,
+                            filtered_title_cards_count: 0,
                             sequence_metrics: seq_metrics,
                             edl_content: generate_cmx3600_edl(
                                 "AESTHETIC_STILL",
@@ -824,10 +824,16 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                             *loaded = Some(info);
                             let mut ca = state.current_analysis.write().unwrap();
                             *ca = Some(res);
+                            let mut cf = state.cached_frames.write().unwrap();
+                            cf.clear();
+                            cf.insert("still_001".to_string(), rgb);
                         }
                         let json = serde_json::json!({
                             "success": true,
                             "takes_count": takes.len(),
+                            "total_available_takes": takes.len(),
+                            "total_scenes_detected": 1,
+                            "filtered_title_cards_count": 0,
                             "takes": takes,
                             "sequence_metrics": seq_json
                         });
@@ -852,7 +858,7 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 let options = BatchOptions {
                     sample_step_sec: step,
                     top_n,
-                    export_sidecars_dir: Some(sidecars_dir),
+                    export_sidecars_dir: Some(sidecars_dir.clone()),
                     ..Default::default()
                 };
 
@@ -863,14 +869,35 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                             *loaded = Some(info);
                         }
                         let takes = res.ranked_takes.clone();
+                        let total_available = res.all_ranked_takes.len();
+                        let total_scenes = res.total_scenes_detected;
+                        let filtered_cards = res.filtered_title_cards_count;
                         let seq_json = res.sequence_metrics.clone();
+
+                        // Populate cached_frames from freshly exported sidecar PNGs for instant thumbnails
+                        let mut fresh_frames = std::collections::HashMap::new();
+                        let metrics_dir = sidecars_dir.join("metrics");
+                        for take in &res.all_ranked_takes {
+                            let png_p = metrics_dir.join(format!("{}.png", take.take_id));
+                            if png_p.exists() {
+                                if let Ok(img) = image::open(&png_p) {
+                                    fresh_frames.insert(take.take_id.clone(), img.to_rgb8());
+                                }
+                            }
+                        }
+
                         {
+                            let mut cf = state.cached_frames.write().unwrap();
+                            *cf = fresh_frames;
                             let mut ca = state.current_analysis.write().unwrap();
                             *ca = Some(res);
                         }
                         let json = serde_json::json!({
                             "success": true,
                             "takes_count": takes.len(),
+                            "total_available_takes": total_available,
+                            "total_scenes_detected": total_scenes,
+                            "filtered_title_cards_count": filtered_cards,
                             "takes": takes,
                             "sequence_metrics": seq_json
                         });
@@ -910,6 +937,9 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                     "duration": res.video_info.duration_sec,
                     "fps": res.video_info.frame_rate,
                     "takes": res.ranked_takes,
+                    "total_available_takes": res.all_ranked_takes.len(),
+                    "total_scenes_detected": res.total_scenes_detected,
+                    "filtered_title_cards_count": res.filtered_title_cards_count,
                     "sequence_metrics": res.sequence_metrics
                 });
                 send_response(
@@ -935,6 +965,93 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                     "source": "DEMO_PORTFOLIO_REEL.MOV",
                     "duration": 60.0,
                     "fps": 24.0,
+                    "takes": takes,
+                    "total_available_takes": takes.len(),
+                    "total_scenes_detected": takes.len(),
+                    "filtered_title_cards_count": 0,
+                    "sequence_metrics": seq
+                });
+                send_response(
+                    stream,
+                    "200 OK",
+                    "application/json",
+                    json.to_string().as_bytes(),
+                );
+            }
+        }
+        "/api/set_top_n" => {
+            let top_n = parse_top_n_query(&query_map, Some(20));
+            let mut ca = state.current_analysis.write().unwrap();
+            if let Some(ref mut res) = *ca {
+                let source_pool = if !res.all_ranked_takes.is_empty() {
+                    res.all_ranked_takes.clone()
+                } else {
+                    res.ranked_takes.clone()
+                };
+                let mut sliced = source_pool.clone();
+                if let Some(n) = top_n {
+                    if n > 0 && n < sliced.len() {
+                        sliced.truncate(n);
+                    }
+                }
+                res.ranked_takes = sliced.clone();
+                res.sequence_metrics =
+                    aesthetic_core::compute_reel_sequence_metrics(&res.ranked_takes, &res.video_info);
+                let media_path = res.video_info.file_path.clone();
+                let fps = res.video_info.frame_rate;
+                let title = Path::new(&media_path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("AESTHETIC_SELECTS");
+                let clip_name = Path::new(&media_path)
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("SOURCE.MOV");
+                res.edl_content = generate_cmx3600_edl(title, clip_name, &res.ranked_takes, fps);
+                res.csv_content = generate_csv_selects(clip_name, &res.ranked_takes, fps);
+                res.fcpxml_content =
+                    Some(generate_fcpxml(title, &media_path, &res.ranked_takes, fps));
+
+                let json = serde_json::json!({
+                    "success": true,
+                    "takes_count": res.ranked_takes.len(),
+                    "total_available_takes": source_pool.len(),
+                    "total_scenes_detected": res.total_scenes_detected,
+                    "filtered_title_cards_count": res.filtered_title_cards_count,
+                    "takes": res.ranked_takes,
+                    "sequence_metrics": res.sequence_metrics
+                });
+                send_response(
+                    stream,
+                    "200 OK",
+                    "application/json",
+                    json.to_string().as_bytes(),
+                );
+            } else {
+                let mut takes = get_demo_takes();
+                let total_available = takes.len();
+                if let Some(n) = top_n {
+                    if n > 0 && n < takes.len() {
+                        takes.truncate(n);
+                    }
+                }
+                let demo_info = VideoSourceInfo {
+                    file_path: "DEMO_PORTFOLIO_REEL.MOV".to_string(),
+                    duration_sec: 60.0,
+                    frame_rate: 24.0,
+                    width: 1920,
+                    height: 1080,
+                    codec: "prores".to_string(),
+                    color_primaries: Some("bt709".to_string()),
+                    transfer_characteristic: Some("bt709".to_string()),
+                };
+                let seq = aesthetic_core::compute_reel_sequence_metrics(&takes, &demo_info);
+                let json = serde_json::json!({
+                    "success": true,
+                    "takes_count": takes.len(),
+                    "total_available_takes": total_available,
+                    "total_scenes_detected": total_available,
+                    "filtered_title_cards_count": 0,
                     "takes": takes,
                     "sequence_metrics": seq
                 });
@@ -1059,12 +1176,17 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 .and_then(|s| s.to_str())
                 .unwrap_or("AESTHETIC");
 
-            // Extract hero stills for top 5 takes if possible
+            // Extract hero stills for ranked takes (capped at 60 PNGs inside ZIP for safety)
+            let cf = state.cached_frames.read().unwrap();
             let mut stills_holder: Vec<(String, RgbImage)> = Vec::new();
-            for (idx, take) in takes.iter().take(5).enumerate() {
-                let img = get_frame_for_time(state, take.hero_timestamp_sec);
+            for (idx, take) in takes.iter().take(60).enumerate() {
+                let img = cf
+                    .get(&take.take_id)
+                    .cloned()
+                    .unwrap_or_else(|| get_frame_for_time(state, take.hero_timestamp_sec));
                 stills_holder.push((format!("hero_select_{:02}", idx + 1), img));
             }
+            drop(cf);
             let stills_ref: Vec<(String, &RgbImage)> = stills_holder
                 .iter()
                 .map(|(name, img)| (name.clone(), img))
@@ -1132,8 +1254,8 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 let step = query_map
                     .get("step")
                     .and_then(|s| s.parse::<f64>().ok())
-                    .unwrap_or(2.0);
-                let top_n = query_map.get("top").and_then(|s| s.parse::<usize>().ok());
+                    .unwrap_or(1.0);
+                let top_n = parse_top_n_query(&query_map, None);
 
                 let folder_path = Path::new(clean_folder);
                 let out_path = Path::new(clean_user_path_str(&out_dir_str));
@@ -1173,12 +1295,26 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
             if let Some(path_str) = query_map.get("path") {
                 let clean = clean_user_path_str(path_str);
                 let sidecars_path = Path::new(clean);
+                let top_n = parse_top_n_query(&query_map, Some(20));
                 match aesthetic_core::rescore_from_sidecars(sidecars_path) {
-                    Ok((takes, _frames)) => {
-                        let max_end = takes
+                    Ok((all_takes, _frames)) => {
+                        let max_end = all_takes
                             .iter()
                             .map(|t| t.end_sec)
                             .fold(30.0f64, |a, b| a.max(b));
+                        let mut unique_scenes: Vec<usize> =
+                            all_takes.iter().map(|t| t.scene_index).collect();
+                        unique_scenes.sort_unstable();
+                        unique_scenes.dedup();
+                        let total_scenes = unique_scenes.len();
+
+                        let mut takes = all_takes.clone();
+                        if let Some(n) = top_n {
+                            if n > 0 && n < takes.len() {
+                                takes.truncate(n);
+                            }
+                        }
+
                         let info = VideoSourceInfo {
                             file_path: path_str.clone(),
                             duration_sec: max_end,
@@ -1193,6 +1329,9 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                         let res = BatchAnalysisResult {
                             video_info: info.clone(),
                             ranked_takes: takes.clone(),
+                            all_ranked_takes: all_takes.clone(),
+                            total_scenes_detected: total_scenes,
+                            filtered_title_cards_count: 0,
                             sequence_metrics: seq.clone(),
                             edl_content: generate_cmx3600_edl(
                                 "RESCORED_SELECTS",
@@ -1222,6 +1361,8 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                         let json = serde_json::json!({
                             "success": true,
                             "takes_count": takes.len(),
+                            "total_available_takes": all_takes.len(),
+                            "total_scenes_detected": total_scenes,
                             "takes": takes,
                             "sequence_metrics": seq
                         });
@@ -1261,16 +1402,21 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 get_demo_takes()
             };
             drop(ca);
+            let cf = state.cached_frames.read().unwrap();
             let mut frames = std::collections::HashMap::new();
-            for take in takes.iter().take(12) {
-                let img = get_frame_for_time(state, take.hero_timestamp_sec);
+            for take in &takes {
+                let img = cf
+                    .get(&take.take_id)
+                    .cloned()
+                    .unwrap_or_else(|| get_frame_for_time(state, take.hero_timestamp_sec));
                 frames.insert(take.take_id.clone(), img);
             }
+            drop(cf);
             let html = generate_contact_sheet_html_with_frames(
                 "AESTHETIC_SELECTS",
                 "FEATURE_MASTER.MOV",
                 &takes,
-                12,
+                takes.len(),
                 &frames,
             );
             send_response(
@@ -1354,7 +1500,25 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 Ok(total) => {
                     if let Ok(mut ca) = state.current_analysis.write() {
                         if let Some(ref mut res) = *ca {
-                            aesthetic_core::apply_reel_diversity_ranking(&mut res.ranked_takes);
+                            if !res.all_ranked_takes.is_empty() {
+                                let keep_n = if res.ranked_takes.len() < res.all_ranked_takes.len() {
+                                    Some(res.ranked_takes.len())
+                                } else {
+                                    None
+                                };
+                                aesthetic_core::apply_reel_diversity_ranking(&mut res.all_ranked_takes);
+                                res.ranked_takes = if let Some(n) = keep_n {
+                                    res.all_ranked_takes.iter().take(n).cloned().collect()
+                                } else {
+                                    res.all_ranked_takes.clone()
+                                };
+                                res.sequence_metrics = aesthetic_core::compute_reel_sequence_metrics(
+                                    &res.ranked_takes,
+                                    &res.video_info,
+                                );
+                            } else {
+                                aesthetic_core::apply_reel_diversity_ranking(&mut res.ranked_takes);
+                            }
                         }
                     }
                     let profile = aesthetic_core::compute_personal_taste_profile();
@@ -1550,6 +1714,17 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
         _ => {
             send_response(stream, "404 NOT FOUND", "text/plain", b"Not Found");
         }
+    }
+}
+
+fn parse_top_n_query(
+    query_map: &std::collections::HashMap<String, String>,
+    default_n: Option<usize>,
+) -> Option<usize> {
+    match query_map.get("top").and_then(|s| s.parse::<usize>().ok()) {
+        Some(0) => None, // 0 = All ranked selects across every scene
+        Some(n) => Some(n),
+        None => default_n,
     }
 }
 

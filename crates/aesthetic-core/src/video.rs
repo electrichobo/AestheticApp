@@ -4,8 +4,9 @@
 //! requiring complex native C library bindings.
 
 use aesthetic_models::manifest::VideoSourceInfo;
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// Normalizes a path to an absolute path without Windows extended-length prefix (`\\?\`).
 fn clean_absolute_path(path: &Path) -> Option<PathBuf> {
@@ -533,6 +534,285 @@ pub fn extract_trimmed_clip(
     }
 
     Ok(())
+}
+
+/// Computes a fast photographic quality score (0.0 - 100.0) on a 160x90 streaming proxy frame,
+/// rewarding genuine tonal dynamic range, midtone texture, and focus crispness.
+fn compute_proxy_photographic_quality(proxy: &image::RgbImage) -> f32 {
+    let (w, h) = proxy.dimensions();
+    let total = (w * h) as usize;
+    if total == 0 {
+        return 0.0;
+    }
+
+    let raw = proxy.as_raw();
+    let mut hist = [0u32; 256];
+    let mut midtone_count = 0usize;
+    let mut lumas = vec![0.0f32; total];
+
+    for (i, px) in raw.as_chunks::<3>().0.iter().enumerate() {
+        let l = 0.2126 * px[0] as f32 + 0.7152 * px[1] as f32 + 0.0722 * px[2] as f32;
+        lumas[i] = l;
+        let bin = (l.round() as usize).clamp(0, 255);
+        hist[bin] += 1;
+        if (28..=228).contains(&bin) {
+            midtone_count += 1;
+        }
+    }
+
+    let p05_thresh = (total as f32 * 0.05) as usize;
+    let p95_thresh = (total as f32 * 0.95) as usize;
+    let mut cum = 0usize;
+    let mut p05 = 0usize;
+    let mut p95 = 255usize;
+    for (bin, &cnt) in hist.iter().enumerate() {
+        let prev = cum;
+        cum += cnt as usize;
+        if prev <= p05_thresh && cum > p05_thresh {
+            p05 = bin;
+        }
+        if prev <= p95_thresh && cum > p95_thresh {
+            p95 = bin;
+        }
+    }
+
+    let luma_spread_score = ((p95.saturating_sub(p05) as f32 / 210.0) * 100.0).clamp(0.0, 100.0);
+    let midtone_score = ((midtone_count as f32 / total as f32) * 125.0).clamp(0.0, 100.0);
+
+    // Acutance proxy over interior pixels
+    let wu = w as usize;
+    let hu = h as usize;
+    let mut grad_sum = 0.0f32;
+    let mut grad_n = 0usize;
+    for y in 1..hu.saturating_sub(1) {
+        let row = y * wu;
+        for x in 1..wu.saturating_sub(1) {
+            let l = lumas[row + x];
+            let gx = (lumas[row + x + 1] - l).abs();
+            let gy = (lumas[row + wu + x] - l).abs();
+            grad_sum += gx + gy;
+            grad_n += 1;
+        }
+    }
+    let mean_grad = if grad_n > 0 {
+        grad_sum / grad_n as f32
+    } else {
+        0.0
+    };
+    let acutance_score = (mean_grad * 4.2).clamp(0.0, 100.0);
+
+    (luma_spread_score * 0.35 + midtone_score * 0.30 + acutance_score * 0.35).clamp(0.0, 100.0)
+}
+
+/// Streams the entire video in a single fast 160x90 FFmpeg proxy pass to discover every
+/// cut boundary, strip non-photographic title cards/leaders, and group contiguous shots into scenes.
+///
+/// Returns `(photographic_scenes, non_photographic_shot_count)`.
+pub fn scan_video_scenes(
+    video_path: &Path,
+    duration_sec: f64,
+    scan_fps: f64,
+) -> Result<(Vec<crate::scene::DetectedScene>, usize), String> {
+    let ffmpeg = find_ffmpeg().ok_or_else(|| {
+        "FFmpeg executable not found. Ensure tools/ffmpeg.exe exists or add ffmpeg to PATH."
+            .to_string()
+    })?;
+
+    const PROXY_W: u32 = 160;
+    const PROXY_H: u32 = 90;
+    const FRAME_BYTES: usize = (PROXY_W as usize) * (PROXY_H as usize) * 3;
+
+    let fps = scan_fps.clamp(0.25, 4.0);
+    let vf = format!(
+        "fps={:.3},scale={}:{}:flags=fast_bilinear,format=rgb24",
+        fps, PROXY_W, PROXY_H
+    );
+
+    let mut child = Command::new(&ffmpeg)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-threads",
+            "0",
+            "-i",
+            video_path.to_str().unwrap_or_default(),
+            "-vf",
+            &vf,
+            "-f",
+            "rawvideo",
+            "-",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn ffmpeg scene scanner at {:?}: {}", ffmpeg, e))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Failed to attach stdout pipe to ffmpeg scene scanner".to_string())?;
+    let mut reader = BufReader::with_capacity(FRAME_BYTES * 8, stdout);
+    let mut buf = vec![0u8; FRAME_BYTES];
+
+    struct SampledFrame {
+        ts: f64,
+        quality: f32,
+        avg_luma: f32,
+        hist: [f32; 24],
+    }
+
+    let finalize_shot =
+        |frames: Vec<SampledFrame>,
+         shot_start: f64,
+         shot_end: f64,
+         is_non_photo: bool|
+         -> Option<crate::scene::ShotCandidateWindow> {
+            if frames.is_empty() {
+                return None;
+            }
+            let max_quality = frames
+                .iter()
+                .map(|f| f.quality)
+                .fold(0.0f32, |a, b| a.max(b));
+            let best_frame = frames
+                .iter()
+                .max_by(|a, b| {
+                    a.quality
+                        .partial_cmp(&b.quality)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .unwrap();
+
+            let dur = (shot_end - shot_start).max(0.0);
+            let mut pool: Vec<&SampledFrame> = if dur >= 1.5 {
+                let interior: Vec<&SampledFrame> = frames
+                    .iter()
+                    .filter(|f| f.ts >= shot_start + 0.4 && f.ts <= shot_end - 0.4)
+                    .collect();
+                if interior.is_empty() {
+                    frames.iter().collect()
+                } else {
+                    interior
+                }
+            } else {
+                frames.iter().collect()
+            };
+
+            pool.sort_by(|a, b| {
+                b.quality
+                    .partial_cmp(&a.quality)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            let mut best_timestamps = Vec::new();
+            for cand in &pool {
+                if best_timestamps
+                    .iter()
+                    .all(|&chosen: &f64| (chosen - cand.ts).abs() >= 1.0)
+                {
+                    best_timestamps.push(cand.ts);
+                    if best_timestamps.len() >= 3 {
+                        break;
+                    }
+                }
+            }
+            if best_timestamps.is_empty() {
+                best_timestamps.push(best_frame.ts);
+            }
+
+            Some(crate::scene::ShotCandidateWindow {
+                start_sec: shot_start,
+                end_sec: shot_end,
+                best_timestamps,
+                proxy_quality: if is_non_photo { 0.0 } else { max_quality },
+                avg_luma: best_frame.avg_luma,
+                color_hist: best_frame.hist,
+                is_non_photographic: is_non_photo,
+            })
+        };
+
+    let mut raw_shots: Vec<crate::scene::ShotCandidateWindow> = Vec::new();
+    let mut shot_frames: Vec<SampledFrame> = Vec::new();
+    let mut shot_start = 0.0f64;
+    let mut shot_non_photo = false;
+    let mut prev_img: Option<image::RgbImage> = None;
+    let mut prev_hist: [f32; 24] = [0.0; 24];
+    let mut prev_non_photo = false;
+    let mut frame_idx = 0usize;
+
+    loop {
+        match reader.read_exact(&mut buf) {
+            Ok(()) => {
+                let ts = ((frame_idx as f64) / fps).min(duration_sec);
+                frame_idx += 1;
+
+                let Some(img) = image::RgbImage::from_raw(PROXY_W, PROXY_H, buf.clone()) else {
+                    continue;
+                };
+                let is_non_photo = crate::pipeline::is_proxy_title_card_or_blank(&img);
+                let (hist, avg_luma) = crate::scene::compute_compact_color_hist(&img);
+                let quality = if is_non_photo {
+                    0.0
+                } else {
+                    compute_proxy_photographic_quality(&img)
+                };
+
+                if let Some(ref p_img) = prev_img {
+                    let mad = crate::scene::compute_frame_difference(p_img, &img);
+                    let hist_dist = crate::scene::histogram_l1_distance(&prev_hist, &hist);
+                    let is_cut = mad > 19.0
+                        || hist_dist > 0.34
+                        || prev_non_photo != is_non_photo
+                        || (ts - shot_start) >= 20.0;
+
+                    if is_cut {
+                        let shot_end = ts.max(shot_start);
+                        let taken = std::mem::take(&mut shot_frames);
+                        if let Some(w) = finalize_shot(taken, shot_start, shot_end, shot_non_photo) {
+                            raw_shots.push(w);
+                        }
+                        shot_start = ts;
+                        shot_non_photo = is_non_photo;
+                    }
+                } else {
+                    shot_start = ts;
+                    shot_non_photo = is_non_photo;
+                }
+
+                shot_frames.push(SampledFrame {
+                    ts,
+                    quality,
+                    avg_luma,
+                    hist,
+                });
+                prev_img = Some(img);
+                prev_hist = hist;
+                prev_non_photo = is_non_photo;
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("Failed reading ffmpeg proxy stream: {}", e));
+            }
+        }
+    }
+
+    let _ = child.wait();
+
+    if !shot_frames.is_empty() {
+        let shot_end = duration_sec.max(shot_start);
+        if let Some(w) = finalize_shot(shot_frames, shot_start, shot_end, shot_non_photo) {
+            raw_shots.push(w);
+        }
+    }
+
+    if raw_shots.is_empty() {
+        return Err("Scene scanner decoded zero proxy frames".to_string());
+    }
+
+    Ok(crate::scene::group_shots_into_scenes(raw_shots))
 }
 
 #[cfg(test)]

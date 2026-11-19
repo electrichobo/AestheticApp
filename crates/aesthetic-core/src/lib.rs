@@ -32,18 +32,22 @@ pub use multicam::{
     compute_cross_angle_setup_matching, compute_master_baseline_cdl_grade, generate_3d_lut_cube,
     generate_asc_cdl_xml,
 };
-pub use video::{extract_frame_rgb, extract_trimmed_clip, probe_video_metadata};
+pub use video::{
+    extract_frame_rgb, extract_trimmed_clip, probe_video_metadata, scan_video_scenes,
+};
 
 pub use pipeline::{
     analyze_folder_queue, analyze_video_file, apply_reel_diversity_ranking, compose_smart_showreel,
     compute_feedback_preference_boost, compute_personal_taste_profile,
     compute_reel_sequence_metrics, detect_burst_light_flicker, detect_flat_log_encoding,
-    detect_subtitle_or_lower_third_burnin, enrich_take, evaluate_candidate_frame,
-    generate_cinematographic_rationale, log_select_feedback_event, BatchAnalysisResult,
-    BatchOptions, CalibratedRerankerWeights, FolderBatchSummary, PersonalTasteProfile,
-    ShowreelObjective,
+    detect_subtitle_or_lower_third_burnin, detect_title_card_or_graphic, enrich_take,
+    evaluate_candidate_frame, generate_cinematographic_rationale, is_proxy_title_card_or_blank,
+    log_select_feedback_event, BatchAnalysisResult, BatchOptions, CalibratedRerankerWeights,
+    FolderBatchSummary, PersonalTasteProfile, ShowreelObjective, TitleCardDetection,
 };
 pub use scene::{
-    classify_transition, compute_frame_difference, detect_directional_wipe, TransitionType,
+    classify_transition, compute_compact_color_hist, compute_frame_difference,
+    detect_directional_wipe, group_shots_into_scenes, histogram_l1_distance, DetectedScene,
+    ShotCandidateWindow, TransitionType,
 };
 pub use window::{find_best_usable_window, FrameEvaluationSample};

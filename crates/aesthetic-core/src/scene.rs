@@ -104,3 +104,121 @@ pub fn classify_transition(
         TransitionType::None
     }
 }
+
+/// A single continuous shot segment discovered during full-timeline streaming scan.
+#[derive(Debug, Clone)]
+pub struct ShotCandidateWindow {
+    pub start_sec: f64,
+    pub end_sec: f64,
+    /// Up to 3 best interior timestamps ordered best-first for full-resolution evaluation.
+    pub best_timestamps: Vec<f64>,
+    pub proxy_quality: f32,
+    pub avg_luma: f32,
+    pub color_hist: [f32; 24],
+    pub is_non_photographic: bool,
+}
+
+/// A coherent narrative/lighting scene grouping visually related photographic shots.
+#[derive(Debug, Clone)]
+pub struct DetectedScene {
+    pub scene_index: usize,
+    pub start_sec: f64,
+    pub end_sec: f64,
+    pub shots: Vec<ShotCandidateWindow>,
+    pub is_non_photographic: bool,
+}
+
+/// Computes a normalized 24-bin RGB color histogram (8 bins/channel) and mean luma.
+pub fn compute_compact_color_hist(img: &RgbImage) -> ([f32; 24], f32) {
+    let (w, h) = img.dimensions();
+    let total = (w * h) as usize;
+    if total == 0 {
+        return ([0.0; 24], 0.0);
+    }
+
+    let mut counts = [0u32; 24];
+    let mut luma_sum = 0.0f64;
+
+    for px in img.as_raw().as_chunks::<3>().0 {
+        let r = px[0];
+        let g = px[1];
+        let b = px[2];
+        counts[(r >> 5) as usize] += 1;
+        counts[8 + (g >> 5) as usize] += 1;
+        counts[16 + (b >> 5) as usize] += 1;
+        luma_sum += (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) as f64;
+    }
+
+    let inv = 1.0 / (total as f32 * 3.0);
+    let mut hist = [0.0f32; 24];
+    for (i, &c) in counts.iter().enumerate() {
+        hist[i] = (c as f32) * inv;
+    }
+
+    (hist, (luma_sum / total as f64) as f32)
+}
+
+/// Computes L1 histogram distance in [0.0, 2.0] between two compact color histograms.
+pub fn histogram_l1_distance(a: &[f32; 24], b: &[f32; 24]) -> f32 {
+    a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum()
+}
+
+/// Groups contiguous shot windows into photographic scenes while stripping non-photographic
+/// title cards, credits, and black leaders (which act as hard scene separators).
+///
+/// Returns `(photographic_scenes, non_photographic_shot_count)`.
+pub fn group_shots_into_scenes(shots: Vec<ShotCandidateWindow>) -> (Vec<DetectedScene>, usize) {
+    let mut scenes: Vec<DetectedScene> = Vec::new();
+    let mut non_photo_count = 0usize;
+    let mut active_hist = [0.0f32; 24];
+    let mut active_luma = 0.0f32;
+    let mut had_non_photo_break = false;
+
+    for shot in shots {
+        if shot.is_non_photographic {
+            non_photo_count += 1;
+            had_non_photo_break = true;
+            continue;
+        }
+
+        let start_new_scene = if let Some(curr) = scenes.last() {
+            let last_shot_end = curr.shots.last().map(|s| s.end_sec).unwrap_or(curr.end_sec);
+            let time_gap = shot.start_sec - last_shot_end;
+            let hist_dist = histogram_l1_distance(&active_hist, &shot.color_hist);
+            let luma_jump = (active_luma - shot.avg_luma).abs();
+            let scene_dur = shot.end_sec - curr.start_sec;
+
+            had_non_photo_break
+                || time_gap > 2.5
+                || hist_dist > 0.48
+                || (luma_jump > 42.0 && hist_dist > 0.32)
+                || scene_dur > 90.0
+        } else {
+            true
+        };
+
+        had_non_photo_break = false;
+
+        if start_new_scene {
+            let idx = scenes.len() + 1;
+            active_hist = shot.color_hist;
+            active_luma = shot.avg_luma;
+            scenes.push(DetectedScene {
+                scene_index: idx,
+                start_sec: shot.start_sec,
+                end_sec: shot.end_sec,
+                shots: vec![shot],
+                is_non_photographic: false,
+            });
+        } else if let Some(curr) = scenes.last_mut() {
+            curr.end_sec = curr.end_sec.max(shot.end_sec);
+            for (h, s) in active_hist.iter_mut().zip(shot.color_hist.iter()) {
+                *h = 0.75 * *h + 0.25 * *s;
+            }
+            active_luma = 0.75 * active_luma + 0.25 * shot.avg_luma;
+            curr.shots.push(shot);
+        }
+    }
+
+    (scenes, non_photo_count)
+}

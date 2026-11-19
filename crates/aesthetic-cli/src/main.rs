@@ -92,9 +92,9 @@ fn main() {
 
 fn print_usage() {
     println!("\nCommands:");
-    println!("  analyze <video_file>   Analyze video and generate 4-output candidate selects");
+    println!("  analyze <video_file>   Analyze video across all scenes and generate candidate selects");
     println!("    Options:");
-    println!("      --top <N>              Limit candidate selects to top N hero shots");
+    println!("      -n, --top <N>          Limit ranked selects to top N hero shots (0 = All scenes)");
     println!("      --edl <file.edl>       Export CMX 3600 standard EDL");
     println!("      --csv <file.csv>       Export CSV selects manifest");
     println!("      --xml <file.xml>       Export FCPXML timeline for DaVinci Resolve / FCP");
@@ -102,7 +102,7 @@ fn print_usage() {
     println!("      --sidecars <dir>       Export JSON shot sidecars to <dir>/metrics/*.json");
     println!("      --clips <dir>          Export trimmed select clips with handles");
     println!("      --package [dir]        Export complete Unified Deliverables Package (.zip + folder)");
-    println!("      --step <seconds>       Sampling interval in seconds (default: 1.0)");
+    println!("      --step <seconds>       Override scene-scan sample interval in seconds (default: adaptive)");
     println!("  ingest-baseline <file_or_dir> --title <title> --dp <cinematographer>");
     println!("                         Ingest reference film, still image, or directory into Golden Baseline");
     println!("  ingest-server <dir>    Scan media server, match Oscar/ASC/BSC award titles, & ingest shots");
@@ -116,10 +116,11 @@ fn print_usage() {
     println!("  batch <folder>         Batch analyze all video files in a folder into organized sidecars");
     println!("    Options:");
     println!("      --out <dir>            Output root directory for sidecars");
-    println!("      --step <seconds>       Sample interval in seconds (default: 2.0)");
-    println!("      --top <N>              Top N takes per video file");
+    println!("      --step <seconds>       Override scene-scan sample interval in seconds (default: adaptive)");
+    println!("      -n, --top <N>          Top N takes per video file (0 = All scenes)");
     println!("  rescore <sidecars_dir> Instantaneously re-score cached JSON+PNG sidecars against current baseline");
     println!("    Options:");
+    println!("      -n, --top <N>          Limit rescored selects to top N hero shots (0 = All)");
     println!("      --contact-sheet <file> Export updated visual HTML contact sheet");
     println!("      --resolve <file.py>    Export DaVinci Resolve Python automation script");
     println!("      --live-resolve         Directly assemble timeline in running DaVinci Resolve");
@@ -178,7 +179,7 @@ fn run_folder_batch(folder: &Path, flags: &[String]) {
         .parent()
         .unwrap_or(folder)
         .join(format!("{}_sidecars", folder.file_name().and_then(|s| s.to_str()).unwrap_or("batch")));
-    let mut step = 2.0;
+    let mut step = 1.0;
     let mut top_n: Option<usize> = None;
 
     let mut i = 0;
@@ -194,9 +195,9 @@ fn run_folder_batch(folder: &Path, flags: &[String]) {
                 }
                 i += 1;
             }
-            "--top" if i + 1 < flags.len() => {
+            "-n" | "--top" | "--top-n" if i + 1 < flags.len() => {
                 if let Ok(n) = flags[i + 1].parse::<usize>() {
-                    top_n = Some(n);
+                    top_n = if n == 0 { None } else { Some(n) };
                 }
                 i += 1;
             }
@@ -231,9 +232,17 @@ fn run_sidecars_rescore(sidecars_dir: &Path, flags: &[String]) {
     let mut contact_sheet_path: Option<PathBuf> = None;
     let mut resolve_script_path: Option<PathBuf> = None;
     let mut live_resolve: bool = false;
+    let mut top_n: Option<usize> = None;
     let mut i = 0;
     while i < flags.len() {
-        if (flags[i] == "--contact-sheet" || flags[i] == "--html") && i + 1 < flags.len() {
+        if (flags[i] == "-n" || flags[i] == "--top" || flags[i] == "--top-n")
+            && i + 1 < flags.len()
+        {
+            if let Ok(n) = flags[i + 1].parse::<usize>() {
+                top_n = if n == 0 { None } else { Some(n) };
+            }
+            i += 1;
+        } else if (flags[i] == "--contact-sheet" || flags[i] == "--html") && i + 1 < flags.len() {
             contact_sheet_path = Some(PathBuf::from(&flags[i + 1]));
             i += 1;
         } else if (flags[i] == "--resolve" || flags[i] == "--resolve-script") && i + 1 < flags.len()
@@ -248,7 +257,12 @@ fn run_sidecars_rescore(sidecars_dir: &Path, flags: &[String]) {
 
     let t0 = Instant::now();
     match aesthetic_core::export::rescore_from_sidecars(sidecars_dir) {
-        Ok((takes, hero_frames)) => {
+        Ok((mut takes, hero_frames)) => {
+            if let Some(n) = top_n {
+                if n > 0 && n < takes.len() {
+                    takes.truncate(n);
+                }
+            }
             let elapsed = t0.elapsed().as_secs_f64() * 1000.0;
             println!(
                 "\nRe-scored {} cached takes in {:.1}ms against Golden Baseline",
@@ -346,9 +360,9 @@ fn run_video_analysis(video_path: &Path, flags: &[String]) {
                     package_dir = Some(PathBuf::from("outputs").join(format!("deliverables_{}", stem)));
                 }
             }
-            "--top" | "--top-n" if i + 1 < flags.len() => {
+            "-n" | "--top" | "--top-n" if i + 1 < flags.len() => {
                 if let Ok(n) = flags[i + 1].parse::<usize>() {
-                    options.top_n = Some(n);
+                    options.top_n = if n == 0 { None } else { Some(n) };
                 }
                 i += 1;
             }
@@ -403,8 +417,11 @@ fn run_video_analysis(video_path: &Path, flags: &[String]) {
                 result.video_info.duration_sec
             );
             println!(
-                "Candidate Selects Identified: {}",
-                result.ranked_takes.len()
+                "Scenes Checked: {} | Title Cards Filtered: {} | Ranked Selects: {} of {}",
+                result.total_scenes_detected,
+                result.filtered_title_cards_count,
+                result.ranked_takes.len(),
+                result.all_ranked_takes.len()
             );
             println!("------------------------------------------------------------");
 

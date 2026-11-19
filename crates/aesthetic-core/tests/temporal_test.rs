@@ -254,3 +254,313 @@ fn test_reel_continuity_and_sidecar_rescore() {
     let reel = aesthetic_core::compose_smart_showreel(&rescored, 2.0, aesthetic_core::ShowreelObjective::DramaticNarrative);
     assert_eq!(reel.len(), 1);
 }
+
+fn draw_synthetic_text_band(img: &mut RgbImage, y0: u32, y1: u32, x0: u32, x1: u32, fg: Rgb<u8>) {
+    for y in y0..y1.min(img.height()) {
+        for x in x0..x1.min(img.width()) {
+            // Alternating glyph vertical strokes with letter spaces (every 6 px)
+            let dx = x - x0;
+            if (dx % 6) < 3 && ((y - y0) != (y1 - y0) / 2 || (dx % 12) < 6) {
+                img.put_pixel(x, y, fg);
+            }
+        }
+    }
+}
+
+#[test]
+fn test_title_card_detection_and_filtering() {
+    use aesthetic_core::{
+        apply_reel_diversity_ranking, detect_title_card_or_graphic, is_proxy_title_card_or_blank,
+    };
+    use aesthetic_models::ShotTake;
+    use aesthetic_metrics::compute_objective_physics;
+    use aesthetic_models::baseline::MetricQuantiles;
+
+    let (w, h) = (320u32, 180u32);
+
+    // 1. White-on-black title card
+    let mut black_card = RgbImage::from_pixel(w, h, Rgb([10, 10, 12]));
+    for row_y in [58u32, 74, 90, 106, 122] {
+        draw_synthetic_text_band(&mut black_card, row_y, row_y + 8, 70, 250, Rgb([240, 240, 242]));
+    }
+    let phys_black = compute_objective_physics(&black_card);
+    assert!(
+        detect_title_card_or_graphic(&black_card, &phys_black).is_some(),
+        "White-on-black title card must be flagged"
+    );
+    let black_proxy = image::imageops::resize(&black_card, 160, 90, image::imageops::FilterType::Triangle);
+    assert!(
+        is_proxy_title_card_or_blank(&black_proxy),
+        "Proxy white-on-black title card must be flagged"
+    );
+
+    // 2. Black-on-white title card
+    let mut white_card = RgbImage::from_pixel(w, h, Rgb([244, 244, 246]));
+    for row_y in [60u32, 78, 96, 114] {
+        draw_synthetic_text_band(&mut white_card, row_y, row_y + 8, 80, 240, Rgb([16, 16, 20]));
+    }
+    let phys_white = compute_objective_physics(&white_card);
+    assert!(
+        detect_title_card_or_graphic(&white_card, &phys_white).is_some(),
+        "Black-on-white title card must be flagged"
+    );
+    let white_proxy = image::imageops::resize(&white_card, 160, 90, image::imageops::FilterType::Triangle);
+    assert!(
+        is_proxy_title_card_or_blank(&white_proxy),
+        "Proxy black-on-white title card must be flagged"
+    );
+
+    // 3. Gold-on-navy-gradient title card
+    let mut grad_card = RgbImage::new(w, h);
+    for y in 0..h {
+        let fy = y as f32 / (h - 1) as f32;
+        for x in 0..w {
+            let r = (14.0 + fy * 16.0) as u8;
+            let g = (24.0 + fy * 22.0) as u8;
+            let b = (52.0 + fy * 34.0) as u8;
+            grad_card.put_pixel(x, y, Rgb([r, g, b]));
+        }
+    }
+    for row_y in [64u32, 82, 100, 118] {
+        draw_synthetic_text_band(&mut grad_card, row_y, row_y + 8, 72, 248, Rgb([235, 190, 68]));
+    }
+    let phys_grad = compute_objective_physics(&grad_card);
+    assert!(
+        detect_title_card_or_graphic(&grad_card, &phys_grad).is_some(),
+        "Gold-on-navy-gradient title card must be flagged"
+    );
+    let grad_proxy = image::imageops::resize(&grad_card, 160, 90, image::imageops::FilterType::Triangle);
+    assert!(
+        is_proxy_title_card_or_blank(&grad_proxy),
+        "Proxy gradient title card must be flagged"
+    );
+
+    // 4. Multi-row rolling credits card
+    let mut credits_card = RgbImage::from_pixel(w, h, Rgb([12, 12, 14]));
+    for i in 0..10u32 {
+        let y0 = 20 + i * 14;
+        draw_synthetic_text_band(&mut credits_card, y0, y0 + 6, 48, 272, Rgb([232, 232, 235]));
+    }
+    let phys_cred = compute_objective_physics(&credits_card);
+    assert!(
+        detect_title_card_or_graphic(&credits_card, &phys_cred).is_some(),
+        "Multi-row credits roll must be flagged"
+    );
+
+    // 5. Rich photographic scene must NOT be flagged
+    let mut photo = RgbImage::new(w, h);
+    for y in 0..h {
+        for x in 0..w {
+            let nx = x as f32 / w as f32;
+            let ny = y as f32 / h as f32;
+            let wave = (nx * 9.0 + ny * 4.5).sin() * 28.0 + (nx * 19.0 - ny * 11.0).cos() * 14.0;
+            let r = (70.0 + nx * 130.0 + wave).clamp(0.0, 255.0) as u8;
+            let g = (55.0 + ny * 110.0 + wave * 0.7).clamp(0.0, 255.0) as u8;
+            let b = (90.0 + (1.0 - nx) * 85.0 - wave * 0.5).clamp(0.0, 255.0) as u8;
+            photo.put_pixel(x, y, Rgb([r, g, b]));
+        }
+    }
+    let phys_photo = compute_objective_physics(&photo);
+    assert!(
+        detect_title_card_or_graphic(&photo, &phys_photo).is_none(),
+        "Rich photographic scene must NOT be flagged as a title card"
+    );
+    let photo_proxy = image::imageops::resize(&photo, 160, 90, image::imageops::FilterType::Triangle);
+    assert!(
+        !is_proxy_title_card_or_blank(&photo_proxy),
+        "Proxy rich photographic scene must NOT be flagged"
+    );
+
+    // 6. Low-key chiaroscuro portrait with smooth spherical shading on dark ambient wall
+    let mut portrait = RgbImage::new(w, h);
+    for y in 0..h {
+        for x in 0..w {
+            let nx = x as f32 / w as f32;
+            let ny = y as f32 / h as f32;
+            let sx = (nx - 0.42) / 0.14;
+            let sy = (ny - 0.44) / 0.24;
+            let r2 = sx * sx + sy * sy;
+            if r2 < 1.0 {
+                let nz = (1.0 - r2).sqrt();
+                let key = (-0.6 * sx - 0.35 * sy + 0.7 * nz).max(0.0);
+                let luma = 35.0 + 165.0 * key;
+                portrait.put_pixel(
+                    x,
+                    y,
+                    Rgb([
+                        (luma * 1.1).clamp(0.0, 255.0) as u8,
+                        (luma * 0.85).clamp(0.0, 255.0) as u8,
+                        (luma * 0.65).clamp(0.0, 255.0) as u8,
+                    ]),
+                );
+            } else {
+                // Soft ambient practical glow on dark studio background (smooth mid gradients)
+                let wall = 22.0 + 26.0 * (nx * 4.5).sin().abs() + 18.0 * (1.0 - ny);
+                portrait.put_pixel(
+                    x,
+                    y,
+                    Rgb([
+                        wall as u8,
+                        (wall * 1.05) as u8,
+                        (wall * 1.25) as u8,
+                    ]),
+                );
+            }
+        }
+    }
+    let phys_port = compute_objective_physics(&portrait);
+    assert!(
+        detect_title_card_or_graphic(&portrait, &phys_port).is_none(),
+        "Low-key chiaroscuro portrait must NOT be flagged"
+    );
+
+    // 7. Ranking removes title card completely when photographic takes exist
+    let q = MetricQuantiles {
+        min: 1.0,
+        p10: 5.0,
+        p25: 8.0,
+        p50: 10.0,
+        p75: 12.0,
+        p90: 14.0,
+        max: 16.5,
+    };
+    let mut t_photo = evaluate_candidate_frame(&photo, "take_001", 1, 10.0, &q, &q, &q);
+    t_photo.scores.overall = 82.0;
+    let t_card = evaluate_candidate_frame(&black_card, "take_002", 2, 1.0, &q, &q, &q);
+    assert!(t_card
+        .concerns
+        .iter()
+        .any(|c| c.code == "NON_PHOTOGRAPHIC_OR_CREDITS"));
+
+    let mut mixed: Vec<ShotTake> = vec![t_card, t_photo];
+    apply_reel_diversity_ranking(&mut mixed);
+    assert_eq!(mixed.len(), 1, "Title card must be excluded from ranked takes");
+    assert_eq!(mixed[0].take_id, "take_001");
+}
+
+#[test]
+fn test_scene_grouping_and_scene_coverage_ranking() {
+    use aesthetic_core::{
+        apply_reel_diversity_ranking, group_shots_into_scenes, ShotCandidateWindow,
+    };
+    use aesthetic_models::ShotTake;
+
+    let make_hist = |r_bin: usize, g_bin: usize, b_bin: usize| -> [f32; 24] {
+        let mut h = [0.0f32; 24];
+        h[r_bin] = 0.33;
+        h[8 + g_bin] = 0.33;
+        h[16 + b_bin] = 0.34;
+        h
+    };
+
+    let raw_shots = vec![
+        // Scene 1: 2 similar shots
+        ShotCandidateWindow {
+            start_sec: 0.0,
+            end_sec: 3.0,
+            best_timestamps: vec![1.5],
+            proxy_quality: 75.0,
+            avg_luma: 95.0,
+            color_hist: make_hist(4, 3, 2),
+            is_non_photographic: false,
+        },
+        ShotCandidateWindow {
+            start_sec: 3.0,
+            end_sec: 6.0,
+            best_timestamps: vec![4.5],
+            proxy_quality: 82.0,
+            avg_luma: 98.0,
+            color_hist: make_hist(4, 3, 2),
+            is_non_photographic: false,
+        },
+        // Intertitle / title card separator
+        ShotCandidateWindow {
+            start_sec: 6.0,
+            end_sec: 9.0,
+            best_timestamps: vec![7.5],
+            proxy_quality: 0.0,
+            avg_luma: 12.0,
+            color_hist: make_hist(0, 0, 0),
+            is_non_photographic: true,
+        },
+        // Scene 2: separated by non-photographic title card
+        ShotCandidateWindow {
+            start_sec: 9.0,
+            end_sec: 13.0,
+            best_timestamps: vec![11.0],
+            proxy_quality: 80.0,
+            avg_luma: 100.0,
+            color_hist: make_hist(4, 3, 2),
+            is_non_photographic: false,
+        },
+        // Scene 3: large palette shift
+        ShotCandidateWindow {
+            start_sec: 13.0,
+            end_sec: 17.0,
+            best_timestamps: vec![15.0],
+            proxy_quality: 85.0,
+            avg_luma: 185.0,
+            color_hist: make_hist(7, 7, 5),
+            is_non_photographic: false,
+        },
+        // Scene 4: large palette shift to night exterior
+        ShotCandidateWindow {
+            start_sec: 17.0,
+            end_sec: 21.0,
+            best_timestamps: vec![19.0],
+            proxy_quality: 78.0,
+            avg_luma: 38.0,
+            color_hist: make_hist(0, 1, 5),
+            is_non_photographic: false,
+        },
+    ];
+
+    let (scenes, non_photo_count) = group_shots_into_scenes(raw_shots);
+    assert_eq!(non_photo_count, 1, "Must count filtered title card separator");
+    assert_eq!(scenes.len(), 4, "Must discover all 4 distinct photographic scenes");
+    assert_eq!(scenes[0].shots.len(), 2, "Similar consecutive shots merge into Scene 1");
+
+    // Verify scene-coverage diversity in apply_reel_diversity_ranking:
+    // Give Scene 1 three slightly higher scores than Scenes 2, 3, 4 and check Top 4 covers all 4 scenes.
+    let make_take = |id: &str, scene_idx: usize, score: f32, dr: f32, luma: f32, cct: f32| -> ShotTake {
+        let mut t = ShotTake {
+            take_id: id.to_string(),
+            scene_index: scene_idx,
+            start_sec: scene_idx as f64 * 10.0,
+            end_sec: scene_idx as f64 * 10.0 + 3.0,
+            duration_sec: 3.0,
+            hero_frame_index: Some(0),
+            hero_timestamp_sec: scene_idx as f64 * 10.0 + 1.5,
+            scores: Default::default(),
+            style: Default::default(),
+            measured: Default::default(),
+            concerns: Vec::new(),
+            craft: None,
+            golden_baseline: Vec::new(),
+            rationale_summary: String::new(),
+        };
+        t.scores.overall = score;
+        t.measured.exposure.dynamic_range_stops = dr;
+        t.measured.exposure.histogram_mean = luma;
+        t.measured.color.estimated_kelvin = cct;
+        t
+    };
+
+    let mut takes = vec![
+        make_take("s1_a", 1, 92.0, 10.5, 110.0, 5200.0),
+        make_take("s1_b", 1, 91.5, 10.6, 112.0, 5220.0),
+        make_take("s1_c", 1, 91.0, 10.4, 108.0, 5180.0),
+        make_take("s2_a", 2, 89.0, 9.8, 125.0, 6200.0),
+        make_take("s3_a", 3, 88.0, 11.2, 160.0, 4000.0),
+        make_take("s4_a", 4, 87.0, 8.9, 65.0, 3200.0),
+    ];
+
+    apply_reel_diversity_ranking(&mut takes);
+    let top4_scenes: std::collections::HashSet<usize> =
+        takes.iter().take(4).map(|t| t.scene_index).collect();
+    assert_eq!(
+        top4_scenes.len(),
+        4,
+        "Top 4 selects must represent all 4 distinct scenes before duplicating Scene 1"
+    );
+}

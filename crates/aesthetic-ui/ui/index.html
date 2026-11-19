@@ -15,6 +15,13 @@
         <span class="version-tag">Core Engine v0.1.0 (Rust)</span>
       </div>
       <div class="header-actions">
+        <!-- Configurable Top N Ranked Selects Control -->
+        <div class="top-n-control" title="Number of top shots (N) to rank &amp; export across all scenes (0 = All scenes)">
+          <label for="input-top-n" class="top-n-label">Top N</label>
+          <input type="number" id="input-top-n" class="top-n-input" min="0" max="500" step="1" value="20" aria-label="Number of shots to rank">
+          <button type="button" id="btn-top-n-all" class="top-n-all-btn" title="Show &amp; export all ranked scenes">All</button>
+        </div>
+
         <!-- Import Dropdown -->
         <div class="dropdown" id="dropdown-import">
           <button class="btn btn-secondary dropdown-toggle" id="btn-dropdown-import" title="Media ingest options">

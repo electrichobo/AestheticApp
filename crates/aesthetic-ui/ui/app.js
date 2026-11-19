@@ -1244,8 +1244,21 @@ async function loadSelects() {
     currentTakes = data.takes || [];
     if (data.duration) videoDuration = data.duration;
 
-    if (countBadge) countBadge.textContent = `${currentTakes.length} Takes`;
-    if (modalSheetCount) modalSheetCount.textContent = `${currentTakes.length} Hero Selects`;
+    const totalAvailable = data.total_available_takes != null ? data.total_available_takes : currentTakes.length;
+    const totalScenes = data.total_scenes_detected != null ? data.total_scenes_detected : 0;
+    const filteredCards = data.filtered_title_cards_count != null ? data.filtered_title_cards_count : 0;
+
+    if (countBadge) {
+      countBadge.textContent = totalScenes > 0
+        ? `${currentTakes.length} Takes • ${totalScenes} Scenes`
+        : `${currentTakes.length} Takes`;
+      countBadge.title = `Ranked: ${currentTakes.length} of ${totalAvailable} candidate takes across ${totalScenes} scenes (${filteredCards} title cards/leaders filtered out)`;
+    }
+    if (modalSheetCount) {
+      modalSheetCount.textContent = totalScenes > 0
+        ? `${currentTakes.length} Hero Selects (${totalScenes} Scenes • ${filteredCards} Cards Filtered)`
+        : `${currentTakes.length} Hero Selects`;
+    }
     takesList.innerHTML = '';
     if (modalSheetGrid) {
       modalSheetGrid.innerHTML = '';
@@ -1288,6 +1301,9 @@ async function loadSelects() {
         decisionText = 'Defect Alert';
       }
 
+      const sceneIdx = t.scene_index != null ? t.scene_index : (i + 1);
+      const sceneLabel = `S${String(sceneIdx).padStart(2, '0')}`;
+
       // 1. Candidate Selects Card in Left Panel
       const item = document.createElement('div');
       item.className = `take-item ${i === activeTakeIndex ? 'active' : ''}`;
@@ -1299,7 +1315,7 @@ async function loadSelects() {
           <span class="take-name">${t.take_id || `Take ${String(i + 1).padStart(2, '0')}`}</span>
           <span class="take-score">${score}</span>
         </div>
-        <div class="take-details">${startTc} – ${endTc} (${dur}s)</div>
+        <div class="take-details"><span class="take-scene-tag">${sceneLabel}</span>&bull; ${startTc} – ${endTc} (${dur}s)</div>
         <div class="take-tags-row">
           <span class="take-tag-pill">${t.style?.lighting_key || 'Natural'}</span>
           <span class="take-tag-pill">${t.style?.motion_type || 'Static'}</span>
@@ -1355,7 +1371,7 @@ async function loadSelects() {
           </div>
           <div class="sheet-card-body">
             <div class="sheet-card-header">
-              <span class="sheet-card-title">#${i + 1} — ${t.take_id}</span>
+              <span class="sheet-card-title">#${i + 1} (${sceneLabel}) — ${t.take_id}</span>
               <span class="sheet-card-score">${score} / 100</span>
             </div>
             <div class="take-details">${startTc} &rarr; ${endTc} (${dur}s)</div>
@@ -1554,6 +1570,69 @@ window.addEventListener('click', () => {
   if (dropdownExport) dropdownExport.classList.remove('open');
 });
 
+// ============================================================================
+// Top-N Ranked Shots Control (Header Input + All Toggle + Persistence)
+// ============================================================================
+const inputTopN = document.getElementById('input-top-n');
+const btnTopNAll = document.getElementById('btn-top-n-all');
+
+function getSelectedTopN() {
+  if (inputTopN) {
+    const parsed = parseInt(inputTopN.value, 10);
+    if (!Number.isNaN(parsed) && parsed >= 0) {
+      return Math.min(500, parsed);
+    }
+  }
+  const saved = parseInt(localStorage.getItem('aesthetic_top_n') || '20', 10);
+  return Number.isNaN(saved) || saved < 0 ? 20 : Math.min(500, saved);
+}
+
+function syncTopNUI(val) {
+  const clean = Math.max(0, Math.min(500, Number.isNaN(val) ? 20 : val));
+  if (inputTopN) inputTopN.value = String(clean);
+  if (btnTopNAll) btnTopNAll.classList.toggle('active', clean === 0);
+  try {
+    localStorage.setItem('aesthetic_top_n', String(clean));
+  } catch (_) {}
+  return clean;
+}
+
+async function applyTopNLive(val) {
+  const clean = syncTopNUI(val);
+  try {
+    const res = await fetch(`/api/set_top_n?top=${encodeURIComponent(clean)}`);
+    if (res.ok) {
+      activeTakeIndex = 0;
+      await loadSelects();
+      if (currentTakes.length > 0) {
+        const first = currentTakes[0];
+        const heroTime = first.hero_timestamp_sec != null ? first.hero_timestamp_sec : first.start_sec;
+        fetchFrameData(heroTime);
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to update Top-N slice:', err);
+  }
+}
+
+{
+  const initialTopN = parseInt(localStorage.getItem('aesthetic_top_n') || '20', 10);
+  syncTopNUI(Number.isNaN(initialTopN) ? 20 : initialTopN);
+}
+
+if (inputTopN) {
+  inputTopN.addEventListener('change', () => {
+    applyTopNLive(parseInt(inputTopN.value, 10));
+  });
+}
+
+if (btnTopNAll) {
+  btnTopNAll.addEventListener('click', () => {
+    const curr = getSelectedTopN();
+    applyTopNLive(curr === 0 ? 20 : 0);
+  });
+}
+
 // Import Options
 const btnOpen = document.getElementById('btn-open-file');
 if (btnOpen) {
@@ -1574,14 +1653,16 @@ if (btnOpen) {
       if (!filePath || !filePath.trim()) return;
       filePath = filePath.trim().replace(/^["']|["']$/g, '').trim();
 
+      const topN = getSelectedTopN();
       const takesList = document.getElementById('takes-list');
       if (takesList) {
-        takesList.innerHTML = '<div class="empty-state">Analyzing video stream & computing cinematographic matrix...</div>';
+        takesList.innerHTML = `<div class="empty-state">Scanning every scene on timeline &amp; filtering title cards (Top ${topN === 0 ? 'All' : topN})...</div>`;
       }
 
-      const res = await fetch(`/api/analyze?path=${encodeURIComponent(filePath)}`);
+      const res = await fetch(`/api/analyze?path=${encodeURIComponent(filePath)}&top=${encodeURIComponent(topN)}`);
       const data = await res.json();
       if (data.success) {
+        activeTakeIndex = 0;
         await loadSelects();
         fetchFrameData(currentTime);
       } else {
@@ -1632,14 +1713,16 @@ if (btnOpenSidecars) {
       if (!dirPath || !dirPath.trim()) return;
       dirPath = dirPath.trim().replace(/^["']|["']$/g, '').trim();
 
+      const topN = getSelectedTopN();
       const takesList = document.getElementById('takes-list');
       if (takesList) {
-        takesList.innerHTML = '<div class="empty-state">Loading cached sidecars & computing baseline similarity...</div>';
+        takesList.innerHTML = '<div class="empty-state">Loading cached sidecars, filtering title cards &amp; computing baseline similarity...</div>';
       }
 
-      const res = await fetch(`/api/rescore_sidecars?path=${encodeURIComponent(dirPath)}`);
+      const res = await fetch(`/api/rescore_sidecars?path=${encodeURIComponent(dirPath)}&top=${encodeURIComponent(topN)}`);
       const data = await res.json();
       if (data.success) {
+        activeTakeIndex = 0;
         await loadSelects();
       } else {
         alert(`Failed to rescore sidecars: ${data.error || 'Unknown error'}`);
@@ -1672,9 +1755,10 @@ if (btnBatchFolder) {
       if (!folderPath || !folderPath.trim()) return;
       folderPath = folderPath.trim().replace(/^["']|["']$/g, '').trim();
 
+      const topN = getSelectedTopN();
       btnBatchFolder.disabled = true;
-      alert(`[AESTHETIC Batch Queue]\nStarting batch analysis on directory:\n${folderPath}\nThis runs sequentially across all video files and saves individual sidecars.`);
-      const res = await fetch(`/api/batch_folder?folder=${encodeURIComponent(folderPath)}&step=2.0`);
+      alert(`[AESTHETIC Batch Queue]\nStarting exhaustive scene-by-scene batch analysis (Top N = ${topN === 0 ? 'All' : topN}) on directory:\n${folderPath}\nThis runs sequentially across all video files and saves individual sidecars.`);
+      const res = await fetch(`/api/batch_folder?folder=${encodeURIComponent(folderPath)}&top=${encodeURIComponent(topN)}`);
       const data = await res.json();
       if (data.folder_path) {
         alert(`[✓] Batch Analysis Finished!\nProcessed ${data.total_files_processed} files in ${data.elapsed_sec.toFixed(1)}s.\nTotal Hero Selects Extracted: ${data.total_takes_extracted}\nOutput saved to: ${data.output_sidecars_dir}`);

@@ -61,6 +61,10 @@ impl Default for BatchOptions {
 pub struct BatchAnalysisResult {
     pub video_info: VideoSourceInfo,
     pub ranked_takes: Vec<ShotTake>,
+    /// Full un-truncated list of ranked takes across all detected scenes for instant Top-N re-slicing.
+    pub all_ranked_takes: Vec<ShotTake>,
+    pub total_scenes_detected: usize,
+    pub filtered_title_cards_count: usize,
     pub sequence_metrics: ReelSequenceMetrics,
     pub edl_content: String,
     pub csv_content: String,
@@ -91,15 +95,20 @@ pub fn evaluate_candidate_frame(
     // 2. Compute full Objective Physics measurements
     let physics = compute_objective_physics(&active_img);
 
-    // 3. Automatic Lighting Key and Style Discovery
-    let is_black_or_credits = physics.exposure.histogram_mean < 14.0
-        || physics.exposure.shadow_clip_pct > 78.0
-        || physics.exposure.el_zones.zone_0_black_pct > 82.0
-        || physics.color.palette_entropy < 1.0;
+    // 3. Multi-signal non-photographic title card / credits / leader detection
+    // Also check uncropped frame when matte crop trimmed wide margins on both axes (centered title box on black).
+    let mut title_card_det = detect_title_card_or_graphic(&active_img, &physics);
+    if title_card_det.is_none()
+        && crop.x > img.width() / 10
+        && crop.y > img.height() / 10
+    {
+        title_card_det = detect_title_card_or_graphic(img, &physics);
+    }
+    let is_black_or_credits = title_card_det.is_some();
 
     let zones = &physics.exposure.false_color_zones;
     let lighting_key = if is_black_or_credits {
-        "Black / Credits Leader".to_string()
+        "Title Card / Non-Photographic".to_string()
     } else if zones.highlight_zone_pct > 25.0 || zones.skin_zone_pct > 35.0 {
         "High-Key".to_string()
     } else if zones.black_clip_pct > 15.0 || zones.shadow_zone_pct > 40.0 {
@@ -131,7 +140,7 @@ pub fn evaluate_candidate_frame(
     let mut technical_score =
         (dr_score * 0.35 + rolloff_score * 0.35 + sharp_score * 0.30).clamp(0.0, 100.0);
     if is_black_or_credits {
-        technical_score = (technical_score * 0.20).min(18.0);
+        technical_score = (technical_score * 0.15).min(12.0);
     }
     // Creative (craft) and temporal pillars are filled in by `enrich_take` when measured.
     // Until then the overall score reflects only what was actually measured.
@@ -140,15 +149,18 @@ pub fn evaluate_candidate_frame(
     let overall_score = technical_score;
 
     let mut concerns = Vec::new();
-    if is_black_or_credits {
+    if let Some(ref det) = title_card_det {
         concerns.push(DiagnosticFlag {
             code: "NON_PHOTOGRAPHIC_OR_CREDITS".to_string(),
-            title: "Black Leader or Title/Credits Graphic".to_string(),
+            title: "Title Card, Credits, or Non-Photographic Graphic".to_string(),
             description: format!(
-                "Frame is {:.1}% black floor (mean luma {:.1}, entropy {:.2} bits) — deprioritized from hero cinematography selects",
-                physics.exposure.el_zones.zone_0_black_pct,
-                physics.exposure.histogram_mean,
-                physics.color.palette_entropy
+                "{} (border match {:.0}%, bg match {:.0}%, flat {:.0}%, mid-grad {:.1}%, text bands {}) — filtered from hero selects",
+                det.reason,
+                det.border_bg_pct * 100.0,
+                det.bg_match_pct * 100.0,
+                det.flat_pixel_pct * 100.0,
+                det.mid_grad_pct * 100.0,
+                det.text_band_rows
             ),
             severity: aesthetic_models::forensics::DiagnosticSeverity::Warning,
             timestamp_sec,
@@ -727,7 +739,646 @@ pub fn detect_subtitle_or_lower_third_burnin(img: &RgbImage) -> bool {
     low_density > 0.045 && low_density > (mid_density * 3.2).max(0.04) && glyph_pct > 0.015 && glyph_pct < 0.28
 }
 
-/// Executes full end-to-end batch analysis on a video file.
+/// Diagnostic breakdown explaining why a frame was classified as a non-photographic title card,
+/// slate, credits roll, or blank leader.
+#[derive(Debug, Clone)]
+pub struct TitleCardDetection {
+    pub reason: String,
+    pub bg_match_pct: f32,
+    pub border_bg_pct: f32,
+    pub flat_pixel_pct: f32,
+    pub mid_grad_pct: f32,
+    pub text_band_rows: usize,
+}
+
+#[derive(Debug, Clone)]
+struct GraphicCardFeatures {
+    bg_match_pct: f32,
+    border_bg_pct: f32,
+    border_grad_mean: f32,
+    border_mean_luma: f32,
+    border_luma_std: f32,
+    flat_pixel_pct: f32,
+    mid_grad_pct: f32,
+    sharp_edge_pct: f32,
+    text_band_rows: usize,
+    dense_credit_rows: usize,
+}
+
+fn channel_median(vals: &mut [u8]) -> f32 {
+    if vals.is_empty() {
+        return 0.0;
+    }
+    vals.sort_unstable();
+    let mid = vals.len() / 2;
+    if vals.len() % 2 == 1 {
+        vals[mid] as f32
+    } else {
+        (vals[mid - 1] as f32 + vals[mid] as f32) * 0.5
+    }
+}
+
+fn corner_median_rgb(img: &RgbImage, x0: u32, y0: u32, x1: u32, y1: u32) -> [f32; 3] {
+    let cap = ((x1 - x0) * (y1 - y0)) as usize;
+    let mut rs = Vec::with_capacity(cap);
+    let mut gs = Vec::with_capacity(cap);
+    let mut bs = Vec::with_capacity(cap);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let p = img.get_pixel(x, y);
+            rs.push(p[0]);
+            gs.push(p[1]);
+            bs.push(p[2]);
+        }
+    }
+    [
+        channel_median(&mut rs),
+        channel_median(&mut gs),
+        channel_median(&mut bs),
+    ]
+}
+
+fn analyze_graphic_card_features(img: &RgbImage) -> GraphicCardFeatures {
+    let (w0, h0) = img.dimensions();
+    let resized;
+    let proxy: &RgbImage = if w0 > 320 {
+        let nh = ((h0 as f32) * 320.0 / (w0 as f32)).round().max(16.0) as u32;
+        resized = image::imageops::resize(img, 320, nh, image::imageops::FilterType::Triangle);
+        &resized
+    } else {
+        img
+    };
+
+    let (w, h) = proxy.dimensions();
+    if w < 16 || h < 16 {
+        return GraphicCardFeatures {
+            bg_match_pct: 1.0,
+            border_bg_pct: 1.0,
+            border_grad_mean: 0.0,
+            border_mean_luma: 0.0,
+            border_luma_std: 0.0,
+            flat_pixel_pct: 1.0,
+            mid_grad_pct: 0.0,
+            sharp_edge_pct: 0.0,
+            text_band_rows: 0,
+            dense_credit_rows: 0,
+        };
+    }
+
+    // Fit 4-corner bilinear background model (10% x 10% corner patches, min 4x4)
+    let pw = ((w as f32 * 0.10).round() as u32).max(4).min(w / 2);
+    let ph = ((h as f32 * 0.10).round() as u32).max(4).min(h / 2);
+    let c_tl = corner_median_rgb(proxy, 0, 0, pw, ph);
+    let c_tr = corner_median_rgb(proxy, w - pw, 0, w, ph);
+    let c_bl = corner_median_rgb(proxy, 0, h - ph, pw, h);
+    let c_br = corner_median_rgb(proxy, w - pw, h - ph, w, h);
+
+    let bg_at = |x: u32, y: u32| -> [f32; 3] {
+        let fx = x as f32 / (w - 1) as f32;
+        let fy = y as f32 / (h - 1) as f32;
+        let mut out = [0.0f32; 3];
+        for ch in 0..3 {
+            let top = c_tl[ch] * (1.0 - fx) + c_tr[ch] * fx;
+            let bot = c_bl[ch] * (1.0 - fx) + c_br[ch] * fx;
+            out[ch] = top * (1.0 - fy) + bot * fy;
+        }
+        out
+    };
+
+    let luma_of = |rgb: [f32; 3]| -> f32 { 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2] };
+
+    // Outer 8% border metrics
+    let bx_margin = ((w as f32 * 0.08).round() as u32).max(2);
+    let by_margin = ((h as f32 * 0.08).round() as u32).max(2);
+    let mut border_match_count = 0usize;
+    let mut border_count = 0usize;
+    let mut border_grad_sum = 0.0f64;
+    let mut border_luma_sum = 0.0f64;
+    let mut border_luma_sq_sum = 0.0f64;
+
+    // Interior metrics
+    let mut bg_match_count = 0usize;
+    let mut flat_count = 0usize;
+    let mut mid_grad_count = 0usize;
+    let mut sharp_edge_count = 0usize;
+    let total_pixels = (w * h) as usize;
+
+    let raw = proxy.as_raw();
+    let stride = (w as usize) * 3;
+
+    for y in 0..h {
+        let in_border_y = y < by_margin || y >= h - by_margin;
+        for x in 0..w {
+            let idx = (y as usize) * stride + (x as usize) * 3;
+            let r = raw[idx] as f32;
+            let g = raw[idx + 1] as f32;
+            let b = raw[idx + 2] as f32;
+            let l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+            let bg = bg_at(x, y);
+            let max_bg_diff = (r - bg[0])
+                .abs()
+                .max((g - bg[1]).abs())
+                .max((b - bg[2]).abs());
+
+            if max_bg_diff <= 24.0 {
+                bg_match_count += 1;
+            }
+
+            let mut grad_luma = 0.0f32;
+            let mut max_nb_diff = 0.0f32;
+            if x + 1 < w && y + 1 < h {
+                let r_idx = idx + 3;
+                let d_idx = idx + stride;
+                let lr = 0.2126 * raw[r_idx] as f32
+                    + 0.7152 * raw[r_idx + 1] as f32
+                    + 0.0722 * raw[r_idx + 2] as f32;
+                let ld = 0.2126 * raw[d_idx] as f32
+                    + 0.7152 * raw[d_idx + 1] as f32
+                    + 0.0722 * raw[d_idx + 2] as f32;
+                grad_luma = (l - lr).abs() + (l - ld).abs();
+
+                let dr = (r - raw[r_idx] as f32)
+                    .abs()
+                    .max((g - raw[r_idx + 1] as f32).abs())
+                    .max((b - raw[r_idx + 2] as f32).abs());
+                let dd = (r - raw[d_idx] as f32)
+                    .abs()
+                    .max((g - raw[d_idx + 1] as f32).abs())
+                    .max((b - raw[d_idx + 2] as f32).abs());
+                max_nb_diff = dr.max(dd);
+            }
+
+            if max_nb_diff <= 6.0 {
+                flat_count += 1;
+            }
+            if (6.0..=28.0).contains(&grad_luma) {
+                mid_grad_count += 1;
+            }
+            if grad_luma >= 45.0 {
+                sharp_edge_count += 1;
+            }
+
+            if in_border_y || x < bx_margin || x >= w - bx_margin {
+                border_count += 1;
+                if max_bg_diff <= 22.0 {
+                    border_match_count += 1;
+                }
+                border_grad_sum += grad_luma as f64;
+                border_luma_sum += l as f64;
+                border_luma_sq_sum += (l as f64) * (l as f64);
+            }
+        }
+    }
+
+    let b_cnt_f = (border_count.max(1)) as f64;
+    let border_mean_luma = (border_luma_sum / b_cnt_f) as f32;
+    let border_var = ((border_luma_sq_sum / b_cnt_f) - (border_mean_luma as f64).powi(2)).max(0.0);
+    let border_luma_std = border_var.sqrt() as f32;
+
+    // Horizontal typography / text-band row scan across interior rows
+    let y_start = ((h as f32 * 0.08).round() as u32).max(1);
+    let y_end = ((h as f32 * 0.92).round() as u32).min(h.saturating_sub(1));
+    let x_margin_5pct = ((w as f32 * 0.05).round() as u32).max(2);
+    let max_glyph_run = (((w as f32 / 320.0) * 14.0).round() as u32).clamp(4, 14);
+
+    let mut text_band_rows = 0usize;
+    let mut dense_credit_rows = 0usize;
+
+    for y in y_start..y_end {
+        let mut transitions = 0usize;
+        let mut short_fg_runs = 0usize;
+        let mut row_bg_pixels = 0usize;
+        let mut outer_margin_fg = 0usize;
+        let mut prev_fg = false;
+        let mut curr_run_len = 0u32;
+
+        for x in 0..w {
+            let idx = (y as usize) * stride + (x as usize) * 3;
+            let r = raw[idx] as f32;
+            let g = raw[idx + 1] as f32;
+            let b = raw[idx + 2] as f32;
+            let l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+            let bg = bg_at(x, y);
+            let bg_luma = luma_of(bg);
+            let linf = (r - bg[0]).abs().max((g - bg[1]).abs()).max((b - bg[2]).abs());
+
+            if linf <= 24.0 {
+                row_bg_pixels += 1;
+            }
+            let is_fg = linf > 30.0 || (l - bg_luma).abs() > 28.0;
+
+            if is_fg && (x < x_margin_5pct || x >= w - x_margin_5pct) {
+                outer_margin_fg += 1;
+            }
+
+            if x > 0 && is_fg != prev_fg {
+                transitions += 1;
+                if prev_fg && (1..=max_glyph_run).contains(&curr_run_len) {
+                    short_fg_runs += 1;
+                }
+                curr_run_len = if is_fg { 1 } else { 0 };
+            } else if is_fg {
+                curr_run_len += 1;
+            }
+            prev_fg = is_fg;
+        }
+        if prev_fg && (1..=max_glyph_run).contains(&curr_run_len) {
+            short_fg_runs += 1;
+        }
+
+        let row_bg_pct = row_bg_pixels as f32 / (w as f32);
+        let margins_clean = outer_margin_fg <= ((w as usize) / 40).max(1);
+
+        if transitions >= 8 && short_fg_runs >= 3 && row_bg_pct >= 0.45 && margins_clean {
+            text_band_rows += 1;
+        }
+        if transitions >= 12 && short_fg_runs >= 5 && row_bg_pct >= 0.40 {
+            dense_credit_rows += 1;
+        }
+    }
+
+    let tot_f = (total_pixels.max(1)) as f32;
+    GraphicCardFeatures {
+        bg_match_pct: bg_match_count as f32 / tot_f,
+        border_bg_pct: border_match_count as f32 / (b_cnt_f as f32),
+        border_grad_mean: (border_grad_sum / b_cnt_f) as f32,
+        border_mean_luma,
+        border_luma_std,
+        flat_pixel_pct: flat_count as f32 / tot_f,
+        mid_grad_pct: mid_grad_count as f32 / tot_f,
+        sharp_edge_pct: sharp_edge_count as f32 / tot_f,
+        text_band_rows,
+        dense_credit_rows,
+    }
+}
+
+/// Multi-signal detector for non-photographic frames: title cards (on black, white, color,
+/// or gradient backdrops), opening/end credits rolls, color slates, and blank leaders.
+pub fn detect_title_card_or_graphic(
+    active_img: &RgbImage,
+    physics: &aesthetic_models::physics::ObjectivePhysics,
+) -> Option<TitleCardDetection> {
+    let exp = &physics.exposure;
+    let col = &physics.color;
+
+    // 1. Fast exposure/entropy leader check
+    if exp.histogram_mean < 14.0
+        || exp.histogram_mean > 242.0
+        || exp.shadow_clip_pct > 78.0
+        || exp.highlight_clip_pct > 75.0
+        || exp.el_zones.zone_0_black_pct > 82.0
+        || exp.histogram_std < 6.0
+        || col.palette_entropy < 1.0
+    {
+        return Some(TitleCardDetection {
+            reason: format!(
+                "Blank leader or near-uniform frame (mean luma {:.1}, std {:.1}, entropy {:.2} bits)",
+                exp.histogram_mean, exp.histogram_std, col.palette_entropy
+            ),
+            bg_match_pct: 1.0 - (exp.histogram_std / 128.0).clamp(0.0, 1.0),
+            border_bg_pct: 1.0,
+            flat_pixel_pct: 0.95,
+            mid_grad_pct: 0.0,
+            text_band_rows: 0,
+        });
+    }
+
+    let f = analyze_graphic_card_features(active_img);
+
+    let reason = if f.border_bg_pct >= 0.85
+        && f.bg_match_pct >= 0.55
+        && f.text_band_rows >= 3
+        && f.mid_grad_pct < 0.12
+    {
+        Some("Typography title card on uniform/gradient backdrop".to_string())
+    } else if f.border_bg_pct >= 0.90
+        && f.border_grad_mean < 3.0
+        && f.bg_match_pct >= 0.72
+        && f.flat_pixel_pct >= 0.76
+        && f.mid_grad_pct < 0.065
+        && f.text_band_rows >= 2
+    {
+        Some("Minimalist centered title or intertitle graphic".to_string())
+    } else if f.border_mean_luma < 42.0
+        && f.border_luma_std < 14.0
+        && f.border_bg_pct >= 0.84
+        && f.bg_match_pct >= 0.62
+        && f.text_band_rows >= 2
+    {
+        Some("Dark-backdrop title card or credits frame".to_string())
+    } else if f.border_mean_luma > 200.0
+        && f.border_luma_std < 15.0
+        && f.border_bg_pct >= 0.84
+        && f.bg_match_pct >= 0.62
+        && f.text_band_rows >= 2
+    {
+        Some("Light/white-backdrop title card or intertitle frame".to_string())
+    } else if f.border_bg_pct >= 0.80
+        && f.dense_credit_rows >= 5
+        && f.mid_grad_pct < 0.14
+        && col.palette_entropy < 2.8
+    {
+        Some("Full-screen credits roll or multi-line text wall".to_string())
+    } else if (col.palette_entropy < 1.35 && f.flat_pixel_pct >= 0.84 && f.mid_grad_pct < 0.05)
+        || (col.palette_entropy < 1.65
+            && f.border_bg_pct >= 0.92
+            && f.bg_match_pct >= 0.80
+            && f.sharp_edge_pct >= 0.003
+            && f.mid_grad_pct < 0.03)
+    {
+        Some("Flat solid slate, vector logo card, or non-photographic graphic".to_string())
+    } else {
+        None
+    };
+
+    reason.map(|r| TitleCardDetection {
+        reason: r,
+        bg_match_pct: f.bg_match_pct,
+        border_bg_pct: f.border_bg_pct,
+        flat_pixel_pct: f.flat_pixel_pct,
+        mid_grad_pct: f.mid_grad_pct,
+        text_band_rows: f.text_band_rows,
+    })
+}
+
+/// Lightweight Pass-1 detector run on 160x90 streaming proxy frames to tag non-photographic
+/// title cards, blank leaders, and credits rolls without computing the full 79-metric vector.
+pub fn is_proxy_title_card_or_blank(proxy: &RgbImage) -> bool {
+    let (pw, ph) = proxy.dimensions();
+    if pw < 16 || ph < 16 {
+        return true;
+    }
+
+    // Crop top/bottom letterbox bars or left/right pillarbox bars, while keeping centered title cards intact
+    let crop = detect_active_picture(proxy);
+    let cropped_img;
+    let active: &RgbImage = if (crop.x <= 4 || crop.y <= 4)
+        && (crop.width < pw || crop.height < ph)
+    {
+        cropped_img = image::imageops::crop_imm(proxy, crop.x, crop.y, crop.width, crop.height)
+            .to_image();
+        &cropped_img
+    } else {
+        proxy
+    };
+
+    let raw = active.as_raw();
+    let total = raw.len() / 3;
+    if total == 0 {
+        return true;
+    }
+
+    let mut sum = 0.0f64;
+    let mut sq_sum = 0.0f64;
+    for px in raw.as_chunks::<3>().0 {
+        let l = (0.2126 * px[0] as f32 + 0.7152 * px[1] as f32 + 0.0722 * px[2] as f32) as f64;
+        sum += l;
+        sq_sum += l * l;
+    }
+    let mean = (sum / total as f64) as f32;
+    let var = ((sq_sum / total as f64) - (mean as f64).powi(2)).max(0.0);
+    let std = var.sqrt() as f32;
+
+    if mean < 14.0 || mean > 242.0 || std < 6.0 {
+        return true;
+    }
+
+    let f = analyze_graphic_card_features(active);
+    (f.border_bg_pct >= 0.85
+        && f.bg_match_pct >= 0.55
+        && f.text_band_rows >= 3
+        && f.mid_grad_pct < 0.12)
+        || (f.border_bg_pct >= 0.90
+            && f.border_grad_mean < 3.0
+            && f.bg_match_pct >= 0.72
+            && f.flat_pixel_pct >= 0.76
+            && f.mid_grad_pct < 0.065
+            && f.text_band_rows >= 2)
+        || (f.border_mean_luma < 42.0
+            && f.border_luma_std < 14.0
+            && f.border_bg_pct >= 0.84
+            && f.bg_match_pct >= 0.62
+            && f.text_band_rows >= 2)
+        || (f.border_mean_luma > 200.0
+            && f.border_luma_std < 15.0
+            && f.border_bg_pct >= 0.84
+            && f.bg_match_pct >= 0.62
+            && f.text_band_rows >= 2)
+        || (f.border_bg_pct >= 0.80 && f.dense_credit_rows >= 5 && f.mid_grad_pct < 0.14)
+}
+
+/// Selects candidate shots across EVERY photographic scene detected in Pass 1:
+/// 1. Unconditionally includes the top-quality shot from every scene (ensuring full timeline coverage).
+/// 2. Distributes remaining evaluation budget round-robin across visually distinct shots in each scene.
+fn select_pass2_shots(
+    scenes: &[crate::scene::DetectedScene],
+    top_n: Option<usize>,
+) -> Vec<(usize, crate::scene::ShotCandidateWindow)> {
+    use std::collections::HashSet;
+
+    if scenes.is_empty() {
+        return Vec::new();
+    }
+
+    let mut per_scene_sorted: Vec<(usize, Vec<crate::scene::ShotCandidateWindow>)> = scenes
+        .iter()
+        .filter_map(|s| {
+            let mut shots: Vec<_> = s
+                .shots
+                .iter()
+                .filter(|sh| !sh.is_non_photographic)
+                .cloned()
+                .collect();
+            if shots.is_empty() {
+                return None;
+            }
+            shots.sort_by(|a, b| {
+                b.proxy_quality
+                    .partial_cmp(&a.proxy_quality)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            Some((s.scene_index, shots))
+        })
+        .collect();
+
+    if per_scene_sorted.is_empty() {
+        return Vec::new();
+    }
+
+    let mut picked: Vec<(usize, crate::scene::ShotCandidateWindow)> = Vec::new();
+    let mut picked_hists: Vec<Vec<[f32; 24]>> = vec![Vec::new(); per_scene_sorted.len()];
+    let mut used_indices: Vec<HashSet<usize>> = vec![HashSet::new(); per_scene_sorted.len()];
+
+    // Pass A: Guarantee the single best shot from EVERY photographic scene
+    for (s_pos, (scene_idx, shots)) in per_scene_sorted.iter().enumerate() {
+        picked_hists[s_pos].push(shots[0].color_hist);
+        used_indices[s_pos].insert(0);
+        picked.push((*scene_idx, shots[0].clone()));
+    }
+
+    // Pass B: Round-robin budget for additional visually distinct shots per scene
+    let eval_budget = if let Some(n) = top_n {
+        scenes.len().max(n.saturating_mul(2)).clamp(40, 240)
+    } else {
+        scenes.len().clamp(80, 240)
+    };
+
+    while picked.len() < eval_budget {
+        let mut added_any = false;
+        for (s_pos, (scene_idx, shots)) in per_scene_sorted.iter_mut().enumerate() {
+            if picked.len() >= eval_budget {
+                break;
+            }
+            if let Some((best_k, sh)) = shots.iter().enumerate().find(|(k, cand)| {
+                !used_indices[s_pos].contains(k)
+                    && picked_hists[s_pos]
+                        .iter()
+                        .all(|h| crate::scene::histogram_l1_distance(h, &cand.color_hist) > 0.22)
+            }) {
+                picked_hists[s_pos].push(sh.color_hist);
+                used_indices[s_pos].insert(best_k);
+                picked.push((*scene_idx, sh.clone()));
+                added_any = true;
+            }
+        }
+        if !added_any {
+            break;
+        }
+    }
+
+    picked
+}
+
+struct Pass2Context<'a> {
+    video_path: &'a Path,
+    options: &'a BatchOptions,
+    dr_q: &'a MetricQuantiles,
+    rolloff_q: &'a MetricQuantiles,
+    sharp_q: &'a MetricQuantiles,
+    store: &'a BaselineStore,
+    inference: &'a ModelInferenceEngine,
+}
+
+struct Pass2ShotResult {
+    clean: Option<(ShotTake, RgbImage)>,
+    fallback: Option<(ShotTake, RgbImage)>,
+    filtered_cards: usize,
+}
+
+fn evaluate_pass2_shot(
+    ctx: &Pass2Context<'_>,
+    scene_index: usize,
+    shot: &crate::scene::ShotCandidateWindow,
+) -> Pass2ShotResult {
+    let mut filtered_cards = 0usize;
+    let mut fallback_non_photo: Option<(ShotTake, RgbImage)> = None;
+
+    for &ts in &shot.best_timestamps {
+        let frames_opt = extract_frames_burst(ctx.video_path, ts, 3, 4.0, None)
+            .ok()
+            .or_else(|| extract_frame_rgb(ctx.video_path, ts).ok().map(|f| vec![f]));
+
+        let Some(frames) = frames_opt else {
+            continue;
+        };
+        if frames.is_empty() {
+            continue;
+        }
+
+        // Cut-aware pair selection within the 3-frame burst (0.25s spacing)
+        let (frame, next_ref, eff_ts) = if frames.len() >= 3 {
+            let d01 = crate::scene::compute_frame_difference(&frames[0], &frames[1]);
+            let d12 = crate::scene::compute_frame_difference(&frames[1], &frames[2]);
+            if d01 > 26.0 && d12 <= 26.0 {
+                (&frames[1], Some((&frames[2], 0.25)), ts + 0.25)
+            } else if d01 <= 26.0 {
+                (&frames[0], Some((&frames[1], 0.25)), ts)
+            } else {
+                (&frames[0], None, ts)
+            }
+        } else if frames.len() == 2 {
+            let d01 = crate::scene::compute_frame_difference(&frames[0], &frames[1]);
+            if d01 <= 26.0 {
+                (&frames[0], Some((&frames[1], 0.25)), ts)
+            } else {
+                (&frames[0], None, ts)
+            }
+        } else {
+            (&frames[0], None, ts)
+        };
+
+        let mut candidate = evaluate_candidate_frame(
+            frame,
+            "pending",
+            scene_index,
+            eff_ts,
+            ctx.dr_q,
+            ctx.rolloff_q,
+            ctx.sharp_q,
+        );
+        enrich_take(&mut candidate, frame, next_ref, ctx.store, ctx.inference);
+
+        // Clamp take window inside this shot's boundaries
+        let shot_dur = (shot.end_sec - shot.start_sec).max(ctx.options.min_take_duration_sec);
+        let win_dur = shot_dur.clamp(
+            ctx.options.min_take_duration_sec,
+            ctx.options.max_take_duration_sec,
+        );
+        let max_start = (shot.end_sec - win_dur).max(shot.start_sec);
+        let win_start = (eff_ts - win_dur * 0.35)
+            .max(shot.start_sec)
+            .min(max_start);
+        candidate.start_sec = win_start;
+        candidate.end_sec = (win_start + win_dur).max(win_start + ctx.options.min_take_duration_sec);
+        candidate.duration_sec = candidate.end_sec - candidate.start_sec;
+        candidate.hero_timestamp_sec = eff_ts;
+
+        if frames.len() >= 3
+            && detect_burst_light_flicker(&frames[0], &frames[1], &frames[2])
+            && !candidate
+                .concerns
+                .iter()
+                .any(|c| c.code == "PRACTICAL_LIGHT_FLICKER")
+        {
+            candidate.concerns.push(DiagnosticFlag {
+                code: "PRACTICAL_LIGHT_FLICKER".to_string(),
+                title: "Practical Light / Mains Flicker Detected".to_string(),
+                description: "Alternating mean luminance oscillation across consecutive burst frames indicates PWM or mains practical light flicker".to_string(),
+                severity: aesthetic_models::forensics::DiagnosticSeverity::Warning,
+                timestamp_sec: eff_ts,
+                affected_region: None,
+            });
+        }
+
+        if candidate
+            .concerns
+            .iter()
+            .any(|c| c.code == "NON_PHOTOGRAPHIC_OR_CREDITS")
+        {
+            filtered_cards += 1;
+            if fallback_non_photo.is_none() {
+                fallback_non_photo = Some((candidate, frame.clone()));
+            }
+            continue;
+        }
+
+        return Pass2ShotResult {
+            clean: Some((candidate, frame.clone())),
+            fallback: None,
+            filtered_cards,
+        };
+    }
+
+    Pass2ShotResult {
+        clean: None,
+        fallback: fallback_non_photo,
+        filtered_cards,
+    }
+}
+
+/// Executes full end-to-end two-pass scene-by-scene analysis on a video file.
 pub fn analyze_video_file(
     video_path: &Path,
     options: &BatchOptions,
@@ -741,157 +1392,148 @@ pub fn analyze_video_file(
     let inference = ModelInferenceEngine::new();
     let (dr_q, rolloff_q, sharp_q, _) = store.scoring_quantiles();
 
-    // Adaptive step scaling: if default 1.0s step is passed on a long video (> 24s),
-    // sample ~26 evenly distributed windows across the active program (skipping 3% head/tail leader).
-    let effective_step = if (options.sample_step_sec - 1.0).abs() < 1e-4
-        && video_info.duration_sec > 24.0
-    {
-        (video_info.duration_sec * 0.94 / 26.0).max(2.0)
+    // Pass 1: Fast single-pass streaming proxy scan across 100% of the timeline
+    let scan_fps = if (options.sample_step_sec - 1.0).abs() >= 1e-4 {
+        (1.0 / options.sample_step_sec.max(0.25)).clamp(0.25, 4.0)
+    } else if video_info.duration_sec <= 180.0 {
+        2.0
+    } else if video_info.duration_sec <= 2700.0 {
+        1.0
     } else {
-        options.sample_step_sec.max(0.5)
+        0.5
     };
 
-    let start_offset = if video_info.duration_sec > 10.0 {
-        (video_info.duration_sec * 0.03).min(5.0)
-    } else {
-        0.0
-    };
-    let end_limit = if video_info.duration_sec > 10.0 {
-        video_info.duration_sec * 0.97
-    } else {
-        video_info.duration_sec
-    };
+    let (detected_scenes, mut filtered_title_cards_count) =
+        match crate::video::scan_video_scenes(video_path, video_info.duration_sec, scan_fps) {
+            Ok((scenes, non_photo)) if !scenes.is_empty() => (scenes, non_photo),
+            Ok((_, non_photo)) => {
+                // Entire timeline flagged as non-photographic or single very short shot: synthesize 1 fallback scene
+                let mid = (video_info.duration_sec * 0.5).max(0.0);
+                let fallback_scene = crate::scene::DetectedScene {
+                    scene_index: 1,
+                    start_sec: 0.0,
+                    end_sec: video_info.duration_sec,
+                    shots: vec![crate::scene::ShotCandidateWindow {
+                        start_sec: 0.0,
+                        end_sec: video_info.duration_sec,
+                        best_timestamps: vec![mid],
+                        proxy_quality: 50.0,
+                        avg_luma: 128.0,
+                        color_hist: [0.0; 24],
+                        is_non_photographic: false,
+                    }],
+                    is_non_photographic: false,
+                };
+                (vec![fallback_scene], non_photo)
+            }
+            Err(_) => {
+                // Safe fallback for exotic codecs/short synthetic clips if rawvideo pipe fails
+                let mid = (video_info.duration_sec * 0.5).max(0.0);
+                let fallback_scene = crate::scene::DetectedScene {
+                    scene_index: 1,
+                    start_sec: 0.0,
+                    end_sec: video_info.duration_sec,
+                    shots: vec![crate::scene::ShotCandidateWindow {
+                        start_sec: 0.0,
+                        end_sec: video_info.duration_sec,
+                        best_timestamps: vec![mid],
+                        proxy_quality: 50.0,
+                        avg_luma: 128.0,
+                        color_hist: [0.0; 24],
+                        is_non_photographic: false,
+                    }],
+                    is_non_photographic: false,
+                };
+                (vec![fallback_scene], 0)
+            }
+        };
 
-    let mut candidate_timestamps = Vec::new();
-    let mut t = start_offset;
-    while t < end_limit {
-        candidate_timestamps.push(t);
-        t += effective_step;
+    let total_scenes_detected = detected_scenes.len();
+    let pass2_shots = select_pass2_shots(&detected_scenes, options.top_n);
+
+    // Pass 2: Concurrent full-resolution evaluation across every detected scene (bounded 4 workers)
+    let pass2_ctx = Pass2Context {
+        video_path,
+        options,
+        dr_q: &dr_q,
+        rolloff_q: &rolloff_q,
+        sharp_q: &sharp_q,
+        store: &store,
+        inference: &inference,
+    };
+    let next_idx = std::sync::atomic::AtomicUsize::new(0);
+    let total_jobs = pass2_shots.len();
+    let worker_count = total_jobs.clamp(1, 4);
+    let results_mutex = std::sync::Mutex::new(Vec::with_capacity(total_jobs));
+    let fallback_mutex = std::sync::Mutex::new(Vec::new());
+    let extra_filtered = std::sync::atomic::AtomicUsize::new(0);
+
+    std::thread::scope(|s| {
+        for _ in 0..worker_count {
+            s.spawn(|| loop {
+                let job_i = next_idx.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if job_i >= total_jobs {
+                    break;
+                }
+                let (scene_idx, ref shot) = pass2_shots[job_i];
+                let res = evaluate_pass2_shot(&pass2_ctx, scene_idx, shot);
+                if res.filtered_cards > 0 {
+                    extra_filtered.fetch_add(res.filtered_cards, std::sync::atomic::Ordering::Relaxed);
+                }
+                if let Some(clean) = res.clean {
+                    if let Ok(mut guard) = results_mutex.lock() {
+                        guard.push(clean);
+                    }
+                } else if let Some(fb) = res.fallback {
+                    if let Ok(mut guard) = fallback_mutex.lock() {
+                        guard.push(fb);
+                    }
+                }
+            });
+        }
+    });
+
+    filtered_title_cards_count += extra_filtered.load(std::sync::atomic::Ordering::Relaxed);
+
+    let mut clean_results = results_mutex.into_inner().unwrap_or_default();
+    if clean_results.is_empty() {
+        clean_results = fallback_mutex.into_inner().unwrap_or_default();
     }
 
-    let mut takes: Vec<ShotTake> = Vec::new();
-    let mut hero_frames: std::collections::HashMap<String, RgbImage> =
-        std::collections::HashMap::new();
-    let mut prev_setup_frame: Option<(RgbImage, f64, f64)> = None; // (last_frame, setup_start_sec, setup_end_sec)
-    let mut setup_counter = 0usize;
+    // Deterministic order: scene_index ascending, then hero_timestamp_sec ascending
+    clean_results.sort_by(|(a, _), (b, _)| {
+        a.scene_index.cmp(&b.scene_index).then_with(|| {
+            a.hero_timestamp_sec
+                .partial_cmp(&b.hero_timestamp_sec)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    });
 
-    for &ts in &candidate_timestamps {
-        let frames_opt = extract_frames_burst(video_path, ts, 3, 4.0, None)
-            .ok()
-            .or_else(|| extract_frame_rgb(video_path, ts).ok().map(|f| vec![f]));
-
-        if let Some(frames) = frames_opt {
-            if frames.is_empty() {
+    // Deduplicate near-identical camera setups within the SAME scene (keeping higher score)
+    let mut deduped: Vec<(ShotTake, RgbImage)> = Vec::with_capacity(clean_results.len());
+    for (cand, frame) in clean_results {
+        if let Some((prev, prev_frame)) = deduped.last_mut() {
+            if prev.scene_index == cand.scene_index
+                && crate::scene::compute_frame_difference(prev_frame, &frame) < 10.5
+            {
+                if cand.scores.overall > prev.scores.overall {
+                    *prev = cand;
+                    *prev_frame = frame;
+                }
                 continue;
             }
-            // Cut-aware pair selection within the 3-frame burst (0.25s spacing):
-            // If a hard cut occurs between frames[0] and frames[1], step past the cut to (frames[1], frames[2]).
-            let (frame, next_ref, eff_ts) = if frames.len() >= 3 {
-                let d01 = crate::scene::compute_frame_difference(&frames[0], &frames[1]);
-                let d12 = crate::scene::compute_frame_difference(&frames[1], &frames[2]);
-                if d01 > 26.0 && d12 <= 26.0 {
-                    (&frames[1], Some((&frames[2], 0.25)), ts + 0.25)
-                } else if d01 <= 26.0 {
-                    (&frames[0], Some((&frames[1], 0.25)), ts)
-                } else {
-                    (&frames[0], None, ts)
-                }
-            } else if frames.len() == 2 {
-                let d01 = crate::scene::compute_frame_difference(&frames[0], &frames[1]);
-                if d01 <= 26.0 {
-                    (&frames[0], Some((&frames[1], 0.25)), ts)
-                } else {
-                    (&frames[0], None, ts)
-                }
-            } else {
-                (&frames[0], None, ts)
-            };
-
-            // Check if this sample belongs to the same continuous camera setup as the previous take
-            let same_setup = if let Some((ref prev_img, _, _)) = prev_setup_frame {
-                crate::scene::compute_frame_difference(prev_img, frame) < 10.5
-            } else {
-                false
-            };
-
-            let temp_id = format!("take_{:03}", setup_counter + 1);
-            let mut candidate = evaluate_candidate_frame(
-                frame,
-                &temp_id,
-                setup_counter + 1,
-                eff_ts,
-                &dr_q,
-                &rolloff_q,
-                &sharp_q,
-            );
-            enrich_take(&mut candidate, frame, next_ref, &store, &inference);
-
-            // M16 Forensic Diagnostic: Practical light flicker across 3-frame burst within same setup
-            if frames.len() >= 3
-                && detect_burst_light_flicker(&frames[0], &frames[1], &frames[2])
-                && !candidate
-                    .concerns
-                    .iter()
-                    .any(|c| c.code == "PRACTICAL_LIGHT_FLICKER")
-            {
-                candidate.concerns.push(DiagnosticFlag {
-                    code: "PRACTICAL_LIGHT_FLICKER".to_string(),
-                    title: "Practical Light / Mains Flicker Detected".to_string(),
-                    description: "Alternating mean luminance oscillation across consecutive burst frames indicates PWM or mains practical light flicker".to_string(),
-                    severity: aesthetic_models::forensics::DiagnosticSeverity::Warning,
-                    timestamp_sec: eff_ts,
-                    affected_region: None,
-                });
-            }
-
-            if same_setup && !takes.is_empty() {
-                let (_, setup_start, _) = prev_setup_frame.take().unwrap();
-                let setup_end = (eff_ts + options.min_take_duration_sec).min(video_info.duration_sec);
-                let prev_take = takes.last_mut().unwrap();
-                let existing_id = prev_take.take_id.clone();
-                let existing_scene = prev_take.scene_index;
-
-                // Keep the higher-scoring hero moment within this continuous camera setup
-                if candidate.scores.overall > prev_take.scores.overall {
-                    candidate.take_id = existing_id.clone();
-                    candidate.scene_index = existing_scene;
-                    let win_dur = (setup_end - setup_start)
-                        .clamp(options.min_take_duration_sec, options.max_take_duration_sec);
-                    let win_start = (eff_ts - win_dur * 0.35)
-                        .max(setup_start)
-                        .min((setup_end - win_dur).max(setup_start));
-                    candidate.start_sec = win_start;
-                    candidate.end_sec = win_start + win_dur;
-                    candidate.duration_sec = win_dur;
-                    candidate.hero_timestamp_sec = eff_ts;
-                    *prev_take = candidate;
-                    hero_frames.insert(existing_id, frame.clone());
-                } else {
-                    let win_dur = (setup_end - setup_start)
-                        .clamp(options.min_take_duration_sec, options.max_take_duration_sec);
-                    let hero_t = prev_take.hero_timestamp_sec;
-                    let win_start = (hero_t - win_dur * 0.35)
-                        .max(setup_start)
-                        .min((setup_end - win_dur).max(setup_start));
-                    prev_take.start_sec = win_start;
-                    prev_take.end_sec = win_start + win_dur;
-                    prev_take.duration_sec = win_dur;
-                }
-                prev_setup_frame = Some((frame.clone(), setup_start, setup_end));
-            } else {
-                setup_counter += 1;
-                let take_id = format!("take_{:03}", setup_counter);
-                candidate.take_id = take_id.clone();
-                candidate.scene_index = setup_counter;
-                let setup_end = (eff_ts + 2.5).min(video_info.duration_sec);
-                candidate.start_sec = eff_ts;
-                candidate.end_sec = setup_end;
-                candidate.duration_sec = (setup_end - eff_ts).max(options.min_take_duration_sec);
-                hero_frames.insert(take_id, frame.clone());
-                takes.push(candidate);
-                prev_setup_frame = Some((frame.clone(), eff_ts, setup_end));
-            }
         }
+        deduped.push((cand, frame));
+    }
+
+    let mut takes: Vec<ShotTake> = Vec::with_capacity(deduped.len());
+    let mut hero_frames: std::collections::HashMap<String, RgbImage> =
+        std::collections::HashMap::new();
+    for (idx, (mut take, frame)) in deduped.into_iter().enumerate() {
+        let take_id = format!("take_{:03}", idx + 1);
+        take.take_id = take_id.clone();
+        hero_frames.insert(take_id, frame);
+        takes.push(take);
     }
 
     // Propagate container-level Log/HDR transfer characteristic flag if present
@@ -914,10 +1556,11 @@ pub fn analyze_video_file(
         }
     }
 
-    // Apply Maximal Marginal Relevance (MMR) reel diversity ranking so recurring setups
-    // do not crowd out distinct camera angles and shot scales in the Top-N selects.
+    // Apply scene-aware Maximal Marginal Relevance (MMR) reel diversity ranking
+    // so every strong scene surfaces before duplicate angles and title cards are stripped.
     apply_reel_diversity_ranking(&mut takes);
 
+    let all_ranked_takes = takes.clone();
     if let Some(n) = options.top_n {
         if n > 0 && n < takes.len() {
             takes.truncate(n);
@@ -1010,6 +1653,9 @@ pub fn analyze_video_file(
     Ok(BatchAnalysisResult {
         video_info,
         ranked_takes: takes,
+        all_ranked_takes,
+        total_scenes_detected,
+        filtered_title_cards_count,
         sequence_metrics,
         edl_content,
         csv_content,
@@ -1020,21 +1666,11 @@ pub fn analyze_video_file(
     })
 }
 
-/// Greedily orders photographic candidate takes by Maximal Marginal Relevance (MMR),
-/// gently penalizing near-duplicate recurring camera setups so the Top-N hero selects
-/// represent a diverse spread of shot scales, lighting keys, and visual compositions.
+/// Greedily orders photographic candidate takes by scene-aware Maximal Marginal Relevance (MMR),
+/// stripping non-photographic title cards/leaders when photographic takes exist and ensuring every
+/// scene gets representation before picking duplicate angles from the same scene.
 pub fn apply_reel_diversity_ranking(takes: &mut Vec<ShotTake>) {
-    if takes.len() <= 2 {
-        takes.sort_by(|a, b| {
-            b.scores
-                .overall
-                .partial_cmp(&a.scores.overall)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        return;
-    }
-
-    // Separate photographic takes from black/credits leaders
+    // Separate photographic takes from non-photographic title cards / black leaders first
     let mut photo_pool: Vec<ShotTake> = Vec::new();
     let mut leader_pool: Vec<ShotTake> = Vec::new();
     for t in takes.drain(..) {
@@ -1061,12 +1697,27 @@ pub fn apply_reel_diversity_ranking(takes: &mut Vec<ShotTake>) {
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    let mut selected: Vec<ShotTake> = Vec::with_capacity(photo_pool.len());
-    if !photo_pool.is_empty() {
-        selected.push(photo_pool.remove(0));
+    if photo_pool.is_empty() {
+        *takes = leader_pool;
+        return;
     }
 
+    if photo_pool.len() <= 2 {
+        *takes = photo_pool;
+        return;
+    }
+
+    let mut represented_scenes: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    let mut selected: Vec<ShotTake> = Vec::with_capacity(photo_pool.len());
+    let first = photo_pool.remove(0);
+    represented_scenes.insert(first.scene_index);
+    selected.push(first);
+
     while !photo_pool.is_empty() {
+        let has_unrepresented_scene = photo_pool
+            .iter()
+            .any(|c| !represented_scenes.contains(&c.scene_index));
+
         let mut best_idx = 0usize;
         let mut best_mmr = f32::NEG_INFINITY;
 
@@ -1100,19 +1751,31 @@ pub fn apply_reel_diversity_ranking(takes: &mut Vec<ShotTake>) {
                 max_redundancy = max_redundancy.max(sim.clamp(0.0, 1.0));
             }
 
+            // Scene coverage priority: penalize duplicate angles in already-represented scenes
+            // while other distinct scenes remain unrepresented in the ranked selects.
+            let scene_penalty = if has_unrepresented_scene
+                && represented_scenes.contains(&cand.scene_index)
+            {
+                10.0f32
+            } else {
+                0.0f32
+            };
+
             // Up to 7.5-point MMR penalty for redundant recurring setups + learned feedback preference boost (M19)
             let pref_boost = compute_feedback_preference_boost(cand);
-            let mmr_score = cand.scores.overall + pref_boost - 7.5 * max_redundancy;
+            let mmr_score =
+                cand.scores.overall + pref_boost - 7.5 * max_redundancy - scene_penalty;
             if mmr_score > best_mmr {
                 best_mmr = mmr_score;
                 best_idx = idx;
             }
         }
 
-        selected.push(photo_pool.remove(best_idx));
+        let chosen = photo_pool.remove(best_idx);
+        represented_scenes.insert(chosen.scene_index);
+        selected.push(chosen);
     }
 
-    selected.extend(leader_pool);
     *takes = selected;
 }
 
