@@ -36,7 +36,8 @@ pub use multicam::{
     generate_asc_cdl_xml,
 };
 pub use video::{
-    extract_frame_rgb, extract_trimmed_clip, probe_video_metadata, scan_video_scenes,
+    decode_still_image_rgb, extract_frame_rgb, extract_trimmed_clip, probe_video_metadata,
+    scan_video_scenes,
 };
 
 pub use pipeline::{

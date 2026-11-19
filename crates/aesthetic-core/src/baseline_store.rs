@@ -1693,9 +1693,7 @@ impl BaselineStore {
         }
 
         let previous_corpus_shots = self.reference_shots.len();
-        let dyn_img = image::open(still_path)
-            .map_err(|e| format!("Failed to open image '{}': {}", still_path.display(), e))?;
-        let frame = dyn_img.to_rgb8();
+        let frame = crate::video::decode_still_image_rgb(still_path)?;
 
         let crop = detect_active_picture(&frame);
         let active = if crop.width == frame.width() && crop.height == frame.height() {
@@ -1828,8 +1826,7 @@ impl BaselineStore {
                 s_idx,
                 selected_paths.len(),
             );
-            if let Ok(dyn_img) = image::open(path) {
-                let frame = dyn_img.to_rgb8();
+            if let Ok(frame) = crate::video::decode_still_image_rgb(path) {
                 let crop = detect_active_picture(&frame);
                 let active = if crop.width == frame.width() && crop.height == frame.height() {
                     frame.clone()

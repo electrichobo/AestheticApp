@@ -815,6 +815,54 @@ pub fn scan_video_scenes(
     Ok(crate::scene::group_shots_into_scenes(raw_shots))
 }
 
+/// Decodes a still image file into an 8-bit `RgbImage`, falling back to the bundled
+/// FFmpeg decoder (`image2pipe` -> PNG) for `.tiff`, `.tif`, `.webp`, `.bmp`, `.exr`,
+/// or 16-bit formats not natively compiled into the minimal `image` crate features.
+pub fn decode_still_image_rgb(image_path: &Path) -> Result<image::RgbImage, String> {
+    if !image_path.exists() {
+        return Err(format!("Still image does not exist: {}", image_path.display()));
+    }
+
+    if let Ok(dyn_img) = image::open(image_path) {
+        return Ok(dyn_img.to_rgb8());
+    }
+
+    let ffmpeg = find_ffmpeg().ok_or_else(|| {
+        format!(
+            "Unsupported image format '{}' and FFmpeg fallback binary not found",
+            image_path.display()
+        )
+    })?;
+
+    let output = Command::new(&ffmpeg)
+        .args(["-v", "error", "-i"])
+        .arg(image_path)
+        .args(["-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("Failed to spawn FFmpeg for still decode: {}", e))?;
+
+    if !output.status.success() || output.stdout.is_empty() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "Failed to decode still image '{}': {}",
+            image_path.display(),
+            stderr.trim()
+        ));
+    }
+
+    image::load_from_memory_with_format(&output.stdout, image::ImageFormat::Png)
+        .map(|img| img.to_rgb8())
+        .map_err(|e| {
+            format!(
+                "Failed to decode FFmpeg PNG pipe for '{}': {}",
+                image_path.display(),
+                e
+            )
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -833,5 +881,55 @@ mod tests {
             "Unexpected ffmpeg output: {}",
             stdout
         );
+    }
+
+    #[test]
+    fn test_decode_still_image_tiff_and_bmp_fallback() {
+        let ffmpeg = find_ffmpeg().expect("FFmpeg required for TIFF/BMP generation");
+        let temp_dir = std::env::temp_dir().join("aesthetic_test_still_formats");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).expect("Create still formats temp dir");
+
+        let tiff_path = temp_dir.join("test_frame.tiff");
+        let bmp_path = temp_dir.join("test_frame.bmp");
+
+        for out_path in [&tiff_path, &bmp_path] {
+            let status = Command::new(&ffmpeg)
+                .args([
+                    "-y",
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=size=64x64:duration=1",
+                    "-frames:v",
+                    "1",
+                ])
+                .arg(out_path)
+                .status()
+                .expect("Spawn ffmpeg for still generation");
+            assert!(
+                status.success(),
+                "FFmpeg failed generating {}",
+                out_path.display()
+            );
+        }
+
+        let tiff_rgb = decode_still_image_rgb(&tiff_path).expect("Decode .tiff still via fallback");
+        assert_eq!(tiff_rgb.dimensions(), (64, 64));
+
+        let bmp_rgb = decode_still_image_rgb(&bmp_path).expect("Decode .bmp still via fallback");
+        assert_eq!(bmp_rgb.dimensions(), (64, 64));
+
+        let mut store = crate::baseline_store::BaselineStore::default();
+        store.populate_default_masters();
+        let summary = store
+            .ingest_reference_still(&tiff_path, "TIFF Master Test", "Roger Deakins", Some(2024))
+            .expect("Ingest .tiff still into Golden Baseline");
+        assert_eq!(summary.shots_added, 1);
+        assert_eq!(store.reference_shots.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

@@ -1,9 +1,9 @@
 # AESTHETIC — Development Status
 
-## Current Milestone: M31 Viewport Shaders & M32 Unified Deliverables Packaging (Pre-Release Alpha v0.1.0)
+## Current Milestone: M33–M34 Scene Coverage, Baseline Safety & Multi-Format Stills (Release v0.2.5+)
 - **Phase**: Ground-Up Rebuild in Rust
 - **Target**: Windows x64 (primary), Linux, macOS
-- **Active Focus**: Ed Lachman ASC EL Zone false color, focus peaking, 3D volumetric light vector spheres, gaze corridors, zero-dependency PKZIP unified deliverables packaging (`/api/export_package`, `--package`), and broadcast-calibrated scopes.
+- **Active Focus**: Exhaustive two-pass scene-by-scene scanner, multi-signal title card filtering, configurable `Top N`, Golden Baseline auto-backup/restore, additive multi-format still ingestion, native browse controls, and live Job Status Bar Graph.
 
 ---
 
@@ -41,6 +41,8 @@
 | **M30: Automated Look & Style Transfer CDL Calibration** | `compute_master_baseline_cdl_grade` calibrating mathematical ASC CDL and 3D LUT transforms pulling candidate footage into the exact exposure and tone curve of matched award-winning cinema films (1,112-shot Golden Baseline) | ✅ Done | One-click `.cdl` and `.cube` Master Look grading emulation directly in Visual Æesthetic deck |
 | **M31: Viewport Forensic Diagnostic & False Color Shaders** | `compute_focus_peaking_map` (Laplacian+Sobel in-focus edge detection), `compute_el_zone_map` (Ed Lachman, ASC 10-stop calibrated false color), 3D volumetric key-fill light vectors, and Eyeline Rule-of-Thirds gaze corridor | ✅ Done | Real-time viewport diagnostic shaders and interactive camera staging overlays |
 | **M32: Unified Deliverables ZIP Export Packaging** | `build_unified_deliverables_package` & `create_pkzip_archive` zero-dependency PKZIP 2.0 generator bundling EDL, XML, Resolve script, CSV, HTML contact sheet, CDL/CUBE grades, and hero stills | ✅ Done | Single-click unified deliverables package export in UI and CLI (`--package`) |
+| **M33: Exhaustive Scene Scanner, Title Card Elimination & Top-N** | Pass-1 `160x90` full-timeline streaming scene scan (`scan_video_scenes`), multi-signal title/credits card filtering (`detect_title_card_or_graphic`), bounded 4-thread Pass-2 per-scene evaluation, scene-coverage MMR ranking, and user-configurable `Top N` (`0 = All`) | ✅ Done | Every scene represented across the full timeline with zero title card pollution |
+| **M34: Auto-Backup/Restore, Additive Multi-Format Stills, Browse UI & Live Job Graph** | Atomic `.tmp` baseline saves, auto-snapshot backups + rollback (`assets/baseline_backups/`), fail-safe JSON loading, FFmpeg still decoding (`.tiff/.webp/.bmp/.exr/.png/.jpg`), native Browse Folder/File buttons, and real-time Job Status Bar Graph (`/api/job_status`) | ✅ Done | Strictly additive Golden Baseline protection with live 4-stage progress & task points |
 
 ---
 

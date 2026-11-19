@@ -1,28 +1,27 @@
 # AESTHETIC — Development Handoff
 
 ## Repository & State
-- **Repository**: electrichobo/AestheticApp @ `main` (latest pushed release tag `v0.2.5`)
+- **Repository**: electrichobo/AestheticApp @ `main` (pushed `20f084f`, tagged `v0.2.5` at `a92c70a`)
 - **Architecture**: Rust Core Engine (Ground-Up Rebuild)
 - **Active Target**: Windows x64 (Live Production Environment)
 
 ---
 
-## Current Status: Auto-Backup, Still-Frame & Additive Baseline Ingest, Browse UI & Live Job Graph
-- **Automatic Baseline Backup, Rollback & Additive Engine** (`crates/aesthetic-core/src/baseline_store.rs`):
-  - `save_to_dir` uses atomic `.tmp` write-flush-rename; `load_from_dir` strictly errors on malformed `shots.json`/`signatures.json` instead of defaulting empty.
-  - `create_backup`, `list_backups`, and `restore_backup` manage snapshots in `assets/baseline_backups/<backup_id>/` (retaining oldest original + 9 newest).
-  - `ingest_reference_film`, `ingest_reference_film_shots`, `ingest_reference_still`, `ingest_reference_directory_with_limit`, and unified `scan_and_ingest_golden_baseline` are strictly additive (no destructive `retain` or count overwrites) and support movies, still-frame directories, and single stills.
-- **Live Job Status Bar Graph** (`baseline_store.rs`, `pipeline.rs`, `aesthetic-ui/`):
-  - Global thread-safe `JobStatusSnapshot` (`get_job_status`, `/api/job_status`) tracks multi-stage bar columns (`JobStageBar`) and `active_task_point` across Baseline Ingest, Pass-1/Pass-2 Video Analysis, and Batch Folder Queue, rendered in `#global-job-bar` and `#ingest-job-graph`.
-- **Native Browse Controls & CLI** (`crates/aesthetic-ui/`, `crates/aesthetic-cli/src/main.rs`):
-  - Added `Browse Folder` & `Browse File` buttons inside `#server-ingest-modal`, native folder browse on `Open Cached Sidecars Folder`, plus CLI `baseline-backups`, `backup-baseline`, `restore-baseline`, and still-frame additive reporting.
-- **Verification & Packaging**:
-  - `cargo clippy --workspace --all-targets -- -D warnings`: 0 code warnings; `cargo test --workspace`: 35/35 passed (including `test_baseline_backup_and_restore_cycle` and `test_additive_baseline_stills_and_films_never_replace`); `cargo build --release` clean; `dist/Aesthetic-v0.2.5-windows-x64.zip` refreshed.
+## Current Status: Multi-Format Stills, E2E Verified Server & Docs Synced
+- **Multi-Format Still-Image Decoding (`crates/aesthetic-core/src/video.rs`, `baseline_store.rs`, `aesthetic-ui/src/main.rs`)**:
+  - Added `decode_still_image_rgb` trying fast native PNG/JPEG decode with automatic bundled FFmpeg (`image2pipe` -> PNG) fallback for `.tiff`, `.tif`, `.webp`, `.bmp`, `.exr`, and 16-bit stills without adding unapproved crates.
+  - Wired across `ingest_reference_still`, `ingest_reference_directory_with_limit`, UI `/api/open_media`, `/api/analyze` (updating `#global-job-bar`), and `get_or_extract_frame`.
+- **Verification (All Checks Run Cleanly)**:
+  - `cargo clippy --workspace --all-targets -- -D warnings`: 0 code warnings.
+  - `cargo test --workspace`: 36/36 passed (including `test_decode_still_image_tiff_and_bmp_fallback`, `test_additive_baseline_stills_and_films_never_replace`, and `test_baseline_backup_and_restore_cycle`).
+  - `cargo build --release`: clean; isolated headless `aesthetic-ui.exe --headless --port 63529` E2E test verified static assets, `/api/baseline_backups`, `/api/backup_baseline`, additive PNG+TIFF `/api/ingest_server` (`1112 + 2 = 1114`), `/api/job_status` (`Complete 100.0%`), TIFF `/api/analyze`, and `/api/restore_baseline` rollback back to `1112`.
+- **Docs & Packaging Sync**:
+  - Updated `README.md` & `STATUS.md` (added M33 & M34), updated `README_RELEASE.txt`, and refreshed `dist/Aesthetic-v0.2.5-windows-x64.zip`.
 
 ---
 
 ## Next Immediate Step
-1. User review (`git diff --stat`) and explicit approval before `git commit` and `git push`.
+1. Review working tree (`git status -s` / `git diff --stat`) and commit/push on user approval (plus optional new tag e.g. `v0.2.6`).
 
 ---
 

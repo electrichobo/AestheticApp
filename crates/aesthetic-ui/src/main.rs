@@ -5,7 +5,8 @@
 //! and interactive UI via embedded native WebView (Edge App Mode / Chromium).
 
 use aesthetic_core::baseline_store::{
-    get_job_status, scan_and_ingest_golden_baseline, BaselineStore,
+    finish_job_status, get_job_status, make_stage_bar, scan_and_ingest_golden_baseline,
+    update_job_status, BaselineStore,
 };
 use aesthetic_core::deliverables::build_unified_deliverables_package;
 use aesthetic_core::export::{
@@ -16,7 +17,7 @@ use aesthetic_core::inference::ModelInferenceEngine;
 use aesthetic_core::pipeline::{
     analyze_video_file, enrich_take, evaluate_candidate_frame, BatchAnalysisResult, BatchOptions,
 };
-use aesthetic_core::video::{extract_frame_rgb, probe_video_metadata};
+use aesthetic_core::video::{decode_still_image_rgb, extract_frame_rgb, probe_video_metadata};
 use aesthetic_core::web_ingest::probe_web_url;
 use aesthetic_metrics::{compute_el_zone_map, compute_focus_peaking_map};
 use aesthetic_metrics::scopes::{
@@ -599,8 +600,10 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
             if let Some(path_str) = query_map.get("path") {
                 let clean = clean_user_path_str(path_str);
                 let path = Path::new(clean);
-                if let Ok(dyn_img) = image::open(path) {
-                    let rgb = dyn_img.to_rgb8();
+                if let Some(rgb) = is_still_image_path(path)
+                    .then(|| decode_still_image_rgb(path).ok())
+                    .flatten()
+                {
                     let (w, h) = rgb.dimensions();
                     let info = VideoSourceInfo {
                         file_path: path.to_string_lossy().to_string(),
@@ -780,10 +783,25 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                     .and_then(|s| s.parse::<f64>().ok())
                     .unwrap_or(1.0);
 
-                // Direct still-image evaluation support (.png, .jpg, .tiff, .webp, etc.)
+                // Direct still-image evaluation support (.png, .jpg, .tiff, .webp, .bmp, .exr)
                 if is_still_image_path(path) {
-                    if let Ok(dyn_img) = image::open(path) {
-                        let rgb = dyn_img.to_rgb8();
+                    let clip_label = path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("still");
+                    update_job_status(
+                        "still_analysis",
+                        "Evaluating Still",
+                        &format!("Decoding & evaluating {} (79 metrics + Golden Baseline)...", clip_label),
+                        0,
+                        2,
+                        vec![
+                            make_stage_bar("1. Still Decode", 0, 1, "active"),
+                            make_stage_bar("2. Physics & Baseline", 0, 1, "pending"),
+                        ],
+                        "Evaluating high-resolution still frame...",
+                    );
+                    if let Ok(rgb) = decode_still_image_rgb(path) {
                         let (w, h) = rgb.dimensions();
                         let store = BaselineStore::new();
                         let inference = ModelInferenceEngine::new();
@@ -860,6 +878,16 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                             "takes": takes,
                             "sequence_metrics": seq_json
                         });
+                        finish_job_status(
+                            "still_analysis",
+                            "Complete",
+                            &format!("Scored still {} ({}x{})", clip_name, w, h),
+                            vec![
+                                make_stage_bar("1. Still Decode", 1, 1, "done"),
+                                make_stage_bar("2. Physics & Baseline", 1, 1, "done"),
+                            ],
+                            "Still evaluation complete",
+                        );
                         send_response(
                             stream,
                             "200 OK",
@@ -868,6 +896,16 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                         );
                         return;
                     }
+                    finish_job_status(
+                        "still_analysis",
+                        "Error",
+                        &format!("Failed to decode still image {}", path.display()),
+                        vec![
+                            make_stage_bar("1. Still Decode", 0, 1, "error"),
+                            make_stage_bar("2. Physics & Baseline", 0, 1, "pending"),
+                        ],
+                        "Decode error",
+                    );
                 }
 
                 let file_stem = path
@@ -1854,15 +1892,7 @@ fn parse_top_n_query(
 }
 
 fn is_still_image_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .map(|ext| {
-            matches!(
-                ext.to_ascii_lowercase().as_str(),
-                "png" | "jpg" | "jpeg" | "tif" | "tiff" | "webp" | "bmp"
-            )
-        })
-        .unwrap_or(false)
+    aesthetic_core::is_still_image_file(path)
 }
 
 fn get_frame_for_time(state: &AppState, time_sec: f64) -> RgbImage {
@@ -1901,15 +1931,15 @@ fn get_frame_for_time(state: &AppState, time_sec: f64) -> RgbImage {
             return render_cinematic_reference_frame(time_sec);
         }
         if is_still_image_path(media_path) {
-            if let Ok(dyn_img) = image::open(media_path) {
-                return dyn_img.to_rgb8();
+            if let Ok(rgb) = decode_still_image_rgb(media_path) {
+                return rgb;
             }
         }
         if let Ok(frame) = extract_frame_rgb(media_path, time_sec) {
             return frame;
         }
-        if let Ok(dyn_img) = image::open(media_path) {
-            return dyn_img.to_rgb8();
+        if let Ok(rgb) = decode_still_image_rgb(media_path) {
+            return rgb;
         }
     }
 
