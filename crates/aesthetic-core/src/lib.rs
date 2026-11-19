@@ -15,8 +15,11 @@ pub mod web_ingest;
 pub mod window;
 
 pub use baseline_store::{
-    cosine_similarity, find_primary_video_file, parse_movie_folder_name,
-    scan_and_ingest_media_server, BaselineStore, IngestSummary, ServerIngestReport,
+    cosine_similarity, find_primary_video_file, find_still_images_in_dir, finish_job_status,
+    get_job_status, is_still_image_file, is_video_file, make_stage_bar, parse_movie_folder_name,
+    scan_and_ingest_golden_baseline, scan_and_ingest_media_server, update_active_task_point,
+    update_job_status, BaselineBackupInfo, BaselineStore, IngestSummary, JobStageBar,
+    JobStatusSnapshot, ServerIngestReport,
 };
 pub use deliverables::{
     build_unified_deliverables_package, create_pkzip_archive, export_deliverables_directory,

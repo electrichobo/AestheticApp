@@ -1383,10 +1383,76 @@ pub fn analyze_video_file(
     video_path: &Path,
     options: &BatchOptions,
 ) -> Result<BatchAnalysisResult, String> {
-    let video_info = probe_video_metadata(video_path)?;
-    if video_info.duration_sec <= 0.0 {
-        return Err("Video has zero or unknown duration".to_string());
+    use crate::baseline_store::{
+        finish_job_status, get_job_status, make_stage_bar, update_active_task_point,
+        update_job_status,
+    };
+
+    let clip_label = video_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("video")
+        .to_string();
+    let in_batch = {
+        let cur = get_job_status();
+        cur.active && cur.job_type == "batch_folder"
+    };
+    let make_video_stages = |p_done: usize,
+                             p_state: &str,
+                             s_done: usize,
+                             s_state: &str,
+                             e_done: usize,
+                             e_total: usize,
+                             e_state: &str,
+                             r_done: usize,
+                             r_state: &str| {
+        vec![
+            make_stage_bar("1. Media Probe & Baseline", p_done, 1, p_state),
+            make_stage_bar("2. Pass-1 Scene Scan", s_done, 1, s_state),
+            make_stage_bar("3. Pass-2 Scene Eval", e_done, e_total.max(1), e_state),
+            make_stage_bar("4. MMR Ranking & Export", r_done, 1, r_state),
+        ]
+    };
+
+    if !in_batch {
+        update_job_status(
+            "video_analysis",
+            "Probing",
+            &format!("Probing {} & loading Golden Baseline...", clip_label),
+            0,
+            4,
+            make_video_stages(0, "active", 0, "pending", 0, 1, "pending", 0, "pending"),
+            "Initializing media metadata and 199-film reference quantiles...",
+        );
     }
+
+    let video_info = match probe_video_metadata(video_path) {
+        Ok(v) if v.duration_sec > 0.0 => v,
+        Ok(_) => {
+            if !in_batch {
+                finish_job_status(
+                    "video_analysis",
+                    "Error",
+                    "Video has zero or unknown duration",
+                    make_video_stages(0, "error", 0, "pending", 0, 1, "pending", 0, "pending"),
+                    "Aborted",
+                );
+            }
+            return Err("Video has zero or unknown duration".to_string());
+        }
+        Err(e) => {
+            if !in_batch {
+                finish_job_status(
+                    "video_analysis",
+                    "Error",
+                    &e,
+                    make_video_stages(0, "error", 0, "pending", 0, 1, "pending", 0, "pending"),
+                    "Probe failed",
+                );
+            }
+            return Err(e);
+        }
+    };
 
     let store = BaselineStore::new();
     let inference = ModelInferenceEngine::new();
@@ -1402,6 +1468,27 @@ pub fn analyze_video_file(
     } else {
         0.5
     };
+
+    if !in_batch {
+        update_job_status(
+            "video_analysis",
+            "Pass-1 Timeline Scan",
+            &format!(
+                "Scanning 100% timeline ({:.1}s) at 160x90 proxy resolution...",
+                video_info.duration_sec
+            ),
+            1,
+            4,
+            make_video_stages(1, "done", 0, "active", 0, 1, "pending", 0, "pending"),
+            "Detecting shot boundaries, filtering title cards, and grouping scenes...",
+        );
+    } else {
+        update_active_task_point(
+            &format!("{}: Pass-1 scanning {:.1}s timeline...", clip_label, video_info.duration_sec),
+            0,
+            0,
+        );
+    }
 
     let (detected_scenes, mut filtered_title_cards_count) =
         match crate::video::scan_video_scenes(video_path, video_info.duration_sec, scan_fps) {
@@ -1463,10 +1550,27 @@ pub fn analyze_video_file(
     };
     let next_idx = std::sync::atomic::AtomicUsize::new(0);
     let total_jobs = pass2_shots.len();
+    let total_video_units = 2 + total_jobs.max(1) + 1;
     let worker_count = total_jobs.clamp(1, 4);
     let results_mutex = std::sync::Mutex::new(Vec::with_capacity(total_jobs));
     let fallback_mutex = std::sync::Mutex::new(Vec::new());
     let extra_filtered = std::sync::atomic::AtomicUsize::new(0);
+    let completed_jobs = std::sync::atomic::AtomicUsize::new(0);
+
+    if !in_batch {
+        update_job_status(
+            "video_analysis",
+            "Pass-2 Full-Res Evaluation",
+            &format!(
+                "Evaluating {} candidate shots across {} photographic scenes...",
+                total_jobs, total_scenes_detected
+            ),
+            2,
+            total_video_units,
+            make_video_stages(1, "done", 1, "done", 0, total_jobs.max(1), "active", 0, "pending"),
+            "Running 79-metric physics + neural craft + 3D depth on full-res frames...",
+        );
+    }
 
     std::thread::scope(|s| {
         for _ in 0..worker_count {
@@ -1476,6 +1580,7 @@ pub fn analyze_video_file(
                     break;
                 }
                 let (scene_idx, ref shot) = pass2_shots[job_i];
+                let ts_hint = shot.best_timestamps.first().copied().unwrap_or(shot.start_sec);
                 let res = evaluate_pass2_shot(&pass2_ctx, scene_idx, shot);
                 if res.filtered_cards > 0 {
                     extra_filtered.fetch_add(res.filtered_cards, std::sync::atomic::Ordering::Relaxed);
@@ -1489,9 +1594,48 @@ pub fn analyze_video_file(
                         guard.push(fb);
                     }
                 }
+                let done_now = completed_jobs.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                if !in_batch {
+                    update_job_status(
+                        "video_analysis",
+                        "Pass-2 Full-Res Evaluation",
+                        &format!(
+                            "Scene {} — Evaluated shot {}/{} @ {:.1}s",
+                            scene_idx, done_now, total_jobs, ts_hint
+                        ),
+                        2 + done_now,
+                        total_video_units,
+                        make_video_stages(1, "done", 1, "done", done_now, total_jobs.max(1), "active", 0, "pending"),
+                        &format!("{} scenes detected across timeline", total_scenes_detected),
+                    );
+                } else {
+                    update_active_task_point(
+                        &format!(
+                            "{}: Scene {} shot {}/{} @ {:.1}s",
+                            clip_label, scene_idx, done_now, total_jobs, ts_hint
+                        ),
+                        0,
+                        0,
+                    );
+                }
             });
         }
     });
+
+    if !in_batch {
+        update_job_status(
+            "video_analysis",
+            "Ranking & Exporting",
+            &format!(
+                "Applying scene-coverage MMR ranking across {} scenes...",
+                total_scenes_detected
+            ),
+            2 + total_jobs,
+            total_video_units,
+            make_video_stages(1, "done", 1, "done", total_jobs.max(1), total_jobs.max(1), "done", 0, "active"),
+            "Computing sequence continuity metrics & deliverables...",
+        );
+    }
 
     filtered_title_cards_count += extra_filtered.load(std::sync::atomic::Ordering::Relaxed);
 
@@ -1648,6 +1792,21 @@ pub fn analyze_video_file(
                 extracted_clips_count += 1;
             }
         }
+    }
+
+    if !in_batch {
+        finish_job_status(
+            "video_analysis",
+            "Complete",
+            &format!(
+                "Ranked {} hero selects across {} scenes ({} non-photo filtered).",
+                takes.len(),
+                total_scenes_detected,
+                filtered_title_cards_count
+            ),
+            make_video_stages(1, "done", 1, "done", total_jobs.max(1), total_jobs.max(1), "done", 1, "done"),
+            &format!("Analysis ready for {}", clip_label),
+        );
     }
 
     Ok(BatchAnalysisResult {
@@ -2322,16 +2481,51 @@ pub fn analyze_folder_queue(
         ));
     }
 
+    let make_batch_stages = |d_done: usize,
+                             d_state: &str,
+                             p_done: usize,
+                             p_total: usize,
+                             p_state: &str,
+                             s_done: usize,
+                             s_state: &str| {
+        vec![
+            crate::baseline_store::make_stage_bar("1. Folder Scan", d_done, 1, d_state),
+            crate::baseline_store::make_stage_bar("2. Video Queue Analysis", p_done, p_total.max(1), p_state),
+            crate::baseline_store::make_stage_bar("3. Season Deliverables", s_done, 1, s_state),
+        ]
+    };
+
     let start_time = std::time::Instant::now();
+    let total_files = video_files.len();
+    let total_units = 1 + total_files + 1;
+    crate::baseline_store::update_job_status(
+        "batch_folder",
+        "Starting Batch",
+        &format!("Discovered {} videos in {}", total_files, folder_path.display()),
+        1,
+        total_units,
+        make_batch_stages(1, "done", 0, total_files, "active", 0, "pending"),
+        "Sequentially analyzing every file across all scenes...",
+    );
+
     let mut total_takes = 0;
     let mut per_file_takes = Vec::new();
     let mut all_batch_takes = Vec::new();
 
-    for vpath in &video_files {
+    for (v_idx, vpath) in video_files.iter().enumerate() {
         let file_stem = vpath
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("video");
+        crate::baseline_store::update_job_status(
+            "batch_folder",
+            "Processing Queue",
+            &format!("[{}/{}] Analyzing video: {}", v_idx + 1, total_files, file_stem),
+            1 + v_idx,
+            total_units,
+            make_batch_stages(1, "done", v_idx, total_files, "active", 0, "pending"),
+            &format!("{} hero selects accumulated so far", total_takes),
+        );
         let sub_sidecars = out_sidecars_dir.join(file_stem);
         let contact_sheet = out_sidecars_dir.join(format!("{}_contact_sheet.html", file_stem));
         let edl_file = out_sidecars_dir.join(format!("{}_selects.edl", file_stem));
@@ -2397,6 +2591,19 @@ pub fn analyze_folder_queue(
     }
 
     let elapsed_sec = start_time.elapsed().as_secs_f64();
+
+    crate::baseline_store::finish_job_status(
+        "batch_folder",
+        "Complete",
+        &format!(
+            "Batch finished: {} files processed, {} hero selects in {:.1}s",
+            per_file_takes.len(),
+            total_takes,
+            elapsed_sec
+        ),
+        make_batch_stages(1, "done", total_files, total_files, "done", 1, "done"),
+        &format!("Saved sidecars & season deliverables to {}", out_sidecars_dir.display()),
+    );
 
     Ok(FolderBatchSummary {
         folder_path: folder_path.display().to_string(),

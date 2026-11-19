@@ -28,6 +28,9 @@ fn main() {
     match args[1].as_str() {
         "benchmark" => run_benchmark(),
         "baseline-info" => print_baseline_info(),
+        "baseline-backups" => print_baseline_backups(),
+        "backup-baseline" => run_backup_baseline(args.get(2).map(String::as_str)),
+        "restore-baseline" => run_restore_baseline(args.get(2).map(String::as_str)),
         "awards-list" => print_awards_list(),
         "demo" => run_demo_analysis(),
         "analyze" => {
@@ -127,6 +130,9 @@ fn print_usage() {
     println!("  feedback <id> <action> Log user select preference event (promote_hero | pin_select | reject_take)");
     println!("  awards-list            Display all 80+ Oscar, ASC, and BSC titles in the registry");
     println!("  baseline-info          Display current Golden Baseline statistics and films");
+    println!("  baseline-backups       List available Golden Baseline backup snapshots");
+    println!("  backup-baseline [tag]  Create a manual snapshot backup of the Golden Baseline");
+    println!("  restore-baseline [id]  Restore the Golden Baseline from latest (or named) backup");
     println!("  benchmark              Run multi-threaded SIMD physics & vector search benchmarks");
     println!("  demo                   Run synthetic benchmark on high-resolution frame raster");
 }
@@ -579,6 +585,19 @@ fn run_baseline_ingest(media_path: &Path, flags: &[String]) {
     println!("  * Cinematographer:  {}", dp);
     println!("  * Release Year:     {}", year);
 
+    let baseline_dir = BaselineStore::resolve_baseline_dir();
+    match BaselineStore::create_backup(&baseline_dir, "cli_ingest_baseline") {
+        Ok(Some(b)) => println!(
+            "  [✓] Golden Baseline Backup Snapshot: {} ({} shots, {} films)",
+            b.backup_id, b.shots_count, b.films_count
+        ),
+        Ok(None) => {}
+        Err(e) => {
+            eprintln!("Aborting baseline ingest: pre-ingest backup failed: {}", e);
+            return;
+        }
+    }
+
     let res = if is_dir {
         println!("  * Mode:             Directory of Still Reference Frames");
         store.ingest_reference_directory(media_path, &title, &dp, Some(year))
@@ -595,12 +614,15 @@ fn run_baseline_ingest(media_path: &Path, flags: &[String]) {
 
     match res {
         Ok(summary) => {
-            let baseline_dir = Path::new("assets").join("baseline");
             if let Err(e) = store.save_to_dir(&baseline_dir) {
                 eprintln!("Warning: Failed to save baseline to disk: {}", e);
             }
             println!("\n[✓] Ingestion Successful!");
             println!("  * Reference Shots Ingested: {}", summary.shots_added);
+            println!(
+                "  * Additive Corpus Growth:   {} existing + {} added = {} total shots",
+                summary.previous_corpus_shots, summary.shots_added, summary.total_corpus_shots
+            );
             println!(
                 "  * Total Baseline Corpus:    {} shots",
                 summary.total_corpus_shots
@@ -650,6 +672,73 @@ fn print_baseline_info() {
         store.manifest.highlight_rolloff_quantiles.p50,
         store.manifest.highlight_rolloff_quantiles.p90
     );
+}
+
+fn print_baseline_backups() {
+    let baseline_dir = BaselineStore::resolve_baseline_dir();
+    let backups = BaselineStore::list_backups(&baseline_dir);
+    println!(
+        "\n--- Golden Baseline Backups ({}) ---",
+        BaselineStore::resolve_backups_dir(&baseline_dir).display()
+    );
+    if backups.is_empty() {
+        println!("  No backups found yet.");
+        println!("  Run 'aesthetic-cli backup-baseline' or ingest data to create one automatically.");
+        return;
+    }
+    for (idx, b) in backups.iter().enumerate() {
+        let marker = if idx == 0 { " [LATEST]" } else { "" };
+        println!(
+            "  [{}] {}{} — {} shots / {} films (reason: {}, unix: {})",
+            idx + 1,
+            b.backup_id,
+            marker,
+            b.shots_count,
+            b.films_count,
+            b.reason,
+            b.timestamp_unix
+        );
+    }
+}
+
+fn run_backup_baseline(reason: Option<&str>) {
+    let baseline_dir = BaselineStore::resolve_baseline_dir();
+    let label = reason.unwrap_or("manual_cli_snapshot");
+    match BaselineStore::create_backup(&baseline_dir, label) {
+        Ok(Some(b)) => {
+            println!("\n[✓] Golden Baseline Backup Created:");
+            println!("  * Backup ID:  {}", b.backup_id);
+            println!("  * Shots:      {}", b.shots_count);
+            println!("  * Films:      {}", b.films_count);
+            println!("  * Reason:     {}", b.reason);
+            println!("  * Saved To:   {}", b.backup_path);
+        }
+        Ok(None) => {
+            eprintln!(
+                "No existing baseline manifest found at '{}'; nothing to back up.",
+                baseline_dir.display()
+            );
+        }
+        Err(e) => {
+            eprintln!("Failed to create Golden Baseline backup: {}", e);
+        }
+    }
+}
+
+fn run_restore_baseline(backup_id: Option<&str>) {
+    let baseline_dir = BaselineStore::resolve_baseline_dir();
+    match BaselineStore::restore_backup(&baseline_dir, backup_id) {
+        Ok(b) => {
+            println!("\n[✓] Golden Baseline Restored Successfully!");
+            println!("  * Restored Backup ID: {}", b.backup_id);
+            println!("  * Shots Restored:     {}", b.shots_count);
+            println!("  * Films Restored:     {}", b.films_count);
+            println!("  * Target Directory:   {}", baseline_dir.display());
+        }
+        Err(e) => {
+            eprintln!("Failed to restore Golden Baseline backup: {}", e);
+        }
+    }
 }
 
 fn run_benchmark() {
@@ -902,57 +991,122 @@ fn run_server_ingest(server_dir: &Path, flags: &[String]) {
         }
     };
 
-    let mut matched_jobs = Vec::new();
+    struct MatchedServerFolder {
+        folder_name: String,
+        video_file: Option<PathBuf>,
+        stills_dir: Option<PathBuf>,
+        award: Option<&'static aesthetic_models::awards::AwardRecord>,
+        stills_count: usize,
+    }
+
+    let mut matched_jobs: Vec<MatchedServerFolder> = Vec::new();
 
     for entry in entries.flatten() {
         if let Ok(file_type) = entry.file_type() {
             if file_type.is_dir() {
                 let folder_name = entry.file_name().to_string_lossy().to_string();
                 let (title, year) = parse_movie_folder_name(&folder_name);
-                if let Some(award) = find_award_match(&title, year) {
-                    if let Some(video_file) = find_primary_video_file(&entry.path()) {
-                        matched_jobs.push((folder_name, video_file, award));
-                    }
+                let award = find_award_match(&title, year);
+                let video_file = if award.is_some() {
+                    find_primary_video_file(&entry.path())
+                } else {
+                    None
+                };
+                let stills = aesthetic_core::baseline_store::find_still_images_in_dir(&entry.path());
+                let stills_dir = if stills.is_empty() {
+                    None
+                } else {
+                    Some(entry.path())
+                };
+
+                if (award.is_some() && (video_file.is_some() || stills_dir.is_some()))
+                    || stills_dir.is_some()
+                {
+                    matched_jobs.push(MatchedServerFolder {
+                        folder_name,
+                        video_file,
+                        stills_dir,
+                        award,
+                        stills_count: stills.len(),
+                    });
                 }
             }
         }
     }
 
     println!(
-        "\nFound {} award-winning/nominated films in library:",
+        "\nFound {} matched library folders (films & still-frame collections):",
         matched_jobs.len()
     );
-    for (idx, (folder, _file, award)) in matched_jobs.iter().enumerate() {
-        println!(
-            "  [{:02}] {:<35} -> {} ({}, DP: {}) [Awards: {}]",
-            idx + 1,
-            folder,
-            award.title,
-            award.year,
-            award.cinematographer,
-            award.awards.join(", ")
-        );
+    for (idx, item) in matched_jobs.iter().enumerate() {
+        if let Some(award) = item.award {
+            println!(
+                "  [{:02}] {:<35} -> {} ({}, DP: {}) [Video: {}, Stills: {}]",
+                idx + 1,
+                item.folder_name,
+                award.title,
+                award.year,
+                award.cinematographer,
+                if item.video_file.is_some() { "yes" } else { "no" },
+                item.stills_count
+            );
+        } else {
+            println!(
+                "  [{:02}] {:<35} -> Reference Stills Collection [Stills: {}]",
+                idx + 1,
+                item.folder_name,
+                item.stills_count
+            );
+        }
     }
 
     if dry_run {
-        println!("\n[DRY RUN] Cataloging complete. Run without --dry-run to execute shot-separated ingest.");
+        println!("\n[DRY RUN] Cataloging complete. Run without --dry-run to execute additive ingest.");
         return;
     }
 
-    let mut store = BaselineStore::new();
+    let baseline_dir = BaselineStore::resolve_baseline_dir();
+    let mut store = if baseline_dir.join("manifest.json").exists() {
+        match BaselineStore::load_from_dir(&baseline_dir) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "Aborting bulk ingest: failed to load existing Golden Baseline cleanly: {}",
+                    e
+                );
+                return;
+            }
+        }
+    } else {
+        BaselineStore::new()
+    };
+    let initial_corpus_shots = store.reference_shots.len();
 
-    let pending_jobs: Vec<_> = if force {
+    let pending_jobs: Vec<MatchedServerFolder> = if force {
         matched_jobs
     } else {
         let mut pending = Vec::new();
         let mut skipped = 0;
         for job in matched_jobs {
-            let award_title = job.2.title;
-            let exists = store
-                .measured_shots()
-                .iter()
-                .any(|s| s.film_title.eq_ignore_ascii_case(award_title));
-            if exists {
+            let skip = {
+                let (parsed_title, _) = parse_movie_folder_name(&job.folder_name);
+                let title = job
+                    .award
+                    .map(|a| a.title)
+                    .unwrap_or(parsed_title.as_str());
+                let video_exists = job.video_file.is_none()
+                    || store
+                        .measured_shots()
+                        .iter()
+                        .any(|s| s.film_title.eq_ignore_ascii_case(title) && !s.shot_id.contains("_still_"));
+                let stills_exist = job.stills_dir.is_none()
+                    || store
+                        .measured_shots()
+                        .iter()
+                        .any(|s| s.film_title.eq_ignore_ascii_case(title) && s.shot_id.contains("_still_"));
+                video_exists && stills_exist
+            };
+            if skip {
                 skipped += 1;
             } else {
                 pending.push(job);
@@ -960,7 +1114,7 @@ fn run_server_ingest(server_dir: &Path, flags: &[String]) {
         }
         if skipped > 0 {
             println!(
-                "\nDeduplication: Skipping {} already-ingested films in baseline (pass --force to re-ingest).",
+                "\nDeduplication: Skipping {} already-ingested folders in baseline (pass --force for additive re-sample).",
                 skipped
             );
         }
@@ -974,62 +1128,123 @@ fn run_server_ingest(server_dir: &Path, flags: &[String]) {
     };
 
     println!(
-        "\nStarting Shot-Separated Ingestion for {} films ({} hero shots/film)...",
+        "\nStarting Additive Shot & Still Ingestion for {} items ({} cap/item)...",
         to_process.len(),
         shots_per_film
     );
-    let mut total_shots = 0;
 
-    for (idx, (folder, file_path, award)) in to_process.iter().enumerate() {
-        println!("\n[{}/{}] Ingesting: {}", idx + 1, to_process.len(), folder);
-        println!("  File: {}", file_path.display());
-        println!(
-            "  DP:   {} | Style: {}",
-            award.cinematographer, award.style_family
-        );
-
-        let ingest_meta = aesthetic_core::baseline_store::FilmIngestMeta {
-            title: award.title,
-            cinematographer: award.cinematographer,
-            director: Some(award.director),
-            year: award.year,
-            style_family: award.style_family,
-            max_shots: shots_per_film,
-        };
-
-        match store.ingest_reference_film_shots(file_path, &ingest_meta) {
-            Ok(summary) => {
-                println!(
-                    "  [✓] Extracted {} clean continuous shots (Corpus Total: {} shots)",
-                    summary.shots_added, summary.total_corpus_shots
-                );
-                println!(
-                    "      Dynamic Range p50: {:.2} stops | Roll-Off p50: {:.1}%",
-                    summary.new_dynamic_range_p50, summary.new_highlight_rolloff_p50
-                );
-                total_shots += summary.shots_added;
-                let baseline_dir = Path::new("assets").join("baseline");
-                let _ = store.save_to_dir(&baseline_dir);
-            }
-            Err(err) => {
-                eprintln!("  [!] Failed to ingest {}: {}", folder, err);
+    if !to_process.is_empty() {
+        let reason = format!("cli_bulk_ingest_{}_items", to_process.len());
+        match BaselineStore::create_backup(&baseline_dir, &reason) {
+            Ok(Some(b)) => println!(
+                "  [✓] Pre-Bulk Golden Baseline Backup Created: {} ({} shots, {} films)",
+                b.backup_id, b.shots_count, b.films_count
+            ),
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("Aborting bulk server ingest: pre-bulk backup failed: {}", e);
+                return;
             }
         }
     }
 
-    let baseline_dir = Path::new("assets").join("baseline");
-    if let Err(e) = store.save_to_dir(&baseline_dir) {
-        eprintln!("Warning: Failed to save baseline to disk: {}", e);
-    } else {
+    let mut total_shots = 0;
+
+    for (idx, item) in to_process.iter().enumerate() {
+        let (parsed_title, parsed_year) = parse_movie_folder_name(&item.folder_name);
+        let item_title = item
+            .award
+            .map(|a| a.title.to_string())
+            .unwrap_or(parsed_title);
+        let item_dp = item
+            .award
+            .map(|a| a.cinematographer.to_string())
+            .unwrap_or_else(|| "Reference Stills".to_string());
+
         println!(
-            "\n[✓] Golden Baseline successfully updated and saved to: {}",
-            baseline_dir.display()
+            "\n[{}/{}] Additive Ingest: {}",
+            idx + 1,
+            to_process.len(),
+            item.folder_name
         );
+
+        if let (Some(file_path), Some(award)) = (&item.video_file, item.award) {
+            println!("  Video: {}", file_path.display());
+            println!(
+                "  DP:    {} | Style: {}",
+                award.cinematographer, award.style_family
+            );
+
+            let ingest_meta = aesthetic_core::baseline_store::FilmIngestMeta {
+                title: award.title,
+                cinematographer: award.cinematographer,
+                director: Some(award.director),
+                year: award.year,
+                style_family: award.style_family,
+                max_shots: shots_per_film,
+            };
+
+            match store.ingest_reference_film_shots(file_path, &ingest_meta) {
+                Ok(summary) => {
+                    println!(
+                        "  [✓] Added {} clean video shots ({} + {} = {} total corpus shots)",
+                        summary.shots_added,
+                        summary.previous_corpus_shots,
+                        summary.shots_added,
+                        summary.total_corpus_shots
+                    );
+                    total_shots += summary.shots_added;
+                    let _ = store.save_to_dir(&baseline_dir);
+                }
+                Err(err) => {
+                    eprintln!("  [!] Failed video ingest for {}: {}", item.folder_name, err);
+                }
+            }
+        }
+
+        if let Some(stills_dir) = &item.stills_dir {
+            println!("  Stills: {} ({} image files)", stills_dir.display(), item.stills_count);
+            let item_year = parsed_year.or_else(|| item.award.map(|a| a.year));
+            match store.ingest_reference_directory_with_limit(
+                stills_dir,
+                &item_title,
+                &item_dp,
+                item_year,
+                Some(shots_per_film.max(1)),
+            ) {
+                Ok(summary) => {
+                    println!(
+                        "  [✓] Added {} reference still frames ({} + {} = {} total corpus shots)",
+                        summary.shots_added,
+                        summary.previous_corpus_shots,
+                        summary.shots_added,
+                        summary.total_corpus_shots
+                    );
+                    total_shots += summary.shots_added;
+                    let _ = store.save_to_dir(&baseline_dir);
+                }
+                Err(err) => {
+                    eprintln!("  [!] Failed stills ingest for {}: {}", item.folder_name, err);
+                }
+            }
+        }
+    }
+
+    if total_shots > 0 {
+        if let Err(e) = store.save_to_dir(&baseline_dir) {
+            eprintln!("Warning: Failed to save baseline to disk: {}", e);
+        } else {
+            println!(
+                "\n[✓] Golden Baseline successfully updated and saved to: {}",
+                baseline_dir.display()
+            );
+        }
     }
 
     println!(
-        "\nIngestion Complete! Ingested {} clean shots across {} award films.",
+        "\nAdditive Ingestion Complete! {} existing + {} added = {} total Golden Baseline shots.",
+        initial_corpus_shots,
         total_shots,
-        to_process.len()
+        store.reference_shots.len()
     );
 }

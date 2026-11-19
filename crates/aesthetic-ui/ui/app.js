@@ -1659,8 +1659,11 @@ if (btnOpen) {
         takesList.innerHTML = `<div class="empty-state">Scanning every scene on timeline &amp; filtering title cards (Top ${topN === 0 ? 'All' : topN})...</div>`;
       }
 
+      startJobStatusPolling(false);
       const res = await fetch(`/api/analyze?path=${encodeURIComponent(filePath)}&top=${encodeURIComponent(topN)}`);
       const data = await res.json();
+      await fetchAndRenderJobStatus(false);
+      stopJobStatusPolling();
       if (data.success) {
         activeTakeIndex = 0;
         await loadSelects();
@@ -1677,6 +1680,7 @@ if (btnOpen) {
         }
       }
     } catch (err) {
+      stopJobStatusPolling();
       alert(`Error opening media: ${err}`);
     }
   });
@@ -1706,10 +1710,21 @@ const btnOpenSidecars = document.getElementById('btn-open-sidecars');
 if (btnOpenSidecars) {
   btnOpenSidecars.addEventListener('click', async () => {
     try {
-      let dirPath = prompt(
-        'Open Cached Sidecars Folder:\n\nEnter directory path containing JSON+PNG sidecars\n(e.g. assets/curated/acting_dead or an individual episode folder):',
-        'assets/curated/acting_dead'
-      );
+      let dirPath = null;
+      try {
+        const browseRes = await fetch('/api/browse_dir');
+        const browseData = await browseRes.json();
+        if (browseData.success && browseData.path) {
+          dirPath = browseData.path;
+        }
+      } catch (e) {}
+
+      if (!dirPath) {
+        dirPath = prompt(
+          'Open Cached Sidecars Folder:\n\nEnter directory path containing JSON+PNG sidecars\n(e.g. assets/curated/acting_dead or an individual episode folder):',
+          'assets/curated/acting_dead'
+        );
+      }
       if (!dirPath || !dirPath.trim()) return;
       dirPath = dirPath.trim().replace(/^["']|["']$/g, '').trim();
 
@@ -1757,15 +1772,18 @@ if (btnBatchFolder) {
 
       const topN = getSelectedTopN();
       btnBatchFolder.disabled = true;
-      alert(`[AESTHETIC Batch Queue]\nStarting exhaustive scene-by-scene batch analysis (Top N = ${topN === 0 ? 'All' : topN}) on directory:\n${folderPath}\nThis runs sequentially across all video files and saves individual sidecars.`);
+      startJobStatusPolling(false);
       const res = await fetch(`/api/batch_folder?folder=${encodeURIComponent(folderPath)}&top=${encodeURIComponent(topN)}`);
       const data = await res.json();
+      await fetchAndRenderJobStatus(false);
+      stopJobStatusPolling();
       if (data.folder_path) {
         alert(`[✓] Batch Analysis Finished!\nProcessed ${data.total_files_processed} files in ${data.elapsed_sec.toFixed(1)}s.\nTotal Hero Selects Extracted: ${data.total_takes_extracted}\nOutput saved to: ${data.output_sidecars_dir}`);
       } else {
         alert(`Batch analysis error: ${data.error || 'Failed'}`);
       }
     } catch (err) {
+      stopJobStatusPolling();
       alert(`Error in batch processing: ${err}`);
     } finally {
       btnBatchFolder.disabled = false;
@@ -2491,15 +2509,196 @@ const modalClose = document.getElementById('modal-ingest-close');
 const btnIngestCancel = document.getElementById('btn-ingest-cancel');
 const btnIngestStart = document.getElementById('btn-ingest-start');
 const ingestPathInput = document.getElementById('server-ingest-path');
+const btnIngestBrowseDir = document.getElementById('btn-ingest-browse-dir');
+const btnIngestBrowseFile = document.getElementById('btn-ingest-browse-file');
+const ingestTitleInput = document.getElementById('server-ingest-title');
+const ingestDpInput = document.getElementById('server-ingest-dp');
 const ingestLimitInput = document.getElementById('server-ingest-limit');
 const ingestShotsInput = document.getElementById('server-ingest-shots');
 const ingestForceCheck = document.getElementById('server-ingest-force');
 const ingestStatusBox = document.getElementById('server-ingest-status');
+const baselineActiveSummary = document.getElementById('baseline-active-summary');
+const baselineBackupSelect = document.getElementById('baseline-backup-select');
+const btnBaselineBackupNow = document.getElementById('btn-baseline-backup-now');
+const btnBaselineRestore = document.getElementById('btn-baseline-restore');
+
+// ============================================================================
+// Live Job Status Bar Graph Polling & Rendering
+// ============================================================================
+const globalJobBar = document.getElementById('global-job-bar');
+const btnGlobalJobDismiss = document.getElementById('btn-global-job-dismiss');
+const ingestJobGraph = document.getElementById('ingest-job-graph');
+let jobStatusPollTimer = null;
+
+if (btnGlobalJobDismiss && globalJobBar) {
+  btnGlobalJobDismiss.addEventListener('click', () => {
+    globalJobBar.style.display = 'none';
+  });
+}
+
+function renderJobBarWidget(prefix, snap, containerEl) {
+  if (!containerEl) return;
+  const phaseEl = document.getElementById(`${prefix}-phase`);
+  const pointEl = document.getElementById(`${prefix}-point`);
+  const pctEl = document.getElementById(`${prefix}-percent`);
+  const fillEl = document.getElementById(`${prefix}-fill`);
+  const stagesEl = document.getElementById(`${prefix}-stages`);
+
+  containerEl.style.display = 'flex';
+  const pct = Math.max(0, Math.min(100, Math.round(snap.percent || 0)));
+  if (phaseEl) {
+    phaseEl.textContent = snap.phase || (snap.active ? 'Running' : 'Idle');
+    phaseEl.classList.remove('done', 'error');
+    if (phaseEl.textContent.toLowerCase() === 'complete') phaseEl.classList.add('done');
+    if (phaseEl.textContent.toLowerCase() === 'error') phaseEl.classList.add('error');
+  }
+  if (pointEl) {
+    pointEl.textContent = snap.active_task_point || 'Working...';
+    pointEl.title = snap.active_task_point || '';
+  }
+  if (pctEl) pctEl.textContent = `${pct}%`;
+  if (fillEl) fillEl.style.width = `${pct}%`;
+
+  if (stagesEl && Array.isArray(snap.stages)) {
+    stagesEl.innerHTML = '';
+    snap.stages.forEach((st) => {
+      const col = document.createElement('div');
+      const stateClass = st.state || 'pending';
+      col.className = `job-stage-col ${stateClass}`;
+
+      const head = document.createElement('div');
+      head.className = 'job-stage-head';
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'job-stage-name';
+      nameSpan.textContent = st.label;
+      nameSpan.title = st.label;
+      const cntSpan = document.createElement('span');
+      cntSpan.className = 'job-stage-count';
+      cntSpan.textContent = `${st.completed}/${st.total}`;
+      head.appendChild(nameSpan);
+      head.appendChild(cntSpan);
+
+      const track = document.createElement('div');
+      track.className = 'job-stage-bar-track';
+      const fill = document.createElement('div');
+      fill.className = 'job-stage-bar-fill';
+      const stPct = Math.max(0, Math.min(100, Math.round(st.percent || 0)));
+      fill.style.width = `${stPct}%`;
+      track.appendChild(fill);
+
+      col.appendChild(head);
+      col.appendChild(track);
+      stagesEl.appendChild(col);
+    });
+  }
+}
+
+async function fetchAndRenderJobStatus(includeIngestModal) {
+  try {
+    const res = await fetch('/api/job_status');
+    const snap = await res.json();
+    if (!snap || (!snap.job_type && !snap.active_task_point)) return;
+    renderJobBarWidget('global-job', snap, globalJobBar);
+    if (includeIngestModal || snap.job_type === 'golden_baseline_ingest') {
+      renderJobBarWidget('ingest-job', snap, ingestJobGraph);
+    }
+  } catch (err) {
+    console.warn('Job status poll failed:', err);
+  }
+}
+
+function startJobStatusPolling(includeIngestModal) {
+  stopJobStatusPolling();
+  fetchAndRenderJobStatus(includeIngestModal);
+  jobStatusPollTimer = setInterval(() => {
+    fetchAndRenderJobStatus(includeIngestModal);
+  }, 300);
+}
+
+function stopJobStatusPolling() {
+  if (jobStatusPollTimer !== null) {
+    clearInterval(jobStatusPollTimer);
+    jobStatusPollTimer = null;
+  }
+}
+
+if (btnIngestBrowseDir) {
+  btnIngestBrowseDir.addEventListener('click', async () => {
+    btnIngestBrowseDir.disabled = true;
+    try {
+      const res = await fetch('/api/browse_dir');
+      const data = await res.json();
+      if (data.success && data.path && ingestPathInput) {
+        ingestPathInput.value = data.path;
+      }
+    } catch (err) {
+      console.warn('Folder browse failed:', err);
+    } finally {
+      btnIngestBrowseDir.disabled = false;
+    }
+  });
+}
+
+if (btnIngestBrowseFile) {
+  btnIngestBrowseFile.addEventListener('click', async () => {
+    btnIngestBrowseFile.disabled = true;
+    try {
+      const res = await fetch('/api/browse_file');
+      const data = await res.json();
+      if (data.success && data.path && ingestPathInput) {
+        ingestPathInput.value = data.path;
+      }
+    } catch (err) {
+      console.warn('File browse failed:', err);
+    } finally {
+      btnIngestBrowseFile.disabled = false;
+    }
+  });
+}
+
+function renderBaselineBackupsDropdown(data) {
+  if (baselineActiveSummary && typeof data.active_shots === 'number') {
+    baselineActiveSummary.textContent = `Active: ${data.active_shots} shots / ${data.active_films} films`;
+  }
+  if (!baselineBackupSelect) return;
+  const backups = Array.isArray(data.backups) ? data.backups : [];
+  baselineBackupSelect.innerHTML = '';
+  if (backups.length === 0) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'No backups created yet';
+    baselineBackupSelect.appendChild(opt);
+    if (btnBaselineRestore) btnBaselineRestore.disabled = true;
+    return;
+  }
+  backups.forEach((b, idx) => {
+    const opt = document.createElement('option');
+    opt.value = b.backup_id;
+    const latestTag = idx === 0 ? '[LATEST] ' : '';
+    const dt = b.timestamp_unix ? new Date(b.timestamp_unix * 1000).toLocaleString() : 'unknown';
+    opt.textContent = `${latestTag}${b.backup_id} — ${b.shots_count} shots / ${b.films_count} films (${dt})`;
+    baselineBackupSelect.appendChild(opt);
+  });
+  if (btnBaselineRestore) btnBaselineRestore.disabled = false;
+}
+
+async function refreshBaselineBackups() {
+  try {
+    const res = await fetch('/api/baseline_backups');
+    const data = await res.json();
+    if (data && data.success) {
+      renderBaselineBackupsDropdown(data);
+    }
+  } catch (err) {
+    console.warn('Failed to fetch Golden Baseline backups:', err);
+  }
+}
 
 if (btnServerIngest && ingestModal) {
   btnServerIngest.addEventListener('click', () => {
     ingestModal.style.display = 'flex';
     if (ingestStatusBox) ingestStatusBox.style.display = 'none';
+    refreshBaselineBackups();
   });
 }
 
@@ -2510,38 +2709,123 @@ function closeIngestModal() {
 if (modalClose) modalClose.addEventListener('click', closeIngestModal);
 if (btnIngestCancel) btnIngestCancel.addEventListener('click', closeIngestModal);
 
+if (btnBaselineBackupNow) {
+  btnBaselineBackupNow.addEventListener('click', async () => {
+    btnBaselineBackupNow.disabled = true;
+    const origText = btnBaselineBackupNow.innerHTML;
+    btnBaselineBackupNow.textContent = 'Backing up...';
+    try {
+      const res = await fetch('/api/backup_baseline?reason=manual_ui_snapshot');
+      const data = await res.json();
+      if (data.success && data.backup) {
+        renderBaselineBackupsDropdown(data);
+        if (ingestStatusBox) {
+          ingestStatusBox.style.display = 'block';
+          ingestStatusBox.innerHTML = `
+            <strong>[✓] Golden Baseline Backup Snapshot Created!</strong><br>
+            • Backup ID: <code>${data.backup.backup_id}</code><br>
+            • Captured: ${data.backup.shots_count} shots across ${data.backup.films_count} films
+          `;
+        }
+      } else if (ingestStatusBox) {
+        ingestStatusBox.style.display = 'block';
+        ingestStatusBox.innerHTML = `<span style="color: #ff6666;">Backup failed: ${data.error || 'Unknown error'}</span>`;
+      }
+    } catch (err) {
+      if (ingestStatusBox) {
+        ingestStatusBox.style.display = 'block';
+        ingestStatusBox.innerHTML = `<span style="color: #ff6666;">Backup request error: ${err}</span>`;
+      }
+    } finally {
+      btnBaselineBackupNow.disabled = false;
+      btnBaselineBackupNow.innerHTML = origText;
+    }
+  });
+}
+
+if (btnBaselineRestore) {
+  btnBaselineRestore.addEventListener('click', async () => {
+    const selectedId = baselineBackupSelect ? baselineBackupSelect.value : '';
+    if (!selectedId) return;
+    if (!window.confirm(`Restore Golden Baseline from backup "${selectedId}"?\n\nThis will revert manifest, shots, and signatures to that snapshot.`)) {
+      return;
+    }
+    btnBaselineRestore.disabled = true;
+    const origText = btnBaselineRestore.innerHTML;
+    btnBaselineRestore.textContent = 'Restoring...';
+    try {
+      const res = await fetch(`/api/restore_baseline?id=${encodeURIComponent(selectedId)}`);
+      const data = await res.json();
+      if (data.success && data.restored) {
+        renderBaselineBackupsDropdown(data);
+        if (ingestStatusBox) {
+          ingestStatusBox.style.display = 'block';
+          ingestStatusBox.innerHTML = `
+            <strong>[✓] Golden Baseline Restored!</strong><br>
+            • Restored Snapshot: <code>${data.restored.backup_id}</code><br>
+            • Active Corpus Now: ${data.active_shots} shots across ${data.active_films} films
+          `;
+        }
+      } else if (ingestStatusBox) {
+        ingestStatusBox.style.display = 'block';
+        ingestStatusBox.innerHTML = `<span style="color: #ff6666;">Restore failed: ${data.error || 'Unknown error'}</span>`;
+      }
+    } catch (err) {
+      if (ingestStatusBox) {
+        ingestStatusBox.style.display = 'block';
+        ingestStatusBox.innerHTML = `<span style="color: #ff6666;">Restore request error: ${err}</span>`;
+      }
+    } finally {
+      btnBaselineRestore.innerHTML = origText;
+      if (baselineBackupSelect && baselineBackupSelect.value) {
+        btnBaselineRestore.disabled = false;
+      }
+    }
+  });
+}
+
 if (btnIngestStart) {
   btnIngestStart.addEventListener('click', async () => {
     const path = ingestPathInput ? ingestPathInput.value.trim() : 'M:\\movies';
+    const title = ingestTitleInput ? ingestTitleInput.value.trim() : '';
+    const dp = ingestDpInput ? ingestDpInput.value.trim() : '';
     const limit = ingestLimitInput ? parseInt(ingestLimitInput.value, 10) || 5 : 5;
     const shots = ingestShotsInput ? parseInt(ingestShotsInput.value, 10) || 5 : 5;
     const force = ingestForceCheck ? ingestForceCheck.checked : false;
 
     if (ingestStatusBox) {
       ingestStatusBox.style.display = 'block';
-      ingestStatusBox.innerHTML = `Scanning ${path}...<br>Checking against 184 canonical awards titles...<br>Deduplication: ${force ? 'FORCED (re-extracting)' : 'ENABLED (skipping previous)'}`;
+      ingestStatusBox.innerHTML = `Scanning ${path}...<br>Creating automatic Golden Baseline backup before changes...<br>Mode: Additive (films &amp; still frames preserved + appended; ${force ? 'sampling additional points' : 'skipping already-ingested titles'})`;
     }
 
     btnIngestStart.disabled = true;
     btnIngestStart.textContent = 'Ingesting...';
+    startJobStatusPolling(true);
 
     try {
-      const url = `/api/ingest_server?path=${encodeURIComponent(path)}&limit=${limit}&shots=${shots}&force=${force}`;
+      let url = `/api/ingest_server?path=${encodeURIComponent(path)}&limit=${limit}&shots=${shots}&force=${force}`;
+      if (title) url += `&title=${encodeURIComponent(title)}`;
+      if (dp) url += `&dp=${encodeURIComponent(dp)}`;
       const res = await fetch(url);
       const data = await res.json();
+      await fetchAndRenderJobStatus(true);
 
       if (data.success && data.report) {
         const r = data.report;
+        const backupLine = r.backup_created
+          ? `• Auto-Backup Created: <code>${r.backup_created.backup_id}</code> (${r.backup_created.shots_count} shots / ${r.backup_created.films_count} films)<br>`
+          : '';
         ingestStatusBox.innerHTML = `
-          <strong>[✓] Ingestion Complete!</strong><br>
-          • Matched in Library: ${r.matched_films} films<br>
-          • Ingested This Batch: ${r.ingested_films} films (${r.total_shots_added} shots)<br>
-          • Skipped (Already Present): ${r.skipped_films} films<br>
-          • Total Baseline Corpus: ${r.total_corpus_shots} shots<br>
+          <strong>[✓] Additive Ingestion Complete!</strong><br>
+          ${backupLine}• Matched Items Discovered: ${r.matched_films}<br>
+          • Added This Batch: ${r.ingested_films} films, ${r.ingested_stills || 0} still frames (${r.total_shots_added} new shots)<br>
+          • Additive Corpus Growth: <strong>${r.previous_corpus_shots} existing + ${r.total_shots_added} added = ${r.total_corpus_shots} total shots</strong><br>
+          • Skipped (Already Present): ${r.skipped_films}<br>
           • Dynamic Range (p50): ${r.dynamic_range_p50.toFixed(1)} stops<br>
           • Highlight Roll-Off (p50): ${r.highlight_rolloff_p50.toFixed(1)}%<br>
-          ${r.processed_titles && r.processed_titles.length ? `<small>Ingested: ${r.processed_titles.join(', ')}</small>` : ''}
+          ${r.processed_titles && r.processed_titles.length ? `<small>Added: ${r.processed_titles.join(', ')}</small>` : ''}
         `;
+        await refreshBaselineBackups();
       } else {
         ingestStatusBox.innerHTML = `<span style="color: #ff6666;">Error: ${data.error || 'Ingestion failed'}</span>`;
       }
@@ -2550,6 +2834,7 @@ if (btnIngestStart) {
         ingestStatusBox.innerHTML = `<span style="color: #ff6666;">Network/Server error: ${err}</span>`;
       }
     } finally {
+      stopJobStatusPolling();
       btnIngestStart.disabled = false;
       btnIngestStart.textContent = 'Start Ingestion';
     }

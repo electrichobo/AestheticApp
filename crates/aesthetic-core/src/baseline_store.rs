@@ -17,8 +17,168 @@ use aesthetic_models::physics::ObjectivePhysics;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{OnceLock, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Visual stage bar inside the live Job Status Bar Graph.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct JobStageBar {
+    pub label: String,
+    pub completed: usize,
+    pub total: usize,
+    pub percent: f32,
+    /// One of `"pending"`, `"active"`, `"done"`, `"error"`
+    pub state: String,
+}
+
+/// Real-time snapshot of an active or recently finished background job.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct JobStatusSnapshot {
+    pub active: bool,
+    pub job_type: String,
+    pub phase: String,
+    pub active_task_point: String,
+    pub completed_steps: usize,
+    pub total_steps: usize,
+    pub percent: f32,
+    pub stages: Vec<JobStageBar>,
+    pub details: String,
+    pub updated_unix_ms: u64,
+}
+
+static GLOBAL_JOB_STATUS: OnceLock<RwLock<JobStatusSnapshot>> = OnceLock::new();
+
+fn job_status_lock() -> &'static RwLock<JobStatusSnapshot> {
+    GLOBAL_JOB_STATUS.get_or_init(|| RwLock::new(JobStatusSnapshot::default()))
+}
+
+fn now_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Build a `JobStageBar` with clamped percentage.
+pub fn make_stage_bar(label: &str, completed: usize, total: usize, state: &str) -> JobStageBar {
+    let pct = if total > 0 {
+        ((completed as f32 / total as f32) * 100.0).clamp(0.0, 100.0)
+    } else if state == "done" {
+        100.0
+    } else {
+        0.0
+    };
+    JobStageBar {
+        label: label.to_string(),
+        completed,
+        total,
+        percent: pct,
+        state: state.to_string(),
+    }
+}
+
+/// Read the latest live Job Status Bar Graph snapshot.
+pub fn get_job_status() -> JobStatusSnapshot {
+    job_status_lock()
+        .read()
+        .map(|g| g.clone())
+        .unwrap_or_default()
+}
+
+/// Update the live Job Status Bar Graph while work is running.
+pub fn update_job_status(
+    job_type: &str,
+    phase: &str,
+    active_task_point: &str,
+    completed_steps: usize,
+    total_steps: usize,
+    stages: Vec<JobStageBar>,
+    details: &str,
+) {
+    let pct = if total_steps > 0 {
+        ((completed_steps as f32 / total_steps as f32) * 100.0).clamp(0.0, 100.0)
+    } else {
+        0.0
+    };
+    if let Ok(mut g) = job_status_lock().write() {
+        *g = JobStatusSnapshot {
+            active: true,
+            job_type: job_type.to_string(),
+            phase: phase.to_string(),
+            active_task_point: active_task_point.to_string(),
+            completed_steps,
+            total_steps,
+            percent: pct,
+            stages,
+            details: details.to_string(),
+            updated_unix_ms: now_unix_ms(),
+        };
+    }
+}
+
+/// Mark the live Job Status Bar Graph as completed (or errored when `phase == "Error"`).
+pub fn finish_job_status(
+    job_type: &str,
+    phase: &str,
+    active_task_point: &str,
+    stages: Vec<JobStageBar>,
+    details: &str,
+) {
+    let total_steps: usize = stages.iter().map(|s| s.total).sum();
+    let completed_steps: usize = stages.iter().map(|s| s.completed).sum();
+    let percent = if phase.eq_ignore_ascii_case("Error") {
+        if total_steps > 0 {
+            ((completed_steps as f32 / total_steps as f32) * 100.0).clamp(0.0, 100.0)
+        } else {
+            0.0
+        }
+    } else {
+        100.0
+    };
+    if let Ok(mut g) = job_status_lock().write() {
+        *g = JobStatusSnapshot {
+            active: false,
+            job_type: job_type.to_string(),
+            phase: phase.to_string(),
+            active_task_point: active_task_point.to_string(),
+            completed_steps: completed_steps.max(if phase.eq_ignore_ascii_case("Error") { 0 } else { total_steps }),
+            total_steps,
+            percent,
+            stages,
+            details: details.to_string(),
+            updated_unix_ms: now_unix_ms(),
+        };
+    }
+}
+
+/// Update only the live `active_task_point` (and stage-3 sub-progress when single-directory
+/// extraction is active) without resetting outer stages.
+pub fn update_active_task_point(
+    active_task_point: &str,
+    sub_completed: usize,
+    sub_total: usize,
+) {
+    if let Ok(mut g) = job_status_lock().write() {
+        if !g.active {
+            return;
+        }
+        g.active_task_point = active_task_point.to_string();
+        if sub_total > 1 {
+            if let Some(stage) = g.stages.iter_mut().find(|s| s.state == "active" && s.total <= 1) {
+                stage.completed = sub_completed.min(sub_total);
+                stage.total = sub_total;
+                stage.percent = ((stage.completed as f32 / sub_total as f32) * 100.0).clamp(0.0, 100.0);
+                let frac = stage.completed as f32 / sub_total as f32;
+                let total_f = g.total_steps.max(1) as f32;
+                let done_f = (g.completed_steps as f32) + frac;
+                g.percent = ((done_f / total_f) * 100.0).clamp(0.0, 99.0);
+            }
+        }
+        g.updated_unix_ms = now_unix_ms();
+    }
+}
 
 /// Compute cosine similarity between two float vectors, returning a normalized score (0.0 - 100.0).
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
@@ -45,16 +205,28 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     }
 }
 
-/// Summary returned when a film is ingested into the Golden Baseline.
+/// Summary returned when a film or still collection is ingested into the Golden Baseline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IngestSummary {
     pub film_title: String,
     pub cinematographer: String,
     pub shots_added: usize,
+    pub previous_corpus_shots: usize,
     pub total_corpus_shots: usize,
     pub new_dynamic_range_p50: f32,
     pub new_highlight_rolloff_p50: f32,
     pub new_sharpness_p50: f32,
+}
+
+/// Metadata describing a timestamped Golden Baseline snapshot backup.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BaselineBackupInfo {
+    pub backup_id: String,
+    pub timestamp_unix: u64,
+    pub reason: String,
+    pub shots_count: usize,
+    pub films_count: usize,
+    pub backup_path: String,
 }
 
 /// The local Golden Baseline corpus store.
@@ -77,8 +249,9 @@ pub struct FilmIngestMeta<'a> {
 }
 
 impl BaselineStore {
-    /// Create a new baseline store pre-populated with cinema master signatures and pre-trained corpus.
-    pub fn new() -> Self {
+    /// Resolve the active Golden Baseline directory on disk, checking the current
+    /// working directory as well as executable-adjacent paths.
+    pub fn resolve_baseline_dir() -> PathBuf {
         let mut candidates = vec![PathBuf::from("assets").join("baseline")];
         if let Ok(current_exe) = std::env::current_exe() {
             if let Some(parent) = current_exe.parent() {
@@ -88,11 +261,29 @@ impl BaselineStore {
                 }
             }
         }
-        for baseline_dir in candidates {
-            if baseline_dir.join("manifest.json").exists() {
-                if let Ok(store) = Self::load_from_dir(&baseline_dir) {
-                    return store;
-                }
+        for dir in candidates {
+            if dir.join("manifest.json").exists() {
+                return dir;
+            }
+        }
+        PathBuf::from("assets").join("baseline")
+    }
+
+    /// Resolve the backup snapshots directory sibling to the baseline directory.
+    pub fn resolve_backups_dir(baseline_dir: &Path) -> PathBuf {
+        baseline_dir
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("assets"))
+            .join("baseline_backups")
+    }
+
+    /// Create a new baseline store pre-populated with cinema master signatures and pre-trained corpus.
+    pub fn new() -> Self {
+        let baseline_dir = Self::resolve_baseline_dir();
+        if baseline_dir.join("manifest.json").exists() {
+            if let Ok(store) = Self::load_from_dir(&baseline_dir) {
+                return store;
             }
         }
         let mut store = Self::default();
@@ -1029,6 +1220,93 @@ impl BaselineStore {
         self.manifest.total_reference_shots = self.reference_shots.len();
     }
 
+    /// Generate a collision-free shot ID for a title and shot kind (`"shot"` or `"still"`),
+    /// ensuring newly ingested shots and stills are always appended without replacing existing ones.
+    pub fn next_unique_shot_id(&self, title: &str, kind: &str) -> String {
+        let mut slug = String::new();
+        let mut prev_us = false;
+        for ch in title.trim().chars() {
+            if ch.is_ascii_alphanumeric() {
+                slug.push(ch.to_ascii_lowercase());
+                prev_us = false;
+            } else if !prev_us && !slug.is_empty() {
+                slug.push('_');
+                prev_us = true;
+            }
+        }
+        let slug = slug.trim_matches('_');
+        let slug = if slug.is_empty() { "reference" } else { slug };
+
+        let existing_count = self
+            .reference_shots
+            .iter()
+            .filter(|s| s.film_title.eq_ignore_ascii_case(title))
+            .count();
+
+        let mut idx = existing_count + 1;
+        loop {
+            let candidate = format!("{}_{}_{:04}", slug, kind, idx);
+            if !self.reference_shots.iter().any(|s| s.shot_id == candidate) {
+                return candidate;
+            }
+            idx += 1;
+        }
+    }
+
+    /// Additively merge newly ingested shots into `self.manifest.films` without resetting or
+    /// losing existing shot counts or rolling dynamic range averages.
+    #[allow(clippy::too_many_arguments)]
+    fn upsert_manifest_film_additive(
+        &mut self,
+        title: &str,
+        cinematographer: &str,
+        director: Option<&str>,
+        year: u32,
+        aspect_ratio: String,
+        added_shots: usize,
+        added_dr_sum: f32,
+    ) {
+        if let Some(existing) = self
+            .manifest
+            .films
+            .iter_mut()
+            .find(|f| f.title.eq_ignore_ascii_case(title))
+        {
+            let prev_count = existing.shot_count;
+            let new_total = prev_count + added_shots;
+            if new_total > 0 {
+                existing.average_dynamic_range = ((existing.average_dynamic_range
+                    * (prev_count as f32))
+                    + added_dr_sum)
+                    / (new_total as f32);
+            }
+            existing.shot_count = new_total;
+            if existing.cinematographer.is_empty() && !cinematographer.is_empty() {
+                existing.cinematographer = cinematographer.to_string();
+            }
+            if existing.director.is_none() {
+                existing.director = director.map(|d| d.to_string());
+            }
+        } else {
+            let avg_dr = if added_shots > 0 {
+                added_dr_sum / (added_shots as f32)
+            } else {
+                0.0
+            };
+            self.manifest.films.push(IngestedReferenceFilm {
+                title: title.to_string(),
+                cinematographer: cinematographer.to_string(),
+                director: director.map(|d| d.to_string()),
+                year,
+                aspect_ratio,
+                shot_count: added_shots,
+                average_dynamic_range: avg_dr,
+            });
+        }
+        self.manifest.total_films = self.manifest.films.len();
+        self.manifest.total_reference_shots = self.reference_shots.len();
+    }
+
     /// Register a master cinematographer signature.
     pub fn register_signature(&mut self, sig: CinematographerSignature) {
         self.master_signatures.push(sig);
@@ -1139,7 +1417,7 @@ impl BaselineStore {
 
     /// Ingest a reference cinema film into the Golden Baseline corpus.
     /// Extracts sample frames across duration, runs 79-metric physics and vision embeddings,
-    /// appends reference shots, updates manifest film catalog, and recalibrates
+    /// additively appends reference shots, updates manifest film catalog, and recalibrates
     /// empirical quantiles across the entire corpus.
     pub fn ingest_reference_film(
         &mut self,
@@ -1155,6 +1433,7 @@ impl BaselineStore {
             return Err("Reference video has zero duration".to_string());
         }
 
+        let previous_corpus_shots = self.reference_shots.len();
         let inference = ModelInferenceEngine::new();
         let step = if sample_step_sec <= 0.0 {
             2.0
@@ -1172,7 +1451,7 @@ impl BaselineStore {
         let mut dr_sum = 0.0f32;
         let mut added_count = 0;
 
-        for (idx, &ts) in timestamps.iter().enumerate() {
+        for &ts in &timestamps {
             if let Ok(frame) = extract_frame_rgb(video_path, ts) {
                 let crop = detect_active_picture(&frame);
                 let active = if crop.width == frame.width() && crop.height == frame.height() {
@@ -1185,7 +1464,7 @@ impl BaselineStore {
                 let physics = compute_objective_physics(&active);
                 let embedding = inference.infer_embedding(&active);
 
-                let shot_id = format!("{}_{:04}", title.to_lowercase().replace(' ', "_"), idx + 1);
+                let shot_id = self.next_unique_shot_id(title, "shot");
                 dr_sum += physics.exposure.dynamic_range_stops;
 
                 self.add_reference_shot(ReferenceShot {
@@ -1211,19 +1490,16 @@ impl BaselineStore {
             return Err("No frames could be extracted from reference video".to_string());
         }
 
-        let avg_dr = dr_sum / (added_count as f32);
         let aspect_ratio = format!("{}:{}", meta.width, meta.height);
-
-        self.manifest.films.push(IngestedReferenceFilm {
-            title: title.to_string(),
-            cinematographer: cinematographer.to_string(),
-            director: director.map(|d| d.to_string()),
+        self.upsert_manifest_film_additive(
+            title,
+            cinematographer,
+            director,
             year,
             aspect_ratio,
-            shot_count: added_count,
-            average_dynamic_range: avg_dr,
-        });
-        self.manifest.total_films = self.manifest.films.len();
+            added_count,
+            dr_sum,
+        );
 
         // Recalibrate quantiles with newly ingested film data
         self.recompute_quantiles();
@@ -1232,6 +1508,7 @@ impl BaselineStore {
             film_title: title.to_string(),
             cinematographer: cinematographer.to_string(),
             shots_added: added_count,
+            previous_corpus_shots,
             total_corpus_shots: self.reference_shots.len(),
             new_dynamic_range_p50: self.manifest.dynamic_range_quantiles.p50,
             new_highlight_rolloff_p50: self.manifest.highlight_rolloff_quantiles.p50,
@@ -1241,7 +1518,8 @@ impl BaselineStore {
 
     /// Ingest reference cinema film using continuous shot segmentation (cut detection).
     /// Isolates individual camera setups, discards cut transitions, computes full
-    /// physics, craft, embeddings, and temporal dynamics inside each continuous shot.
+    /// physics, craft, embeddings, and temporal dynamics inside each continuous shot,
+    /// strictly adding to the existing corpus without removing prior shots.
     pub fn ingest_reference_film_shots(
         &mut self,
         video_path: &Path,
@@ -1252,6 +1530,7 @@ impl BaselineStore {
             return Err("Reference video has zero duration".to_string());
         }
 
+        let previous_corpus_shots = self.reference_shots.len();
         let inference = ModelInferenceEngine::new();
         let target_shots = meta_info.max_shots.clamp(1, 100);
 
@@ -1265,6 +1544,17 @@ impl BaselineStore {
 
         let mut current_t = start_time;
         while current_t < end_time && added_count < target_shots {
+            // Skip timestamps already captured for this film so additive re-ingestion collects fresh shots
+            let dup_ts = self.reference_shots.iter().any(|s| {
+                s.is_measured()
+                    && s.film_title.eq_ignore_ascii_case(meta_info.title)
+                    && (s.timestamp_sec - current_t).abs() < 0.25
+            });
+            if dup_ts {
+                current_t += 1.5;
+                continue;
+            }
+
             if let Ok(burst) = extract_frames_burst(video_path, current_t, 4, 4.0, Some(1920)) {
                 if burst.len() >= 3 {
                     let diff_ab = crate::scene::compute_frame_difference(&burst[0], &burst[1]);
@@ -1327,19 +1617,7 @@ impl BaselineStore {
                         craft.motion = motion.clone();
                         let embedding = inference.infer_embedding(&active);
 
-                        if added_count == 0 {
-                            // Remove any stale measured shots for this film before adding fresh ones
-                            self.reference_shots.retain(|s| {
-                                !s.is_measured()
-                                    || !s.film_title.eq_ignore_ascii_case(meta_info.title)
-                            });
-                        }
-
-                        let shot_id = format!(
-                            "{}_shot_{:04}",
-                            meta_info.title.to_lowercase().replace(' ', "_"),
-                            added_count + 1
-                        );
+                        let shot_id = self.next_unique_shot_id(meta_info.title, "shot");
                         dr_sum += physics.exposure.dynamic_range_stops;
 
                         self.add_reference_shot(ReferenceShot {
@@ -1369,45 +1647,28 @@ impl BaselineStore {
 
         if added_count == 0 {
             return Err(format!(
-                "Could not extract clean continuous shots from '{}'",
+                "Could not extract new clean continuous shots from '{}'",
                 meta_info.title
             ));
         }
 
-        let avg_dr = dr_sum / (added_count as f32);
         let aspect_ratio = format!("{}:{}", meta.width, meta.height);
-
-        if let Some(existing) = self
-            .manifest
-            .films
-            .iter_mut()
-            .find(|f| f.title.eq_ignore_ascii_case(meta_info.title))
-        {
-            existing.cinematographer = meta_info.cinematographer.to_string();
-            existing.director = meta_info.director.map(|d| d.to_string());
-            existing.year = meta_info.year;
-            existing.aspect_ratio = aspect_ratio;
-            existing.shot_count = added_count;
-            existing.average_dynamic_range = avg_dr;
-        } else {
-            self.manifest.films.push(IngestedReferenceFilm {
-                title: meta_info.title.to_string(),
-                cinematographer: meta_info.cinematographer.to_string(),
-                director: meta_info.director.map(|d| d.to_string()),
-                year: meta_info.year,
-                aspect_ratio,
-                shot_count: added_count,
-                average_dynamic_range: avg_dr,
-            });
-        }
-        self.manifest.total_films = self.manifest.films.len();
-        self.manifest.total_reference_shots = self.reference_shots.len();
+        self.upsert_manifest_film_additive(
+            meta_info.title,
+            meta_info.cinematographer,
+            meta_info.director,
+            meta_info.year,
+            aspect_ratio,
+            added_count,
+            dr_sum,
+        );
         self.recompute_quantiles();
 
         Ok(IngestSummary {
             film_title: meta_info.title.to_string(),
             cinematographer: meta_info.cinematographer.to_string(),
             shots_added: added_count,
+            previous_corpus_shots,
             total_corpus_shots: self.reference_shots.len(),
             new_dynamic_range_p50: self.manifest.dynamic_range_quantiles.p50,
             new_highlight_rolloff_p50: self.manifest.highlight_rolloff_quantiles.p50,
@@ -1416,7 +1677,7 @@ impl BaselineStore {
     }
 
     /// Ingest a single reference cinema still image (.png, .jpg, .tiff, .exr, etc.)
-    /// into the Golden Baseline corpus.
+    /// additively into the Golden Baseline corpus.
     pub fn ingest_reference_still(
         &mut self,
         still_path: &Path,
@@ -1431,6 +1692,7 @@ impl BaselineStore {
             ));
         }
 
+        let previous_corpus_shots = self.reference_shots.len();
         let dyn_img = image::open(still_path)
             .map_err(|e| format!("Failed to open image '{}': {}", still_path.display(), e))?;
         let frame = dyn_img.to_rgb8();
@@ -1450,11 +1712,7 @@ impl BaselineStore {
             .map(|a| a.style_family.to_string())
             .unwrap_or_else(|| "Prestige Naturalism".to_string());
 
-        let shot_id = format!(
-            "{}_still_{:04}",
-            title.to_lowercase().replace(' ', "_"),
-            self.reference_shots.len() + 1
-        );
+        let shot_id = self.next_unique_shot_id(title, "still");
 
         self.add_reference_shot(ReferenceShot {
             shot_id,
@@ -1471,31 +1729,19 @@ impl BaselineStore {
             camera_motion_ratio: None,
         });
 
-        // Update manifest catalog
-        let existing = self
-            .manifest
-            .films
-            .iter_mut()
-            .find(|f| f.title.eq_ignore_ascii_case(title));
-        if let Some(film) = existing {
-            film.shot_count += 1;
-        } else {
-            self.manifest.films.push(IngestedReferenceFilm {
-                title: title.to_string(),
-                cinematographer: cinematographer.to_string(),
-                director: None,
-                year: year.unwrap_or(2024),
-                aspect_ratio: format!(
-                    "{:.2}:1",
-                    active.width() as f32 / active.height().max(1) as f32
-                ),
-                shot_count: 1,
-                average_dynamic_range: physics.exposure.dynamic_range_stops,
-            });
-        }
-
-        self.manifest.total_reference_shots = self.reference_shots.len();
-        self.manifest.total_films = self.manifest.films.len();
+        let aspect_ratio = format!(
+            "{:.2}:1",
+            active.width() as f32 / active.height().max(1) as f32
+        );
+        self.upsert_manifest_film_additive(
+            title,
+            cinematographer,
+            None,
+            year.unwrap_or(2024),
+            aspect_ratio,
+            1,
+            physics.exposure.dynamic_range_stops,
+        );
 
         self.recompute_quantiles();
 
@@ -1503,6 +1749,7 @@ impl BaselineStore {
             film_title: title.to_string(),
             cinematographer: cinematographer.to_string(),
             shots_added: 1,
+            previous_corpus_shots,
             total_corpus_shots: self.reference_shots.len(),
             new_dynamic_range_p50: self.manifest.dynamic_range_quantiles.p50,
             new_highlight_rolloff_p50: self.manifest.highlight_rolloff_quantiles.p50,
@@ -1510,7 +1757,7 @@ impl BaselineStore {
         })
     }
 
-    /// Ingest an entire directory of reference cinema still images.
+    /// Ingest an entire directory of reference cinema still images additively.
     pub fn ingest_reference_directory(
         &mut self,
         dir_path: &Path,
@@ -1518,27 +1765,24 @@ impl BaselineStore {
         cinematographer: &str,
         year: Option<u32>,
     ) -> Result<IngestSummary, String> {
+        self.ingest_reference_directory_with_limit(dir_path, title, cinematographer, year, None)
+    }
+
+    /// Ingest reference cinema still images from a directory additively, optionally sampling
+    /// up to `max_stills` evenly spaced still frames across the directory.
+    pub fn ingest_reference_directory_with_limit(
+        &mut self,
+        dir_path: &Path,
+        title: &str,
+        cinematographer: &str,
+        year: Option<u32>,
+        max_stills: Option<usize>,
+    ) -> Result<IngestSummary, String> {
         if !dir_path.is_dir() {
             return Err(format!("Path is not a directory: {}", dir_path.display()));
         }
 
-        let entries = std::fs::read_dir(dir_path)
-            .map_err(|e| format!("Failed to read directory '{}': {}", dir_path.display(), e))?;
-
-        let mut valid_paths = Vec::new();
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                let ext_lower = ext.to_lowercase();
-                if matches!(
-                    ext_lower.as_str(),
-                    "png" | "jpg" | "jpeg" | "tiff" | "tif" | "exr" | "webp" | "bmp"
-                ) {
-                    valid_paths.push(path);
-                }
-            }
-        }
-
+        let valid_paths = find_still_images_in_dir(dir_path);
         if valid_paths.is_empty() {
             return Err(format!(
                 "No supported still image files found in '{}'",
@@ -1546,8 +1790,21 @@ impl BaselineStore {
             ));
         }
 
-        valid_paths.sort();
+        let selected_paths: Vec<PathBuf> = match max_stills {
+            Some(cap) if cap > 0 && valid_paths.len() > cap => (0..cap)
+                .map(|i| {
+                    let idx = if cap == 1 {
+                        valid_paths.len() / 2
+                    } else {
+                        i * (valid_paths.len() - 1) / (cap - 1)
+                    };
+                    valid_paths[idx].clone()
+                })
+                .collect(),
+            _ => valid_paths,
+        };
 
+        let previous_corpus_shots = self.reference_shots.len();
         let mut added = 0;
         let mut dr_sum = 0.0f32;
         let inference = ModelInferenceEngine::new();
@@ -1555,7 +1812,22 @@ impl BaselineStore {
             .map(|a| a.style_family.to_string())
             .unwrap_or_else(|| "Prestige Naturalism".to_string());
 
-        for path in &valid_paths {
+        for (s_idx, path) in selected_paths.iter().enumerate() {
+            let fname = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("still");
+            update_active_task_point(
+                &format!(
+                    "Evaluating still frame {}/{}: {} ({})",
+                    s_idx + 1,
+                    selected_paths.len(),
+                    title,
+                    fname
+                ),
+                s_idx,
+                selected_paths.len(),
+            );
             if let Ok(dyn_img) = image::open(path) {
                 let frame = dyn_img.to_rgb8();
                 let crop = detect_active_picture(&frame);
@@ -1575,11 +1847,7 @@ impl BaselineStore {
                 let craft = inference.infer_craft(&active);
                 let embedding = inference.infer_embedding(&active);
 
-                let shot_id = format!(
-                    "{}_still_{:04}",
-                    title.to_lowercase().replace(' ', "_"),
-                    self.reference_shots.len() + 1
-                );
+                let shot_id = self.next_unique_shot_id(title, "still");
                 dr_sum += physics.exposure.dynamic_range_stops;
 
                 self.add_reference_shot(ReferenceShot {
@@ -1601,34 +1869,18 @@ impl BaselineStore {
         }
 
         if added == 0 {
-            return Err("Failed to decode any images in the directory".to_string());
+            return Err("Failed to decode any photographic images in the directory".to_string());
         }
 
-        let avg_dr = dr_sum / (added as f32);
-
-        // Update manifest catalog
-        let existing = self
-            .manifest
-            .films
-            .iter_mut()
-            .find(|f| f.title.eq_ignore_ascii_case(title));
-        if let Some(film) = existing {
-            film.shot_count += added;
-            film.average_dynamic_range = avg_dr;
-        } else {
-            self.manifest.films.push(IngestedReferenceFilm {
-                title: title.to_string(),
-                cinematographer: cinematographer.to_string(),
-                director: None,
-                year: year.unwrap_or(2024),
-                aspect_ratio: "Varied".to_string(),
-                shot_count: added,
-                average_dynamic_range: avg_dr,
-            });
-        }
-
-        self.manifest.total_reference_shots = self.reference_shots.len();
-        self.manifest.total_films = self.manifest.films.len();
+        self.upsert_manifest_film_additive(
+            title,
+            cinematographer,
+            None,
+            year.unwrap_or(2024),
+            "Varied".to_string(),
+            added,
+            dr_sum,
+        );
 
         self.recompute_quantiles();
 
@@ -1636,6 +1888,7 @@ impl BaselineStore {
             film_title: title.to_string(),
             cinematographer: cinematographer.to_string(),
             shots_added: added,
+            previous_corpus_shots,
             total_corpus_shots: self.reference_shots.len(),
             new_dynamic_range_p50: self.manifest.dynamic_range_quantiles.p50,
             new_highlight_rolloff_p50: self.manifest.highlight_rolloff_quantiles.p50,
@@ -1670,27 +1923,297 @@ impl BaselineStore {
         self.manifest.sharpness_quantiles = compute_quantiles(&mut sharp_values);
     }
 
-    /// Save baseline store to disk.
+    /// Write a JSON value to a `.tmp` file, flush, and atomically rename into place.
+    fn write_json_atomic<T: Serialize>(
+        target_path: &Path,
+        value: &T,
+        pretty: bool,
+    ) -> Result<(), String> {
+        let file_name = target_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| format!("Invalid target filename: {}", target_path.display()))?;
+        let tmp_path = target_path.with_file_name(format!("{}.tmp", file_name));
+        {
+            let file = File::create(&tmp_path).map_err(|e| e.to_string())?;
+            let mut writer = BufWriter::new(file);
+            if pretty {
+                serde_json::to_writer_pretty(&mut writer, value).map_err(|e| e.to_string())?;
+            } else {
+                serde_json::to_writer(&mut writer, value).map_err(|e| e.to_string())?;
+            }
+            writer.flush().map_err(|e| e.to_string())?;
+        }
+        fs::rename(&tmp_path, target_path).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// Copy `src` into `dst` via a sibling `.tmp` file and atomic rename.
+    fn copy_file_atomic(src: &Path, dst: &Path) -> Result<(), String> {
+        let file_name = dst
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| format!("Invalid destination filename: {}", dst.display()))?;
+        let tmp_path = dst.with_file_name(format!("{}.tmp", file_name));
+        fs::copy(src, &tmp_path)
+            .map_err(|e| format!("Failed copying {} -> {}: {}", src.display(), tmp_path.display(), e))?;
+        fs::rename(&tmp_path, dst)
+            .map_err(|e| format!("Failed renaming {} -> {}: {}", tmp_path.display(), dst.display(), e))?;
+        Ok(())
+    }
+
+    /// Sanitize a backup reason label into lowercase ASCII alphanumeric + underscore (max 32 chars).
+    fn sanitize_backup_reason(reason: &str) -> String {
+        let mut out = String::new();
+        let mut prev_underscore = false;
+        for ch in reason.trim().chars() {
+            if ch.is_ascii_alphanumeric() {
+                out.push(ch.to_ascii_lowercase());
+                prev_underscore = false;
+            } else if !prev_underscore && !out.is_empty() {
+                out.push('_');
+                prev_underscore = true;
+            }
+            if out.len() >= 32 {
+                break;
+            }
+        }
+        let trimmed = out.trim_matches('_').to_string();
+        if trimmed.is_empty() {
+            "pre_ingest".to_string()
+        } else {
+            trimmed
+        }
+    }
+
+    /// Save baseline store to disk using atomic write-then-rename.
     pub fn save_to_dir(&self, dir: &Path) -> Result<(), String> {
         fs::create_dir_all(dir).map_err(|e| format!("Failed to create baseline dir: {}", e))?;
 
-        let manifest_path = dir.join("manifest.json");
-        let shots_path = dir.join("shots.json");
-        let sigs_path = dir.join("signatures.json");
-
-        let f_manifest = File::create(manifest_path).map_err(|e| e.to_string())?;
-        serde_json::to_writer_pretty(BufWriter::new(f_manifest), &self.manifest)
-            .map_err(|e| e.to_string())?;
-
-        let f_shots = File::create(shots_path).map_err(|e| e.to_string())?;
-        serde_json::to_writer(BufWriter::new(f_shots), &self.reference_shots)
-            .map_err(|e| e.to_string())?;
-
-        let f_sigs = File::create(sigs_path).map_err(|e| e.to_string())?;
-        serde_json::to_writer_pretty(BufWriter::new(f_sigs), &self.master_signatures)
-            .map_err(|e| e.to_string())?;
+        Self::write_json_atomic(&dir.join("manifest.json"), &self.manifest, true)?;
+        Self::write_json_atomic(&dir.join("shots.json"), &self.reference_shots, false)?;
+        Self::write_json_atomic(&dir.join("signatures.json"), &self.master_signatures, true)?;
 
         Ok(())
+    }
+
+    /// Create a timestamped snapshot backup of the current Golden Baseline on disk.
+    ///
+    /// Automatically preserves existing `manifest.json`, `shots.json`, and `signatures.json`
+    /// under `assets/baseline_backups/<backup_id>/` before single or bulk mutations.
+    /// Keeps up to 10 snapshots while always retaining the oldest original snapshot.
+    pub fn create_backup(
+        baseline_dir: &Path,
+        reason: &str,
+    ) -> Result<Option<BaselineBackupInfo>, String> {
+        let manifest_path = baseline_dir.join("manifest.json");
+        if !manifest_path.exists() {
+            return Ok(None);
+        }
+
+        let f_manifest = File::open(&manifest_path)
+            .map_err(|e| format!("Failed to open manifest for backup: {}", e))?;
+        let manifest: BaselineCorpusManifest = serde_json::from_reader(BufReader::new(f_manifest))
+            .map_err(|e| format!("Failed to parse manifest for backup: {}", e))?;
+
+        let shots_count = if manifest.total_reference_shots > 0 {
+            manifest.total_reference_shots
+        } else if baseline_dir.join("shots.json").exists() {
+            Self::load_from_dir(baseline_dir)
+                .map(|s| s.reference_shots.len())
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        let films_count = if manifest.total_films > 0 {
+            manifest.total_films
+        } else {
+            manifest.films.len()
+        };
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        let timestamp_unix = now.as_secs();
+        let subsec_millis = now.subsec_millis();
+        let clean_reason = Self::sanitize_backup_reason(reason);
+
+        let backups_dir = Self::resolve_backups_dir(baseline_dir);
+        fs::create_dir_all(&backups_dir)
+            .map_err(|e| format!("Failed to create baseline_backups dir: {}", e))?;
+
+        let mut backup_id = format!("baseline_{}_{}", timestamp_unix, clean_reason);
+        let mut target_dir = backups_dir.join(&backup_id);
+        if target_dir.exists() {
+            backup_id = format!("baseline_{}_{}_{:03}", timestamp_unix, clean_reason, subsec_millis);
+            target_dir = backups_dir.join(&backup_id);
+        }
+        let mut disambiguator = 1usize;
+        while target_dir.exists() {
+            backup_id = format!(
+                "baseline_{}_{}_{}",
+                timestamp_unix, clean_reason, disambiguator
+            );
+            target_dir = backups_dir.join(&backup_id);
+            disambiguator += 1;
+        }
+
+        fs::create_dir_all(&target_dir)
+            .map_err(|e| format!("Failed to create backup dir {}: {}", target_dir.display(), e))?;
+
+        for fname in ["manifest.json", "shots.json", "signatures.json"] {
+            let src = baseline_dir.join(fname);
+            if src.exists() {
+                fs::copy(&src, target_dir.join(fname)).map_err(|e| {
+                    format!(
+                        "Failed backing up {} to {}: {}",
+                        src.display(),
+                        target_dir.display(),
+                        e
+                    )
+                })?;
+            }
+        }
+
+        let info = BaselineBackupInfo {
+            backup_id,
+            timestamp_unix,
+            reason: clean_reason,
+            shots_count,
+            films_count,
+            backup_path: target_dir.to_string_lossy().to_string(),
+        };
+
+        Self::write_json_atomic(&target_dir.join("backup_meta.json"), &info, true)?;
+        Self::prune_backups(baseline_dir, 10);
+
+        Ok(Some(info))
+    }
+
+    /// Prune excess backup snapshots beyond `max_keep` while always preserving the
+    /// oldest snapshot (the initial Golden Baseline state) and the newest snapshots.
+    fn prune_backups(baseline_dir: &Path, max_keep: usize) {
+        if max_keep < 2 {
+            return;
+        }
+        let backups = Self::list_backups(baseline_dir);
+        if backups.len() <= max_keep {
+            return;
+        }
+        let keep_newest = max_keep - 1;
+        let oldest_idx = backups.len() - 1;
+        for b in &backups[keep_newest..oldest_idx] {
+            let _ = fs::remove_dir_all(&b.backup_path);
+        }
+    }
+
+    /// List available Golden Baseline backup snapshots sorted newest-first.
+    pub fn list_backups(baseline_dir: &Path) -> Vec<BaselineBackupInfo> {
+        let backups_dir = Self::resolve_backups_dir(baseline_dir);
+        if !backups_dir.exists() {
+            return Vec::new();
+        }
+        let Ok(entries) = fs::read_dir(&backups_dir) else {
+            return Vec::new();
+        };
+
+        let mut backups = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() || !path.join("manifest.json").exists() {
+                continue;
+            }
+            let meta_path = path.join("backup_meta.json");
+            if meta_path.exists() {
+                if let Ok(f) = File::open(&meta_path) {
+                    if let Ok(mut info) =
+                        serde_json::from_reader::<_, BaselineBackupInfo>(BufReader::new(f))
+                    {
+                        info.backup_path = path.to_string_lossy().to_string();
+                        backups.push(info);
+                        continue;
+                    }
+                }
+            }
+            if let Ok(f) = File::open(path.join("manifest.json")) {
+                if let Ok(manifest) =
+                    serde_json::from_reader::<_, BaselineCorpusManifest>(BufReader::new(f))
+                {
+                    let dir_name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("backup")
+                        .to_string();
+                    let ts = entry
+                        .metadata()
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    backups.push(BaselineBackupInfo {
+                        backup_id: dir_name,
+                        timestamp_unix: ts,
+                        reason: "snapshot".to_string(),
+                        shots_count: manifest.total_reference_shots,
+                        films_count: if manifest.total_films > 0 {
+                            manifest.total_films
+                        } else {
+                            manifest.films.len()
+                        },
+                        backup_path: path.to_string_lossy().to_string(),
+                    });
+                }
+            }
+        }
+
+        backups.sort_by(|a, b| {
+            b.timestamp_unix
+                .cmp(&a.timestamp_unix)
+                .then_with(|| b.backup_id.cmp(&a.backup_id))
+        });
+        backups
+    }
+
+    /// Restore the Golden Baseline on disk from a backup snapshot (defaults to newest).
+    pub fn restore_backup(
+        baseline_dir: &Path,
+        backup_id: Option<&str>,
+    ) -> Result<BaselineBackupInfo, String> {
+        let backups = Self::list_backups(baseline_dir);
+        if backups.is_empty() {
+            return Err("No Golden Baseline backups found".to_string());
+        }
+
+        let selected = match backup_id.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(id) if !id.eq_ignore_ascii_case("latest") => backups
+                .into_iter()
+                .find(|b| b.backup_id == id)
+                .ok_or_else(|| format!("Golden Baseline backup '{}' not found", id))?,
+            _ => backups[0].clone(),
+        };
+
+        let backup_dir = PathBuf::from(&selected.backup_path);
+        // Validate backup readability before overwriting the active baseline
+        let validated = Self::load_from_dir(&backup_dir)?;
+        if validated.manifest.version.is_empty() && validated.reference_shots.is_empty() {
+            return Err(format!(
+                "Backup '{}' appears empty or invalid",
+                selected.backup_id
+            ));
+        }
+
+        fs::create_dir_all(baseline_dir)
+            .map_err(|e| format!("Failed to prepare baseline directory: {}", e))?;
+
+        for fname in ["manifest.json", "shots.json", "signatures.json"] {
+            let src = backup_dir.join(fname);
+            if src.exists() {
+                Self::copy_file_atomic(&src, &baseline_dir.join(fname))?;
+            }
+        }
+
+        Ok(selected)
     }
 
     /// Load baseline store from disk.
@@ -1708,15 +2231,19 @@ impl BaselineStore {
             serde_json::from_reader(BufReader::new(f_manifest)).map_err(|e| e.to_string())?;
 
         let reference_shots: Vec<ReferenceShot> = if shots_path.exists() {
-            let f_shots = File::open(shots_path).map_err(|e| e.to_string())?;
-            serde_json::from_reader(BufReader::new(f_shots)).unwrap_or_default()
+            let f_shots = File::open(&shots_path)
+                .map_err(|e| format!("Failed to open {}: {}", shots_path.display(), e))?;
+            serde_json::from_reader(BufReader::new(f_shots))
+                .map_err(|e| format!("Failed to parse shots.json: {}", e))?
         } else {
             Vec::new()
         };
 
         let master_signatures: Vec<CinematographerSignature> = if sigs_path.exists() {
-            let f_sigs = File::open(sigs_path).map_err(|e| e.to_string())?;
-            serde_json::from_reader(BufReader::new(f_sigs)).unwrap_or_default()
+            let f_sigs = File::open(&sigs_path)
+                .map_err(|e| format!("Failed to open {}: {}", sigs_path.display(), e))?;
+            serde_json::from_reader(BufReader::new(f_sigs))
+                .map_err(|e| format!("Failed to parse signatures.json: {}", e))?
         } else {
             Vec::new()
         };
@@ -2074,17 +2601,65 @@ fn compute_quantiles(vals: &mut [f32]) -> MetricQuantiles {
     }
 }
 
-/// Result summary of media server library scan and shot ingestion.
+/// Result summary of Golden Baseline scan and additive shot/still ingestion.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerIngestReport {
     pub matched_films: usize,
     pub ingested_films: usize,
+    pub ingested_stills: usize,
     pub skipped_films: usize,
+    pub previous_corpus_shots: usize,
     pub total_shots_added: usize,
     pub total_corpus_shots: usize,
     pub dynamic_range_p50: f32,
     pub highlight_rolloff_p50: f32,
     pub processed_titles: Vec<String>,
+    pub backup_created: Option<BaselineBackupInfo>,
+}
+
+/// Returns `true` when `path` has a supported reference still image extension.
+pub fn is_still_image_file(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| {
+                matches!(
+                    e.to_lowercase().as_str(),
+                    "png" | "jpg" | "jpeg" | "tiff" | "tif" | "exr" | "webp" | "bmp"
+                )
+            })
+            .unwrap_or(false)
+}
+
+/// Returns `true` when `path` has a supported reference video extension.
+pub fn is_video_file(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| {
+                matches!(
+                    e.to_lowercase().as_str(),
+                    "mkv" | "mp4" | "mov" | "m4v" | "avi" | "ts" | "webm"
+                )
+            })
+            .unwrap_or(false)
+}
+
+/// Lists sorted reference still image files located directly inside `dir`.
+pub fn find_still_images_in_dir(dir: &Path) -> Vec<PathBuf> {
+    let mut stills = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if is_still_image_file(&p) {
+                stills.push(p);
+            }
+        }
+    }
+    stills.sort();
+    stills
 }
 
 /// Extracts title and optional 4-digit release year from a movie folder name.
@@ -2112,16 +2687,10 @@ pub fn find_primary_video_file(dir: &Path) -> Option<std::path::PathBuf> {
             if let Ok(meta) = entry.metadata() {
                 if meta.is_file() {
                     let p = entry.path();
-                    if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
-                        let ext_lower = ext.to_lowercase();
-                        if matches!(
-                            ext_lower.as_str(),
-                            "mkv" | "mp4" | "mov" | "m4v" | "avi" | "ts"
-                        ) {
-                            let len = meta.len();
-                            if largest.as_ref().map(|l| len > l.1).unwrap_or(true) {
-                                largest = Some((p, len));
-                            }
+                    if is_video_file(&p) {
+                        let len = meta.len();
+                        if largest.as_ref().map(|l| len > l.1).unwrap_or(true) {
+                            largest = Some((p, len));
                         }
                     }
                 }
@@ -2132,53 +2701,306 @@ pub fn find_primary_video_file(dir: &Path) -> Option<std::path::PathBuf> {
     None
 }
 
-/// Executes media server library scanning, deduplication, and continuous shot ingestion.
-pub fn scan_and_ingest_media_server(
-    server_dir: &Path,
+enum GoldenIngestJob {
+    SingleStill {
+        title: String,
+        dp: String,
+        year: u32,
+        file_path: PathBuf,
+        explicit_pick: bool,
+    },
+    StillDirectory {
+        title: String,
+        dp: String,
+        year: u32,
+        dir_path: PathBuf,
+        stills_count: usize,
+        explicit_pick: bool,
+    },
+    ReferenceFilm {
+        title: String,
+        dp: String,
+        director: Option<String>,
+        year: u32,
+        style_family: String,
+        file_path: PathBuf,
+        explicit_pick: bool,
+    },
+}
+
+impl GoldenIngestJob {
+    fn title(&self) -> &str {
+        match self {
+            Self::SingleStill { title, .. }
+            | Self::StillDirectory { title, .. }
+            | Self::ReferenceFilm { title, .. } => title,
+        }
+    }
+
+    fn is_explicit_pick(&self) -> bool {
+        match self {
+            Self::SingleStill { explicit_pick, .. }
+            | Self::StillDirectory { explicit_pick, .. }
+            | Self::ReferenceFilm { explicit_pick, .. } => *explicit_pick,
+        }
+    }
+
+    fn is_still_job(&self) -> bool {
+        matches!(self, Self::SingleStill { .. } | Self::StillDirectory { .. })
+    }
+}
+
+fn resolve_target_metadata(
+    path: &Path,
+    custom_title: Option<&str>,
+    custom_dp: Option<&str>,
+    fallback_dp: &str,
+) -> (String, String, Option<String>, u32, String) {
+    use aesthetic_models::awards::find_award_match;
+
+    let raw_name = path
+        .file_stem()
+        .or_else(|| path.file_name())
+        .and_then(|s| s.to_str())
+        .unwrap_or("Reference Cinema");
+    let (parsed_name, parsed_year) = parse_movie_folder_name(raw_name);
+
+    let title_override = custom_title
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let dp_override = custom_dp
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
+    let search_title = title_override.clone().unwrap_or_else(|| parsed_name.clone());
+    let mut award_opt = find_award_match(&search_title, parsed_year);
+    if award_opt.is_none() && title_override.is_none() {
+        if let Some(parent_name) = path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+        {
+            let (ptitle, pyear) = parse_movie_folder_name(parent_name);
+            award_opt = find_award_match(&ptitle, pyear);
+        }
+    }
+
+    if let Some(award) = award_opt {
+        (
+            title_override.unwrap_or_else(|| award.title.to_string()),
+            dp_override.unwrap_or_else(|| award.cinematographer.to_string()),
+            Some(award.director.to_string()),
+            parsed_year.unwrap_or(award.year),
+            award.style_family.to_string(),
+        )
+    } else {
+        (
+            search_title,
+            dp_override.unwrap_or_else(|| fallback_dp.to_string()),
+            None,
+            parsed_year.unwrap_or(2024),
+            "Prestige Naturalism".to_string(),
+        )
+    }
+}
+
+/// Executes unified Golden Baseline ingestion across directories of films, still frames,
+/// individual video files, or single reference stills with strict additive preservation,
+/// automatic pre-ingest backup, and live Job Status Bar Graph progress reporting.
+pub fn scan_and_ingest_golden_baseline(
+    target_path: &Path,
     limit: Option<usize>,
-    shots_per_film: usize,
+    shots_per_item: usize,
     force: bool,
+    custom_title: Option<&str>,
+    custom_dp: Option<&str>,
 ) -> Result<ServerIngestReport, String> {
     use aesthetic_models::awards::find_award_match;
 
-    if !server_dir.exists() {
+    if !target_path.exists() {
         return Err(format!(
-            "Server directory '{}' does not exist or is inaccessible",
-            server_dir.display()
+            "Target path '{}' does not exist or is inaccessible",
+            target_path.display()
         ));
     }
 
-    let entries = fs::read_dir(server_dir)
-        .map_err(|e| format!("Failed to read directory {}: {}", server_dir.display(), e))?;
+    let make_stages = |b_done: usize,
+                       b_state: &str,
+                       s_done: usize,
+                       s_state: &str,
+                       e_done: usize,
+                       e_total: usize,
+                       e_state: &str,
+                       w_done: usize,
+                       w_state: &str| {
+        vec![
+            make_stage_bar("1. Auto-Backup", b_done, 1, b_state),
+            make_stage_bar("2. Source & Stills Scan", s_done, 1, s_state),
+            make_stage_bar("3. Frame & Shot Extraction", e_done, e_total.max(1), e_state),
+            make_stage_bar("4. Quantiles & Atomic Save", w_done, 1, w_state),
+        ]
+    };
 
-    let mut matched_jobs = Vec::new();
-    for entry in entries.flatten() {
-        if let Ok(file_type) = entry.file_type() {
-            if file_type.is_dir() {
-                let folder_name = entry.file_name().to_string_lossy().to_string();
-                let (title, year) = parse_movie_folder_name(&folder_name);
-                if let Some(award) = find_award_match(&title, year) {
-                    if let Some(video_file) = find_primary_video_file(&entry.path()) {
-                        matched_jobs.push((folder_name, video_file, award));
+    update_job_status(
+        "golden_baseline_ingest",
+        "Scanning",
+        &format!("Scanning {} for films and reference still frames...", target_path.display()),
+        0,
+        4,
+        make_stages(0, "pending", 0, "active", 0, 1, "pending", 0, "pending"),
+        "Inspecting target directory/file...",
+    );
+
+    let mut discovered_jobs: Vec<GoldenIngestJob> = Vec::new();
+
+    if target_path.is_file() {
+        if is_still_image_file(target_path) {
+            let (title, dp, _dir, year, _style) =
+                resolve_target_metadata(target_path, custom_title, custom_dp, "Reference Stills");
+            discovered_jobs.push(GoldenIngestJob::SingleStill {
+                title,
+                dp,
+                year,
+                file_path: target_path.to_path_buf(),
+                explicit_pick: true,
+            });
+        } else if is_video_file(target_path) {
+            let (title, dp, director, year, style_family) =
+                resolve_target_metadata(target_path, custom_title, custom_dp, "Cinema Master");
+            discovered_jobs.push(GoldenIngestJob::ReferenceFilm {
+                title,
+                dp,
+                director,
+                year,
+                style_family,
+                file_path: target_path.to_path_buf(),
+                explicit_pick: true,
+            });
+        } else {
+            let msg = format!("Unsupported reference media format: {}", target_path.display());
+            finish_job_status(
+                "golden_baseline_ingest",
+                "Error",
+                &msg,
+                make_stages(0, "pending", 0, "error", 0, 1, "pending", 0, "pending"),
+                &msg,
+            );
+            return Err(msg);
+        }
+    } else if target_path.is_dir() {
+        // Direct still images inside selected directory
+        let direct_stills = find_still_images_in_dir(target_path);
+        if !direct_stills.is_empty() {
+            let (title, dp, _dir, year, _style) =
+                resolve_target_metadata(target_path, custom_title, custom_dp, "Reference Stills");
+            discovered_jobs.push(GoldenIngestJob::StillDirectory {
+                title,
+                dp,
+                year,
+                dir_path: target_path.to_path_buf(),
+                stills_count: direct_stills.len(),
+                explicit_pick: true,
+            });
+        }
+
+        // Child folders (award films, reference stills folders, or mixed folders)
+        if let Ok(entries) = fs::read_dir(target_path) {
+            let mut subdirs: Vec<PathBuf> = entries
+                .flatten()
+                .filter_map(|e| {
+                    e.file_type()
+                        .ok()
+                        .filter(|t| t.is_dir())
+                        .map(|_| e.path())
+                })
+                .collect();
+            subdirs.sort();
+
+            for subdir in subdirs {
+                let folder_name = subdir
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let (parsed_title, parsed_year) = parse_movie_folder_name(&folder_name);
+                let award_opt = find_award_match(&parsed_title, parsed_year);
+                let subdir_stills = find_still_images_in_dir(&subdir);
+
+                if let Some(award) = award_opt {
+                    if let Some(video_file) = find_primary_video_file(&subdir) {
+                        discovered_jobs.push(GoldenIngestJob::ReferenceFilm {
+                            title: award.title.to_string(),
+                            dp: award.cinematographer.to_string(),
+                            director: Some(award.director.to_string()),
+                            year: award.year,
+                            style_family: award.style_family.to_string(),
+                            file_path: video_file,
+                            explicit_pick: false,
+                        });
                     }
+                    if !subdir_stills.is_empty() {
+                        discovered_jobs.push(GoldenIngestJob::StillDirectory {
+                            title: award.title.to_string(),
+                            dp: custom_dp
+                                .map(str::trim)
+                                .filter(|s| !s.is_empty())
+                                .unwrap_or(award.cinematographer)
+                                .to_string(),
+                            year: parsed_year.unwrap_or(award.year),
+                            dir_path: subdir.clone(),
+                            stills_count: subdir_stills.len(),
+                            explicit_pick: false,
+                        });
+                    }
+                } else if !subdir_stills.is_empty() {
+                    let (title, dp, _dir, year, _style) =
+                        resolve_target_metadata(&subdir, custom_title, custom_dp, "Reference Stills");
+                    discovered_jobs.push(GoldenIngestJob::StillDirectory {
+                        title,
+                        dp,
+                        year,
+                        dir_path: subdir.clone(),
+                        stills_count: subdir_stills.len(),
+                        explicit_pick: false,
+                    });
                 }
             }
         }
     }
 
-    let mut store = BaselineStore::new();
+    // Fail-safe load from disk if baseline already exists so parse errors never erase existing corpus
+    let baseline_dir = BaselineStore::resolve_baseline_dir();
+    let mut store = if baseline_dir.join("manifest.json").exists() {
+        BaselineStore::load_from_dir(&baseline_dir)?
+    } else {
+        BaselineStore::new()
+    };
+    let previous_corpus_shots = store.reference_shots.len();
 
-    let (pending_jobs, skipped_count): (Vec<_>, usize) = if force {
-        (matched_jobs.clone(), 0)
+    let (pending_jobs, skipped_count): (Vec<GoldenIngestJob>, usize) = if force {
+        (discovered_jobs, 0)
     } else {
         let mut pending = Vec::new();
         let mut skipped = 0;
-        for job in matched_jobs.clone() {
-            let award_title = job.2.title;
-            let exists = store
-                .measured_shots()
-                .iter()
-                .any(|s| s.film_title.eq_ignore_ascii_case(award_title));
+        for job in discovered_jobs {
+            if job.is_explicit_pick() {
+                pending.push(job);
+                continue;
+            }
+            let title = job.title();
+            let exists = if job.is_still_job() {
+                store
+                    .measured_shots()
+                    .iter()
+                    .any(|s| s.film_title.eq_ignore_ascii_case(title) && s.shot_id.contains("_still_"))
+            } else {
+                store
+                    .measured_shots()
+                    .iter()
+                    .any(|s| s.film_title.eq_ignore_ascii_case(title) && !s.shot_id.contains("_still_"))
+            };
             if exists {
                 skipped += 1;
             } else {
@@ -2188,44 +3010,218 @@ pub fn scan_and_ingest_media_server(
         (pending, skipped)
     };
 
-    let to_process = if let Some(lim) = limit {
-        &pending_jobs[..lim.min(pending_jobs.len())]
+    let matched_count = pending_jobs.len() + skipped_count;
+    let process_len = limit.map(|l| l.min(pending_jobs.len())).unwrap_or(pending_jobs.len());
+    let to_process = &pending_jobs[..process_len];
+
+    let total_units = 2 + to_process.len().max(1) + 1;
+    update_job_status(
+        "golden_baseline_ingest",
+        "Backing Up",
+        &format!(
+            "Creating safety backup of {} existing Golden Baseline shots...",
+            previous_corpus_shots
+        ),
+        1,
+        total_units,
+        make_stages(
+            0,
+            "active",
+            1,
+            "done",
+            0,
+            to_process.len().max(1),
+            "pending",
+            0,
+            "pending",
+        ),
+        &format!("Found {} items to add ({} already present).", to_process.len(), skipped_count),
+    );
+
+    let backup_created = if !to_process.is_empty() {
+        let reason = format!("bulk_ingest_{}_items", to_process.len());
+        BaselineStore::create_backup(&baseline_dir, &reason)?
     } else {
-        &pending_jobs[..]
+        None
     };
 
-    let mut total_shots = 0;
-    let mut processed_titles = Vec::new();
+    if to_process.is_empty() {
+        let msg = if matched_count == 0 {
+            "No supported films or still frames found at target path.".to_string()
+        } else {
+            format!(
+                "All {} discovered items already present in Golden Baseline ({} shots intact).",
+                skipped_count, previous_corpus_shots
+            )
+        };
+        finish_job_status(
+            "golden_baseline_ingest",
+            "Complete",
+            &msg,
+            make_stages(1, "done", 1, "done", 0, 1, "done", 1, "done"),
+            &msg,
+        );
+        return Ok(ServerIngestReport {
+            matched_films: matched_count,
+            ingested_films: 0,
+            ingested_stills: 0,
+            skipped_films: skipped_count,
+            previous_corpus_shots,
+            total_shots_added: 0,
+            total_corpus_shots: previous_corpus_shots,
+            dynamic_range_p50: store.manifest.dynamic_range_quantiles.p50,
+            highlight_rolloff_p50: store.manifest.highlight_rolloff_quantiles.p50,
+            processed_titles: Vec::new(),
+            backup_created,
+        });
+    }
 
-    for (_folder, file_path, award) in to_process {
-        let ingest_meta = FilmIngestMeta {
-            title: award.title,
-            cinematographer: award.cinematographer,
-            director: Some(award.director),
-            year: award.year,
-            style_family: award.style_family,
-            max_shots: shots_per_film,
+    let mut total_shots_added = 0usize;
+    let mut ingested_films = 0usize;
+    let mut ingested_stills = 0usize;
+    let mut processed_titles = Vec::new();
+    let total_items = to_process.len();
+
+    for (idx, job) in to_process.iter().enumerate() {
+        let active_label = match job {
+            GoldenIngestJob::SingleStill { title, file_path, .. } => format!(
+                "[{}/{}] Evaluating still frame: {} ({})",
+                idx + 1,
+                total_items,
+                title,
+                file_path.file_name().and_then(|s| s.to_str()).unwrap_or("still")
+            ),
+            GoldenIngestJob::StillDirectory { title, stills_count, .. } => format!(
+                "[{}/{}] Extracting still frames: {} ({} files found)",
+                idx + 1,
+                total_items,
+                title,
+                stills_count
+            ),
+            GoldenIngestJob::ReferenceFilm { title, .. } => format!(
+                "[{}/{}] Extracting continuous shots: {} ({} shots target)",
+                idx + 1,
+                total_items,
+                title,
+                shots_per_item
+            ),
         };
 
-        if let Ok(summary) = store.ingest_reference_film_shots(file_path, &ingest_meta) {
-            total_shots += summary.shots_added;
-            processed_titles.push(award.title.to_string());
+        update_job_status(
+            "golden_baseline_ingest",
+            "Ingesting",
+            &active_label,
+            2 + idx,
+            total_units,
+            make_stages(1, "done", 1, "done", idx, total_items, "active", 0, "pending"),
+            &format!("Additive ingestion: {} prior + {} added so far.", previous_corpus_shots, total_shots_added),
+        );
+
+        match job {
+            GoldenIngestJob::SingleStill { title, dp, year, file_path, .. } => {
+                if let Ok(summary) = store.ingest_reference_still(file_path, title, dp, Some(*year)) {
+                    total_shots_added += summary.shots_added;
+                    ingested_stills += summary.shots_added;
+                    processed_titles.push(format!("{} [Still]", title));
+                }
+            }
+            GoldenIngestJob::StillDirectory { title, dp, year, dir_path, .. } => {
+                if let Ok(summary) = store.ingest_reference_directory_with_limit(
+                    dir_path,
+                    title,
+                    dp,
+                    Some(*year),
+                    Some(shots_per_item.max(1)),
+                ) {
+                    total_shots_added += summary.shots_added;
+                    ingested_stills += summary.shots_added;
+                    processed_titles.push(format!("{} [{} Stills]", title, summary.shots_added));
+                }
+            }
+            GoldenIngestJob::ReferenceFilm {
+                title,
+                dp,
+                director,
+                year,
+                style_family,
+                file_path,
+                ..
+            } => {
+                let ingest_meta = FilmIngestMeta {
+                    title,
+                    cinematographer: dp,
+                    director: director.as_deref(),
+                    year: *year,
+                    style_family,
+                    max_shots: shots_per_item,
+                };
+                if let Ok(summary) = store.ingest_reference_film_shots(file_path, &ingest_meta) {
+                    total_shots_added += summary.shots_added;
+                    ingested_films += 1;
+                    processed_titles.push(title.to_string());
+                }
+            }
         }
     }
 
-    let baseline_dir = Path::new("assets").join("baseline");
-    let _ = store.save_to_dir(&baseline_dir);
+    update_job_status(
+        "golden_baseline_ingest",
+        "Saving",
+        &format!(
+            "Recalibrating quantiles & atomically saving {} total shots ({} added)...",
+            store.reference_shots.len(),
+            total_shots_added
+        ),
+        2 + total_items,
+        total_units,
+        make_stages(1, "done", 1, "done", total_items, total_items, "done", 0, "active"),
+        "Writing manifest.json, shots.json, signatures.json...",
+    );
+
+    if total_shots_added > 0 {
+        store.save_to_dir(&baseline_dir)?;
+    }
+
+    let final_msg = format!(
+        "Added {} shots ({} films, {} stills): {} + {} = {} total Golden Baseline shots.",
+        total_shots_added,
+        ingested_films,
+        ingested_stills,
+        previous_corpus_shots,
+        total_shots_added,
+        store.reference_shots.len()
+    );
+    finish_job_status(
+        "golden_baseline_ingest",
+        "Complete",
+        &final_msg,
+        make_stages(1, "done", 1, "done", total_items, total_items, "done", 1, "done"),
+        &final_msg,
+    );
 
     Ok(ServerIngestReport {
-        matched_films: matched_jobs.len(),
-        ingested_films: processed_titles.len(),
+        matched_films: matched_count,
+        ingested_films,
+        ingested_stills,
         skipped_films: skipped_count,
-        total_shots_added: total_shots,
+        previous_corpus_shots,
+        total_shots_added,
         total_corpus_shots: store.reference_shots.len(),
         dynamic_range_p50: store.manifest.dynamic_range_quantiles.p50,
         highlight_rolloff_p50: store.manifest.highlight_rolloff_quantiles.p50,
         processed_titles,
+        backup_created,
     })
+}
+
+/// Executes media server library scanning, deduplication, and additive shot/still ingestion.
+pub fn scan_and_ingest_media_server(
+    server_dir: &Path,
+    limit: Option<usize>,
+    shots_per_film: usize,
+    force: bool,
+) -> Result<ServerIngestReport, String> {
+    scan_and_ingest_golden_baseline(server_dir, limit, shots_per_film, force, None, None)
 }
 
 #[cfg(test)]
@@ -2309,5 +3305,215 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_baseline_backup_and_restore_cycle() {
+        let root_dir = std::env::temp_dir().join("aesthetic_test_baseline_backup_cycle");
+        let _ = fs::remove_dir_all(&root_dir);
+        let baseline_dir = root_dir.join("baseline");
+        fs::create_dir_all(&baseline_dir).expect("Failed to create temp baseline dir");
+
+        let mut store = BaselineStore::default();
+        store.populate_default_masters();
+        store.manifest.version = "test-v1".to_string();
+        for i in 1..=2 {
+            store.add_reference_shot(ReferenceShot {
+                shot_id: format!("orig_shot_{}", i),
+                film_title: "Original Master Film".to_string(),
+                cinematographer: "Roger Deakins".to_string(),
+                timestamp_sec: i as f64,
+                embedding: vec![0.25; 1152],
+                dynamic_range_stops: 9.0,
+                highlight_rolloff: 85.0,
+                sharpness_laplacian: 120.0,
+                key_fill_ratio: 2.5,
+                style_label: "Prestige Naturalism".to_string(),
+                motion_optical_flow: None,
+                camera_motion_ratio: None,
+            });
+        }
+        store.manifest.films.push(IngestedReferenceFilm {
+            title: "Original Master Film".to_string(),
+            cinematographer: "Roger Deakins".to_string(),
+            director: Some("Denis Villeneuve".to_string()),
+            year: 2017,
+            aspect_ratio: "2.39:1".to_string(),
+            shot_count: 2,
+            average_dynamic_range: 9.0,
+        });
+        store.manifest.total_films = store.manifest.films.len();
+        store.manifest.total_reference_shots = store.reference_shots.len();
+        store.save_to_dir(&baseline_dir).expect("Save initial baseline");
+
+        // Create backup prior to bulk mutation
+        let backup_info = BaselineStore::create_backup(&baseline_dir, "Pre Bulk Test!")
+            .expect("Backup creation should succeed")
+            .expect("Backup info should be returned");
+        assert_eq!(backup_info.shots_count, 2);
+        assert_eq!(backup_info.films_count, 1);
+        assert_eq!(backup_info.reason, "pre_bulk_test");
+
+        // Mutate baseline to simulate accidental bulk ingest
+        for i in 1..=3 {
+            store.add_reference_shot(ReferenceShot {
+                shot_id: format!("bad_bulk_shot_{}", i),
+                film_title: "Erroneous Film".to_string(),
+                cinematographer: "Unknown".to_string(),
+                timestamp_sec: i as f64 * 10.0,
+                embedding: vec![0.9; 1152],
+                dynamic_range_stops: 6.0,
+                highlight_rolloff: 40.0,
+                sharpness_laplacian: 60.0,
+                key_fill_ratio: 1.5,
+                style_label: "Standard".to_string(),
+                motion_optical_flow: None,
+                camera_motion_ratio: None,
+            });
+        }
+        store.manifest.films.push(IngestedReferenceFilm {
+            title: "Erroneous Film".to_string(),
+            cinematographer: "Unknown".to_string(),
+            director: None,
+            year: 2025,
+            aspect_ratio: "16:9".to_string(),
+            shot_count: 3,
+            average_dynamic_range: 6.0,
+        });
+        store.manifest.total_films = store.manifest.films.len();
+        store.manifest.total_reference_shots = store.reference_shots.len();
+        store.save_to_dir(&baseline_dir).expect("Save mutated baseline");
+
+        let mutated = BaselineStore::load_from_dir(&baseline_dir).expect("Load mutated baseline");
+        assert_eq!(mutated.reference_shots.len(), 5);
+        assert_eq!(mutated.manifest.films.len(), 2);
+
+        // Verify list_backups returns our backup and restore rolls back cleanly
+        let backups = BaselineStore::list_backups(&baseline_dir);
+        assert_eq!(backups.len(), 1);
+        assert_eq!(backups[0].backup_id, backup_info.backup_id);
+
+        let restored_info = BaselineStore::restore_backup(&baseline_dir, None)
+            .expect("Restore latest backup should succeed");
+        assert_eq!(restored_info.backup_id, backup_info.backup_id);
+
+        let restored_store = BaselineStore::load_from_dir(&baseline_dir).expect("Load restored");
+        assert_eq!(restored_store.reference_shots.len(), 2);
+        assert_eq!(restored_store.manifest.films.len(), 1);
+        assert_eq!(restored_store.manifest.films[0].title, "Original Master Film");
+
+        let _ = fs::remove_dir_all(&root_dir);
+    }
+
+    #[test]
+    fn test_additive_baseline_stills_and_films_never_replace() {
+        use image::{Rgb, RgbImage};
+
+        let root_dir = std::env::temp_dir().join("aesthetic_test_additive_stills");
+        let _ = fs::remove_dir_all(&root_dir);
+        let stills_dir = root_dir.join("stills_batch");
+        fs::create_dir_all(&stills_dir).expect("Create stills temp dir");
+
+        let write_photo_still = |path: &Path, r_bias: u8, g_bias: u8| {
+            let mut img = RgbImage::new(64, 64);
+            for y in 0..64 {
+                for x in 0..64 {
+                    let v = ((x * 3 + y * 2) % 180 + 40) as u8;
+                    img.put_pixel(
+                        x,
+                        y,
+                        Rgb([v.saturating_add(r_bias), v.saturating_add(g_bias), 140]),
+                    );
+                }
+            }
+            img.save(path).expect("Save test still");
+        };
+
+        let single_still_a = root_dir.join("film_a_single.png");
+        let dir_still_a1 = stills_dir.join("a_01.png");
+        let dir_still_a2 = stills_dir.join("a_02.png");
+        let single_still_b = root_dir.join("film_b_single.png");
+        write_photo_still(&single_still_a, 10, 0);
+        write_photo_still(&dir_still_a1, 20, 10);
+        write_photo_still(&dir_still_a2, 30, 20);
+        write_photo_still(&single_still_b, 0, 25);
+
+        let mut store = BaselineStore::default();
+        store.populate_default_masters();
+        store.add_reference_shot(ReferenceShot {
+            shot_id: "seed_orig_0001".to_string(),
+            film_title: "Prior Baseline Film".to_string(),
+            cinematographer: "Roger Deakins".to_string(),
+            timestamp_sec: 12.0,
+            embedding: vec![0.1; 1152],
+            dynamic_range_stops: 9.2,
+            highlight_rolloff: 88.0,
+            sharpness_laplacian: 100.0,
+            key_fill_ratio: 2.8,
+            style_label: "Prestige Naturalism".to_string(),
+            motion_optical_flow: None,
+            camera_motion_ratio: None,
+        });
+        let initial_shots = store.reference_shots.len();
+        assert_eq!(initial_shots, 1);
+
+        // 1. Ingest single still for Film A -> 2 total shots
+        let s1 = store
+            .ingest_reference_still(&single_still_a, "Additive Film A", "Roger Deakins", Some(2024))
+            .expect("First still ingest succeeds");
+        assert_eq!(s1.previous_corpus_shots, 1);
+        assert_eq!(s1.shots_added, 1);
+        assert_eq!(s1.total_corpus_shots, 2);
+
+        // 2. Ingest directory of 2 more stills for the SAME Film A -> 4 total shots (Film A shot_count = 3)
+        let s2 = store
+            .ingest_reference_directory(&stills_dir, "Additive Film A", "Roger Deakins", Some(2024))
+            .expect("Directory stills ingest succeeds");
+        assert_eq!(s2.previous_corpus_shots, 2);
+        assert_eq!(s2.shots_added, 2);
+        assert_eq!(s2.total_corpus_shots, 4);
+
+        // 3. Ingest single still for Film B -> 5 total shots
+        let s3 = store
+            .ingest_reference_still(&single_still_b, "Additive Film B", "Hoyte van Hoytema", Some(2024))
+            .expect("Second film still ingest succeeds");
+        assert_eq!(s3.previous_corpus_shots, 4);
+        assert_eq!(s3.shots_added, 1);
+        assert_eq!(s3.total_corpus_shots, 5);
+
+        // Confirm all prior shot IDs remain intact and Film A accumulated 3 shots
+        assert!(store.reference_shots.iter().any(|s| s.shot_id == "seed_orig_0001"));
+        let film_a = store
+            .manifest
+            .films
+            .iter()
+            .find(|f| f.title == "Additive Film A")
+            .expect("Additive Film A should exist in manifest");
+        assert_eq!(film_a.shot_count, 3);
+
+        // Confirm JobStatusSnapshot works cleanly
+        update_job_status(
+            "golden_baseline_ingest",
+            "Ingesting",
+            "Evaluating Additive Film A [Still]",
+            2,
+            4,
+            vec![make_stage_bar("3. Frame & Shot Extraction", 2, 4, "active")],
+            "Unit test progress check",
+        );
+        let snap = get_job_status();
+        assert!(snap.active);
+        assert!((snap.percent - 50.0).abs() < 1e-2);
+        assert_eq!(snap.active_task_point, "Evaluating Additive Film A [Still]");
+        finish_job_status(
+            "golden_baseline_ingest",
+            "Complete",
+            "Unit test done",
+            vec![make_stage_bar("3. Frame & Shot Extraction", 4, 4, "done")],
+            "Done",
+        );
+        assert!(!get_job_status().active);
+
+        let _ = fs::remove_dir_all(&root_dir);
     }
 }

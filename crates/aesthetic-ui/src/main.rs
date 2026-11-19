@@ -4,7 +4,9 @@
 //! Serves broadcast scopes, 4-output evaluations, live frame extraction,
 //! and interactive UI via embedded native WebView (Edge App Mode / Chromium).
 
-use aesthetic_core::baseline_store::{scan_and_ingest_media_server, BaselineStore};
+use aesthetic_core::baseline_store::{
+    get_job_status, scan_and_ingest_golden_baseline, BaselineStore,
+};
 use aesthetic_core::deliverables::build_unified_deliverables_package;
 use aesthetic_core::export::{
     generate_cmx3600_edl, generate_contact_sheet_html, generate_contact_sheet_html_with_frames,
@@ -693,11 +695,17 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 );
             }
         }
+        "/api/job_status" => {
+            let snap = get_job_status();
+            let payload = serde_json::to_string(&snap).unwrap_or_default();
+            send_response(stream, "200 OK", "application/json", payload.as_bytes());
+        }
         "/api/ingest_server" => {
-            let server_path = query_map
+            let server_path_raw = query_map
                 .get("path")
                 .map(|s| s.as_str())
                 .unwrap_or(r"M:\movies");
+            let server_path = clean_user_path_str(server_path_raw);
             let limit: Option<usize> = query_map.get("limit").and_then(|l| l.parse().ok());
             let shots: usize = query_map
                 .get("shots")
@@ -707,12 +715,20 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 .get("force")
                 .map(|f| f == "true" || f == "1")
                 .unwrap_or(false);
+            let custom_title = query_map
+                .get("title")
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
+            let custom_dp = query_map
+                .get("dp")
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
 
             let path = PathBuf::from(server_path);
             if !path.exists() {
                 let json = serde_json::json!({
                     "success": false,
-                    "error": format!("Directory '{}' does not exist or is inaccessible", server_path)
+                    "error": format!("Path '{}' does not exist or is inaccessible", server_path)
                 });
                 send_response(
                     stream,
@@ -723,7 +739,14 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
                 return;
             }
 
-            match scan_and_ingest_media_server(&path, limit, shots, force) {
+            match scan_and_ingest_golden_baseline(
+                &path,
+                limit,
+                shots,
+                force,
+                custom_title,
+                custom_dp,
+            ) {
                 Ok(report) => {
                     let json = serde_json::json!({
                         "success": true,
@@ -1459,6 +1482,108 @@ fn handle_http_request(stream: &mut TcpStream, state: &AppState) {
             let payload = serde_json::to_string(&store.manifest).unwrap_or_default();
             send_response(stream, "200 OK", "application/json", payload.as_bytes());
         }
+        "/api/baseline_backups" => {
+            let baseline_dir = BaselineStore::resolve_baseline_dir();
+            let backups = BaselineStore::list_backups(&baseline_dir);
+            let (active_shots, active_films) = active_baseline_counts(&baseline_dir);
+            let json = serde_json::json!({
+                "success": true,
+                "active_shots": active_shots,
+                "active_films": active_films,
+                "backups": backups
+            });
+            send_response(
+                stream,
+                "200 OK",
+                "application/json",
+                json.to_string().as_bytes(),
+            );
+        }
+        "/api/backup_baseline" => {
+            let baseline_dir = BaselineStore::resolve_baseline_dir();
+            let reason = query_map
+                .get("reason")
+                .map(|s| s.as_str())
+                .unwrap_or("manual_ui_snapshot");
+            match BaselineStore::create_backup(&baseline_dir, reason) {
+                Ok(Some(info)) => {
+                    let backups = BaselineStore::list_backups(&baseline_dir);
+                    let (active_shots, active_films) = active_baseline_counts(&baseline_dir);
+                    let json = serde_json::json!({
+                        "success": true,
+                        "backup": info,
+                        "active_shots": active_shots,
+                        "active_films": active_films,
+                        "backups": backups
+                    });
+                    send_response(
+                        stream,
+                        "200 OK",
+                        "application/json",
+                        json.to_string().as_bytes(),
+                    );
+                }
+                Ok(None) => {
+                    let json = serde_json::json!({
+                        "success": false,
+                        "error": "No baseline manifest found on disk to back up."
+                    });
+                    send_response(
+                        stream,
+                        "404 Not Found",
+                        "application/json",
+                        json.to_string().as_bytes(),
+                    );
+                }
+                Err(err) => {
+                    let json = serde_json::json!({
+                        "success": false,
+                        "error": err
+                    });
+                    send_response(
+                        stream,
+                        "500 Internal Server Error",
+                        "application/json",
+                        json.to_string().as_bytes(),
+                    );
+                }
+            }
+        }
+        "/api/restore_baseline" => {
+            let baseline_dir = BaselineStore::resolve_baseline_dir();
+            let backup_id = query_map.get("id").map(|s| s.as_str());
+            match BaselineStore::restore_backup(&baseline_dir, backup_id) {
+                Ok(info) => {
+                    let backups = BaselineStore::list_backups(&baseline_dir);
+                    let (active_shots, active_films) = active_baseline_counts(&baseline_dir);
+                    let json = serde_json::json!({
+                        "success": true,
+                        "restored": info,
+                        "active_shots": active_shots,
+                        "active_films": active_films,
+                        "backups": backups
+                    });
+                    send_response(
+                        stream,
+                        "200 OK",
+                        "application/json",
+                        json.to_string().as_bytes(),
+                    );
+                }
+                Err(err) => {
+                    let json = serde_json::json!({
+                        "success": false,
+                        "error": err
+                    });
+                    send_response(
+                        stream,
+                        "400 Bad Request",
+                        "application/json",
+                        json.to_string().as_bytes(),
+                    );
+                }
+            }
+        }
         "/api/feedback" => {
             let take_id = query_map
                 .get("take_id")
@@ -2191,7 +2316,7 @@ fn generate_contact_sheet_png_composite(state: &AppState, takes: &[ShotTake]) ->
 fn open_native_file_dialog() -> Option<String> {
     #[cfg(target_os = "windows")]
     {
-        let ps_script = r#"Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.OpenFileDialog; $f.Title = 'Select Finished Video or Reference Image'; $f.Filter = 'Media Files (*.mov;*.mp4;*.mkv;*.png;*.jpg;*.tiff;*.exr)|*.mov;*.mp4;*.mkv;*.png;*.jpg;*.tiff;*.exr|All Files (*.*)|*.*'; $top = New-Object System.Windows.Forms.Form; $top.TopMost = $true; if ($f.ShowDialog($top) -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.FileName }"#;
+        let ps_script = r#"Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.OpenFileDialog; $f.Title = 'Select Finished Video or Reference Still Image'; $f.Filter = 'Media & Stills (*.mov;*.mp4;*.mkv;*.m4v;*.avi;*.ts;*.webm;*.png;*.jpg;*.jpeg;*.tif;*.tiff;*.webp;*.bmp;*.exr)|*.mov;*.mp4;*.mkv;*.m4v;*.avi;*.ts;*.webm;*.png;*.jpg;*.jpeg;*.tif;*.tiff;*.webp;*.bmp;*.exr|All Files (*.*)|*.*'; $top = New-Object System.Windows.Forms.Form; $top.TopMost = $true; if ($f.ShowDialog($top) -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.FileName }"#;
         let output = Command::new("powershell")
             .args(["-NoProfile", "-STA", "-Command", ps_script])
             .output()
@@ -2239,7 +2364,7 @@ fn open_native_file_dialog() -> Option<String> {
 fn open_native_dir_dialog() -> Option<String> {
     #[cfg(target_os = "windows")]
     {
-        let ps_script = r#"Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.ShowNewFolderButton = $false; $f.Description = 'Select Reference Stills or Cached Sidecars Directory'; $top = New-Object System.Windows.Forms.Form; $top.TopMost = $true; if ($f.ShowDialog($top) -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }"#;
+        let ps_script = r#"Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.ShowNewFolderButton = $false; $f.Description = 'Select Movies Library, Reference Stills, or Cached Sidecars Folder'; $top = New-Object System.Windows.Forms.Form; $top.TopMost = $true; if ($f.ShowDialog($top) -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $f.SelectedPath }"#;
         let output = Command::new("powershell")
             .args(["-NoProfile", "-STA", "-Command", ps_script])
             .output()
@@ -2255,4 +2380,27 @@ fn open_native_dir_dialog() -> Option<String> {
     {
         None
     }
+}
+
+fn active_baseline_counts(baseline_dir: &Path) -> (usize, usize) {
+    let manifest_path = baseline_dir.join("manifest.json");
+    if let Ok(file) = std::fs::File::open(manifest_path) {
+        if let Ok(manifest) = serde_json::from_reader::<_, aesthetic_models::baseline::BaselineCorpusManifest>(
+            std::io::BufReader::new(file),
+        ) {
+            let films = if manifest.total_films > 0 {
+                manifest.total_films
+            } else {
+                manifest.films.len()
+            };
+            return (manifest.total_reference_shots, films);
+        }
+    }
+    let store = BaselineStore::new();
+    let films = if store.manifest.total_films > 0 {
+        store.manifest.total_films
+    } else {
+        store.manifest.films.len()
+    };
+    (store.reference_shots.len(), films)
 }

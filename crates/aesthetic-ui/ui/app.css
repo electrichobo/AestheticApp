@@ -1354,3 +1354,226 @@ html, body {
   min-height: 240px;
   aspect-ratio: auto;
 }
+
+/* ==========================================================================
+   Browse Row, Additive Notice & Live Job Status Bar Graph
+   ========================================================================== */
+.browse-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.browse-input-row .input-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.browse-input-row .btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.additive-badge {
+  background: rgba(0, 255, 120, 0.08);
+  border: 1px solid rgba(0, 255, 120, 0.35);
+  color: #b7f7d4;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  margin-bottom: 12px;
+}
+
+.job-status-dock {
+  background: #101521;
+  border-bottom: 1px solid var(--border-light);
+  padding: 7px 16px 9px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+  z-index: 40;
+}
+
+.job-graph-card {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: #0d121d;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.job-dock-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.job-dock-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.job-phase-pill {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(229, 169, 59, 0.18);
+  border: 1px solid var(--accent-gold);
+  color: var(--accent-gold);
+  white-space: nowrap;
+}
+
+.job-phase-pill.done {
+  background: rgba(0, 255, 120, 0.14);
+  border-color: var(--accent-green);
+  color: var(--accent-green);
+}
+
+.job-phase-pill.error {
+  background: rgba(255, 85, 102, 0.16);
+  border-color: var(--accent-red);
+  color: var(--accent-red);
+}
+
+.job-active-point {
+  font-size: 12px;
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.job-dock-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.job-percent-label {
+  font-size: 12px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--accent-cyan);
+}
+
+.job-dismiss-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.job-dismiss-btn:hover {
+  color: #fff;
+}
+
+.job-overall-track {
+  width: 100%;
+  height: 5px;
+  background: #1b2232;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.job-overall-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-gold), var(--accent-cyan));
+  transition: width 0.2s ease;
+}
+
+.job-stage-graph {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.job-stage-col {
+  background: #141a28;
+  border: 1px solid #242d40;
+  border-radius: 5px;
+  padding: 5px 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.job-stage-col.active {
+  border-color: var(--accent-cyan);
+  background: #162033;
+}
+
+.job-stage-col.done {
+  border-color: rgba(0, 255, 120, 0.45);
+}
+
+.job-stage-col.error {
+  border-color: var(--accent-red);
+}
+
+.job-stage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  font-size: 10px;
+}
+
+.job-stage-name {
+  color: var(--text-muted);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.job-stage-col.active .job-stage-name {
+  color: var(--text-main);
+}
+
+.job-stage-count {
+  font-family: var(--font-mono);
+  color: var(--text-subtle);
+  flex-shrink: 0;
+}
+
+.job-stage-bar-track {
+  width: 100%;
+  height: 6px;
+  background: #0b0e15;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.job-stage-bar-fill {
+  height: 100%;
+  background: var(--border-light);
+  transition: width 0.2s ease;
+}
+
+.job-stage-col.active .job-stage-bar-fill {
+  background: var(--accent-cyan);
+}
+
+.job-stage-col.done .job-stage-bar-fill {
+  background: var(--accent-green);
+}
+
+.job-stage-col.error .job-stage-bar-fill {
+  background: var(--accent-red);
+}

@@ -42,11 +42,11 @@
                 <div class="item-desc">Probe streaming link or online portfolio reel</div>
               </div>
             </button>
-            <button class="dropdown-item" id="btn-server-ingest" title="Scan media library directory (e.g. M:\movies) for Oscar, ASC, and BSC cinematography award winners.">
+            <button class="dropdown-item" id="btn-server-ingest" title="Browse or scan media server folders, video files, and still frames into the Golden Baseline (strictly additive).">
               <span class="item-icon">🗄️</span>
               <div class="item-text">
-                <div class="item-title">Bulk Import (Media Server)</div>
-                <div class="item-desc">Auto-match &amp; burst ingest Golden Baseline awards library</div>
+                <div class="item-title">Golden Baseline Mass Ingest</div>
+                <div class="item-desc">Add films &amp; still frames to Golden Baseline (with Auto-Backup)</div>
               </div>
             </button>
             <button class="dropdown-item" id="btn-open-sidecars" title="Instantaneously load and re-score a cached JSON+PNG sidecars folder (~200ms without re-decoding video).">
@@ -141,6 +141,24 @@
         </div>
       </div>
     </header>
+
+    <!-- Live Global Job Status Bar Graph Dock -->
+    <section id="global-job-bar" class="job-status-dock" style="display: none;">
+      <div class="job-dock-top">
+        <div class="job-dock-title-row">
+          <span class="job-phase-pill" id="global-job-phase">Running</span>
+          <span class="job-active-point" id="global-job-point">Initializing task...</span>
+        </div>
+        <div class="job-dock-right">
+          <span class="job-percent-label" id="global-job-percent">0%</span>
+          <button type="button" class="job-dismiss-btn" id="btn-global-job-dismiss" title="Hide job status bar">&times;</button>
+        </div>
+      </div>
+      <div class="job-overall-track">
+        <div class="job-overall-fill" id="global-job-fill" style="width: 0%;"></div>
+      </div>
+      <div class="job-stage-graph" id="global-job-stages"></div>
+    </section>
 
     <!-- Main Workspace -->
     <main class="workspace-grid">
@@ -337,37 +355,87 @@
     </main>
   </div>
 
-  <!-- Media Server Ingest Modal -->
+  <!-- Media Server & Reference Still Ingest Modal -->
   <div id="server-ingest-modal" class="modal-overlay" style="display: none;">
-    <div class="modal-card">
+    <div class="modal-card" style="max-width: 660px;">
       <div class="modal-header">
-        <h3>Golden Baseline Media Server Ingestion</h3>
+        <h3>Golden Baseline Bulk &amp; Still Frame Ingestion</h3>
         <button class="modal-close" id="modal-ingest-close">&times;</button>
       </div>
       <div class="modal-body">
         <p class="modal-desc">
-          Scans your library, matches canonical Oscar, ASC, and BSC cinematography award-winning films, and extracts continuous, cut-isolated reference shots into the Golden Baseline.
+          Select a library folder (movie folders &amp; still-frame directories), a folder of reference still images, or a single film / still frame. Matched titles &amp; stills are <strong>strictly added</strong> to the existing Golden Baseline corpus.
         </p>
+        <div class="additive-badge">
+          &#10003; <strong>Additive Mode Verified:</strong> New films and still frames append to the Golden Baseline (existing shots and films are never overwritten or deleted).
+        </div>
         <div class="form-group">
-          <label for="server-ingest-path">Movies Directory:</label>
-          <input type="text" id="server-ingest-path" class="input-text" value="M:\movies" placeholder="e.g. M:\movies">
+          <label for="server-ingest-path">Source Directory or Still / Video File:</label>
+          <div class="browse-input-row">
+            <input type="text" id="server-ingest-path" class="input-text" value="M:\movies" placeholder="Browse for folder of films/stills, or a single still/video file...">
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-ingest-browse-dir" title="Browse for a directory of films or reference still images">&#128193; Browse Folder</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-ingest-browse-file" title="Browse for a single reference still image or video file">&#128444;&#65039; Browse File</button>
+          </div>
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label for="server-ingest-limit">Batch Limit (Films):</label>
-            <input type="number" id="server-ingest-limit" class="input-number" value="5" min="1" max="100">
+            <label for="server-ingest-title">Optional Title / Collection (for custom stills):</label>
+            <input type="text" id="server-ingest-title" class="input-text" placeholder="Auto-detected from folder / filename">
           </div>
           <div class="form-group">
-            <label for="server-ingest-shots">Shots Per Film:</label>
-            <input type="number" id="server-ingest-shots" class="input-number" value="5" min="1" max="25">
+            <label for="server-ingest-dp">Optional Cinematographer (DP):</label>
+            <input type="text" id="server-ingest-dp" class="input-text" placeholder="Auto-matched or Reference Stills">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="server-ingest-limit">Batch Limit (Items):</label>
+            <input type="number" id="server-ingest-limit" class="input-number" value="5" min="1" max="200">
+          </div>
+          <div class="form-group">
+            <label for="server-ingest-shots">Shots / Stills Cap Per Item:</label>
+            <input type="number" id="server-ingest-shots" class="input-number" value="5" min="1" max="50">
           </div>
         </div>
         <div class="form-group form-checkbox">
           <label class="checkbox-label">
             <input type="checkbox" id="server-ingest-force">
-            <span><strong>Force Re-Ingest</strong> (Skip deduplication &amp; re-extract already ingested films)</span>
+            <span><strong>Additive Re-Sample</strong> (Also sample new timestamps/stills for already-present films without removing prior shots)</span>
           </label>
         </div>
+
+        <!-- Live Job Status Bar Graph inside Modal -->
+        <div id="ingest-job-graph" class="job-graph-card" style="display: none;">
+          <div class="job-dock-top">
+            <div class="job-dock-title-row">
+              <span class="job-phase-pill" id="ingest-job-phase">Running</span>
+              <span class="job-active-point" id="ingest-job-point">Waiting to start...</span>
+            </div>
+            <span class="job-percent-label" id="ingest-job-percent">0%</span>
+          </div>
+          <div class="job-overall-track">
+            <div class="job-overall-fill" id="ingest-job-fill" style="width: 0%;"></div>
+          </div>
+          <div class="job-stage-graph" id="ingest-job-stages"></div>
+        </div>
+
+        <div class="baseline-backup-panel" style="margin-top: 12px; padding: 12px; background: #101521; border: 1px solid var(--border-color); border-radius: 6px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; gap: 8px;">
+            <span style="font-size: 12px; font-weight: 700; color: var(--accent-gold);">Golden Baseline Safety &amp; Rollback</span>
+            <span id="baseline-active-summary" style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">Active: loading...</span>
+          </div>
+          <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px; line-height: 1.35;">
+            Auto-Backup Enabled: Current Golden Baseline is automatically snapshotted before any single or bulk ingestion modifies the corpus.
+          </p>
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <select id="baseline-backup-select" style="flex: 1; min-width: 200px; background: #0d1017; color: var(--text-main); padding: 6px 8px; border: 1px solid var(--border-color); border-radius: 5px; font-size: 12px;">
+              <option value="">No backups created yet</option>
+            </select>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-baseline-backup-now">&#128248; Backup Now</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-baseline-restore" disabled>&#9194; Restore Backup</button>
+          </div>
+        </div>
+
         <div id="server-ingest-status" class="ingest-status-box" style="display: none;"></div>
       </div>
       <div class="modal-footer">

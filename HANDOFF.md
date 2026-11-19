@@ -1,30 +1,28 @@
 # AESTHETIC — Development Handoff
 
 ## Repository & State
-- **Repository**: electrichobo/AestheticApp @ `main`
+- **Repository**: electrichobo/AestheticApp @ `main` (latest pushed release tag `v0.2.5`)
 - **Architecture**: Rust Core Engine (Ground-Up Rebuild)
 - **Active Target**: Windows x64 (Live Production Environment)
 
 ---
 
-## Current Status: Exhaustive Scene Scanner, Title Card Elimination & Top-N Control
-- **Multi-Signal Title Card & Credits Elimination** (`pipeline.rs`, `export.rs`):
-  - `detect_title_card_or_graphic` + `is_proxy_title_card_or_blank`: 4-corner bilinear background fitting + horizontal typography row detection across dark, white, colored, and gradient backdrops, avoiding low-key chiaroscuro false positives.
-  - `apply_reel_diversity_ranking` & `rescore_from_sidecars`: Completely strip title cards when photographic footage exists and prioritize unrepresented scenes (`+10` diversity weight).
-- **Exhaustive Two-Pass Scene-by-Scene Scanner** (`video.rs`, `scene.rs`, `pipeline.rs`):
-  - Pass 1 (`scan_video_scenes`): Single fast `160x90` FFmpeg rawvideo stream across 100% of timeline detecting shot boundaries, stripping title cards, and grouping shots into photographic scenes.
-  - Pass 2 (`analyze_video_file`): Concurrent 4-worker full-res evaluation guaranteeing every photographic scene gets evaluated.
-- **User-Configurable Top N** (`ui/index.html`, `app.js`, `main.rs`, `aesthetic-cli`):
-  - Header `Top N` input + `All` button with live `/api/set_top_n` re-slicing (no re-decode), `localStorage` persistence, and `-n / --top` CLI flag (`0 = All`).
-- **Verification & Distribution**:
-  - JS syntax check: OK; `cargo test --workspace`: 33/33 passed; `cargo clippy --workspace --all-targets -- -D warnings`: 0 warnings.
-  - Release binaries & standalone ZIP refreshed at `dist/Aesthetic-v0.1.0-windows-x64.zip`.
+## Current Status: Auto-Backup, Still-Frame & Additive Baseline Ingest, Browse UI & Live Job Graph
+- **Automatic Baseline Backup, Rollback & Additive Engine** (`crates/aesthetic-core/src/baseline_store.rs`):
+  - `save_to_dir` uses atomic `.tmp` write-flush-rename; `load_from_dir` strictly errors on malformed `shots.json`/`signatures.json` instead of defaulting empty.
+  - `create_backup`, `list_backups`, and `restore_backup` manage snapshots in `assets/baseline_backups/<backup_id>/` (retaining oldest original + 9 newest).
+  - `ingest_reference_film`, `ingest_reference_film_shots`, `ingest_reference_still`, `ingest_reference_directory_with_limit`, and unified `scan_and_ingest_golden_baseline` are strictly additive (no destructive `retain` or count overwrites) and support movies, still-frame directories, and single stills.
+- **Live Job Status Bar Graph** (`baseline_store.rs`, `pipeline.rs`, `aesthetic-ui/`):
+  - Global thread-safe `JobStatusSnapshot` (`get_job_status`, `/api/job_status`) tracks multi-stage bar columns (`JobStageBar`) and `active_task_point` across Baseline Ingest, Pass-1/Pass-2 Video Analysis, and Batch Folder Queue, rendered in `#global-job-bar` and `#ingest-job-graph`.
+- **Native Browse Controls & CLI** (`crates/aesthetic-ui/`, `crates/aesthetic-cli/src/main.rs`):
+  - Added `Browse Folder` & `Browse File` buttons inside `#server-ingest-modal`, native folder browse on `Open Cached Sidecars Folder`, plus CLI `baseline-backups`, `backup-baseline`, `restore-baseline`, and still-frame additive reporting.
+- **Verification & Packaging**:
+  - `cargo clippy --workspace --all-targets -- -D warnings`: 0 code warnings; `cargo test --workspace`: 35/35 passed (including `test_baseline_backup_and_restore_cycle` and `test_additive_baseline_stills_and_films_never_replace`); `cargo build --release` clean; `dist/Aesthetic-v0.2.5-windows-x64.zip` refreshed.
 
 ---
 
 ## Next Immediate Step
-1. User review of changes (`git diff --stat`) and commit/push on explicit approval.
-2. Interactive verification via `Start_Aesthetic.bat` / `http://127.0.0.1:63513` with multi-scene video + `Top N` controls.
+1. User review (`git diff --stat`) and explicit approval before `git commit` and `git push`.
 
 ---
 
